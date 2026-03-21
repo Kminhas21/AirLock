@@ -69,13 +69,20 @@ export interface AlignmentAlertEvent {
   threshold: number;
 }
 
+/** Sent when the scenario has finished (all steps processed). */
+export interface TaskCompleteEvent {
+  event: "task_complete";
+  timestamp: string;
+}
+
 /** Union of all events the server can send us. */
 export type ServerEvent =
   | ReasoningEvent
   | ToolPendingEvent
   | ToolResolvedEvent
   | DriftUpdateEvent
-  | AlignmentAlertEvent;
+  | AlignmentAlertEvent
+  | TaskCompleteEvent;
 
 // ---------- Client → Server Messages ----------
 

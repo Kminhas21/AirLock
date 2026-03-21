@@ -1,19 +1,21 @@
 // DriftMonitor.tsx — Behavioral drift visualization with two charts:
 //
-// 1. 3D Scatter Plot (top): Shows the agent's trajectory through embedding space.
-//    Each point is an agent step projected to 3D via PCA. Points are colored from
-//    blue (early) to red (late). The first 3 points are the "baseline" cluster
-//    shown as larger cyan markers. A line connects points in order.
+// 1. 2D Scatter Plot (top): Shows the agent's trajectory projected to 2D (PC1 vs PC2).
+// 2. Drift Score Chart (bottom): Mahalanobis distance over time with threshold line.
 //
-// 2. Drift Score Chart (bottom): A 2D line chart showing Mahalanobis distance
-//    over time. A horizontal red dashed line marks the threshold (2.5).
-//    Points above the threshold turn red.
+// We use 2D scatter instead of scatter3d to avoid WebGL initialization issues
+// that can crash the app in some browsers/environments.
 
 import { useMemo } from "react";
-import Plot from "react-plotly.js";
+// react-plotly.js is a CJS module. Under Vite's ESM handling, the default
+// export sometimes comes through as { default: PlotComponent } instead of
+// PlotComponent directly. This workaround handles both cases.
+import PlotImport from "react-plotly.js";
+const Plot = (typeof (PlotImport as any).default !== "undefined"
+  ? (PlotImport as any).default
+  : PlotImport) as typeof PlotImport;
 import { useSessionStore } from "../stores/sessionStore";
 
-// How many initial points form the baseline cluster
 const BASELINE_SIZE = 3;
 const DRIFT_THRESHOLD = 2.5;
 
@@ -22,122 +24,121 @@ export function DriftMonitor() {
   const currentDriftScore = useSessionStore((s) => s.currentDriftScore);
   const setSelectedNode = useSessionStore((s) => s.setSelectedNode);
 
-  // Split points into baseline and post-baseline
-  const baselinePoints = driftPoints.slice(0, BASELINE_SIZE);
-  const trailPoints = driftPoints.slice(BASELINE_SIZE);
+  // --- 2D Scatter Data (PC1 vs PC2) ---
+  const scatterData = useMemo(() => {
+    if (driftPoints.length === 0) return [];
 
-  // --- 3D Scatter Data ---
-  const scatter3dData = useMemo(() => {
-    const traces: Plotly.Data[] = [];
+    const baseline = driftPoints.slice(0, BASELINE_SIZE);
+    const trail = driftPoints.slice(BASELINE_SIZE);
+    const traces: object[] = [];
 
-    // Line connecting all points in order (trajectory)
+    // Trajectory line connecting all points
     if (driftPoints.length > 1) {
       traces.push({
-        type: "scatter3d" as const,
-        mode: "lines" as const,
+        type: "scatter",
+        mode: "lines",
         x: driftPoints.map((p) => p.x),
         y: driftPoints.map((p) => p.y),
-        z: driftPoints.map((p) => p.z),
         line: { color: "#4b5563", width: 2 },
         showlegend: false,
-        hoverinfo: "skip" as const,
+        hoverinfo: "skip",
       });
     }
 
     // Baseline cluster — larger cyan markers
-    if (baselinePoints.length > 0) {
+    if (baseline.length > 0) {
       traces.push({
-        type: "scatter3d" as const,
-        mode: "markers" as const,
+        type: "scatter",
+        mode: "markers+text",
         name: "Baseline",
-        x: baselinePoints.map((p) => p.x),
-        y: baselinePoints.map((p) => p.y),
-        z: baselinePoints.map((p) => p.z),
-        marker: {
-          size: 8,
-          color: "#06b6d4", // cyan
-          symbol: "circle",
-        },
-        text: baselinePoints.map(
-          (p) => `Step ${p.stepIndex}<br>Node: ${p.nodeId}<br>Distance: ${p.mahalanobisDistance.toFixed(2)}`
+        x: baseline.map((p) => p.x),
+        y: baseline.map((p) => p.y),
+        marker: { size: 14, color: "#06b6d4", symbol: "circle" },
+        text: baseline.map((p) => `S${p.stepIndex}`),
+        textposition: "top center",
+        textfont: { color: "#06b6d4", size: 10 },
+        hovertext: baseline.map(
+          (p) =>
+            `Step ${p.stepIndex} | ${p.nodeId} | Dist: ${p.mahalanobisDistance.toFixed(2)}`
         ),
-        hoverinfo: "text" as const,
-        customdata: baselinePoints.map((p) => p.nodeId),
+        hoverinfo: "text",
+        customdata: baseline.map((p) => p.nodeId),
       });
     }
 
-    // Post-baseline points — colored by step index (blue to red)
-    if (trailPoints.length > 0) {
+    // Post-baseline points — colored by step index
+    if (trail.length > 0) {
       traces.push({
-        type: "scatter3d" as const,
-        mode: "markers" as const,
+        type: "scatter",
+        mode: "markers+text",
         name: "Agent Steps",
-        x: trailPoints.map((p) => p.x),
-        y: trailPoints.map((p) => p.y),
-        z: trailPoints.map((p) => p.z),
+        x: trail.map((p) => p.x),
+        y: trail.map((p) => p.y),
         marker: {
-          size: 6,
-          color: trailPoints.map((p) => p.stepIndex),
-          colorscale: [
-            [0, "#3b82f6"],
-            [0.5, "#f59e0b"],
-            [1, "#ef4444"],
-          ],
-          showscale: false,
+          size: 10,
+          color: trail.map((p) =>
+            p.mahalanobisDistance > DRIFT_THRESHOLD ? "#ef4444" : "#f59e0b"
+          ),
         },
-        text: trailPoints.map(
+        text: trail.map((p) => `S${p.stepIndex}`),
+        textposition: "top center",
+        textfont: { color: "#9ca3af", size: 10 },
+        hovertext: trail.map(
           (p) =>
-            `Step ${p.stepIndex}<br>Node: ${p.nodeId}<br>Distance: ${p.mahalanobisDistance.toFixed(2)}<br>Persistence: ${p.metrics.goal_persistence.toFixed(2)}`
+            `Step ${p.stepIndex} | ${p.nodeId} | Dist: ${p.mahalanobisDistance.toFixed(2)} | Persistence: ${p.metrics.goal_persistence.toFixed(2)}`
         ),
-        hoverinfo: "text" as const,
-        customdata: trailPoints.map((p) => p.nodeId),
+        hoverinfo: "text",
+        customdata: trail.map((p) => p.nodeId),
       });
     }
 
     return traces;
-  }, [driftPoints, baselinePoints, trailPoints]);
+  }, [driftPoints]);
 
   // --- Drift Score Line Chart Data ---
-  const driftLineData = useMemo((): Plotly.Data[] => {
+  const driftLineData = useMemo(() => {
     if (driftPoints.length === 0) return [];
 
-    // Points colored: green below threshold, red above
-    const colors = driftPoints.map((p) =>
-      p.mahalanobisDistance > DRIFT_THRESHOLD ? "#ef4444" : "#22c55e"
-    );
-
     return [
-      // The line
       {
-        type: "scatter" as const,
-        mode: "lines+markers" as const,
+        type: "scatter",
+        mode: "lines+markers",
         x: driftPoints.map((p) => p.stepIndex),
         y: driftPoints.map((p) => p.mahalanobisDistance),
-        marker: { color: colors, size: 8 },
+        marker: {
+          color: driftPoints.map((p) =>
+            p.mahalanobisDistance > DRIFT_THRESHOLD ? "#ef4444" : "#22c55e"
+          ),
+          size: 8,
+        },
         line: { color: "#4b5563", width: 2 },
         name: "Drift Score",
-        text: driftPoints.map(
+        hovertext: driftPoints.map(
           (p) => `Step ${p.stepIndex}: ${p.mahalanobisDistance.toFixed(2)}`
         ),
-        hoverinfo: "text" as const,
+        hoverinfo: "text",
       },
     ];
   }, [driftPoints]);
 
-  // --- Handle clicking a point to highlight the corresponding kill chain node ---
-  const handlePointClick = (event: Readonly<Plotly.PlotMouseEvent>) => {
-    const point = event.points[0];
+  // Handle clicking a point to highlight the corresponding kill chain node
+  const handlePointClick = (event: any) => {
+    const point = event?.points?.[0];
     if (point?.customdata) {
       setSelectedNode(point.customdata as string);
     }
   };
 
-  // --- Shared Plotly layout settings ---
   const darkAxisStyle = {
     gridcolor: "#2a2d37",
     zerolinecolor: "#2a2d37",
     color: "#6b7280",
   };
+
+  const maxStep =
+    driftPoints.length > 0
+      ? Math.max(...driftPoints.map((p) => p.stepIndex), 5)
+      : 5;
 
   return (
     <div className="panel drift-monitor-panel">
@@ -156,32 +157,26 @@ export function DriftMonitor() {
 
       {driftPoints.length === 0 ? (
         <p className="panel-placeholder">
-          Behavioral drift data will appear here as the agent acts. A 3D scatter
+          Behavioral drift data will appear here as the agent acts. A scatter
           plot will show the agent's trajectory through embedding space.
         </p>
       ) : (
         <div className="drift-charts">
-          {/* 3D Scatter Plot */}
+          {/* 2D Scatter Plot — Embedding Space */}
           <div className="chart-container scatter3d-container">
             <Plot
-              data={scatter3dData}
+              data={scatterData as any}
               layout={{
                 autosize: true,
-                margin: { l: 0, r: 0, t: 0, b: 0 },
+                margin: { l: 40, r: 16, t: 8, b: 40 },
                 paper_bgcolor: "transparent",
-                scene: {
-                  bgcolor: "#1a1d27",
-                  xaxis: { ...darkAxisStyle, title: "PC1" },
-                  yaxis: { ...darkAxisStyle, title: "PC2" },
-                  zaxis: { ...darkAxisStyle, title: "PC3" },
-                },
+                plot_bgcolor: "transparent",
+                xaxis: { ...darkAxisStyle, title: { text: "PC1", font: { size: 11 } } },
+                yaxis: { ...darkAxisStyle, title: { text: "PC2", font: { size: 11 } } },
                 showlegend: false,
                 font: { color: "#9ca3af", size: 10 },
               }}
-              config={{
-                displayModeBar: false,
-                responsive: true,
-              }}
+              config={{ displayModeBar: false, responsive: true }}
               style={{ width: "100%", height: "100%" }}
               onClick={handlePointClick}
               useResizeHandler
@@ -191,7 +186,7 @@ export function DriftMonitor() {
           {/* Drift Score Line Chart */}
           <div className="chart-container line-chart-container">
             <Plot
-              data={driftLineData}
+              data={driftLineData as any}
               layout={{
                 autosize: true,
                 margin: { l: 40, r: 16, t: 8, b: 32 },
@@ -208,19 +203,14 @@ export function DriftMonitor() {
                 },
                 showlegend: false,
                 font: { color: "#9ca3af", size: 10 },
-                // Threshold line
                 shapes: [
                   {
                     type: "line",
                     x0: 0,
-                    x1: Math.max(...driftPoints.map((p) => p.stepIndex), 5),
+                    x1: maxStep,
                     y0: DRIFT_THRESHOLD,
                     y1: DRIFT_THRESHOLD,
-                    line: {
-                      color: "#ef4444",
-                      width: 2,
-                      dash: "dash",
-                    },
+                    line: { color: "#ef4444", width: 2, dash: "dash" },
                   },
                 ],
                 annotations: [
@@ -236,10 +226,7 @@ export function DriftMonitor() {
                   },
                 ],
               }}
-              config={{
-                displayModeBar: false,
-                responsive: true,
-              }}
+              config={{ displayModeBar: false, responsive: true }}
               style={{ width: "100%", height: "100%" }}
               useResizeHandler
             />

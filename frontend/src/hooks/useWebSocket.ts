@@ -30,6 +30,7 @@ export function useWebSocket(url: string = WS_URL) {
   const handleToolResolvedEvent = useSessionStore((s) => s.handleToolResolvedEvent);
   const handleDriftUpdateEvent = useSessionStore((s) => s.handleDriftUpdateEvent);
   const handleAlignmentAlertEvent = useSessionStore((s) => s.handleAlignmentAlertEvent);
+  const setIsRunning = useSessionStore((s) => s.setIsRunning);
 
   // --- Connect to the WebSocket server ---
   const connect = useCallback(() => {
@@ -68,6 +69,9 @@ export function useWebSocket(url: string = WS_URL) {
         case "alignment_alert":
           handleAlignmentAlertEvent(data);
           break;
+        case "task_complete":
+          setIsRunning(false);
+          break;
         default:
           console.warn("[WS] Unknown event type:", data);
       }
@@ -93,6 +97,7 @@ export function useWebSocket(url: string = WS_URL) {
     handleToolResolvedEvent,
     handleDriftUpdateEvent,
     handleAlignmentAlertEvent,
+    setIsRunning,
   ]);
 
   // --- Send a message to the server ---

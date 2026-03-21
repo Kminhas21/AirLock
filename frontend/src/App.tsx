@@ -20,6 +20,7 @@ import { KillChain } from "./components/KillChain";
 import { DriftMonitor } from "./components/DriftMonitor";
 import { AlertBanner } from "./components/AlertBanner";
 import { NodeDetail } from "./components/NodeDetail";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function App() {
   // Connect to WebSocket and get the send function
@@ -62,8 +63,12 @@ function App() {
 
       {/* Main content area: two panels side by side */}
       <div className="main-panels">
-        <KillChain onDecision={handleDecision} />
-        <DriftMonitor />
+        <ErrorBoundary name="Kill Chain">
+          <KillChain onDecision={handleDecision} />
+        </ErrorBoundary>
+        <ErrorBoundary name="Drift Monitor">
+          <DriftMonitor />
+        </ErrorBoundary>
       </div>
 
       {/* Alert banner at the bottom — only shows when there's an active alert */}

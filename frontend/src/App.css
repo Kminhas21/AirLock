@@ -142,6 +142,19 @@
   background: #1a1d27 !important;
 }
 
+/* Override react-flow's grab cursor on nodes since we disabled dragging */
+.react-flow__node {
+  cursor: default !important;
+}
+
+/* Make sure buttons get a pointer cursor and aren't captured by react-flow's drag */
+.flow-node-actions button {
+  cursor: pointer !important;
+  position: relative;
+  z-index: 10;
+  pointer-events: all !important;
+}
+
 /* Base node style shared by all node types */
 .flow-node {
   width: 280px;

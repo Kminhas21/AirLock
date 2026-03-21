@@ -295,6 +295,13 @@ async function runScenario(ws) {
     });
   }
 
+  // --- Signal the frontend that the scenario is finished ---
+  await delay(500);
+  send(ws, {
+    event: "task_complete",
+    timestamp: new Date().toISOString(),
+  });
+
   console.log("\n✅ Scenario complete.\n");
 }
 

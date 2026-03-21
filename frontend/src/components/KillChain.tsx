@@ -15,7 +15,6 @@ import {
   type Node,
   type Edge,
   type NodeTypes,
-  type NodeProps,
   useReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -70,10 +69,17 @@ function getLayoutedElements(nodes: Node<NodeData>[], edges: Edge[]) {
   return { nodes: layoutedNodes, edges };
 }
 
+// ===== Type for custom node props =====
+// In @xyflow/react v12, NodeProps takes the Node type directly.
+type SentinelNodeProps = {
+  id: string;
+  data: NodeData;
+};
+
 // ===== CUSTOM NODE: Reasoning =====
 // Blue rounded rectangle showing the agent's chain-of-thought text.
 
-function ReasoningNode({ data, id }: NodeProps<Node<NodeData>>) {
+function ReasoningNode({ data, id }: SentinelNodeProps) {
   const selectedNodeId = useSessionStore((s) => s.selectedNodeId);
   const setSelectedNode = useSessionStore((s) => s.setSelectedNode);
   const isSelected = selectedNodeId === id;
@@ -94,18 +100,16 @@ function ReasoningNode({ data, id }: NodeProps<Node<NodeData>>) {
 // ===== CUSTOM NODE: Tool Call =====
 // Colored by risk level. Shows Approve/Deny buttons when pending.
 
-function ToolNode({ data, id }: NodeProps<Node<NodeData>>) {
+function ToolNode({ data, id }: SentinelNodeProps) {
   const pendingNodeId = useSessionStore((s) => s.pendingNodeId);
   const selectedNodeId = useSessionStore((s) => s.selectedNodeId);
   const setSelectedNode = useSessionStore((s) => s.setSelectedNode);
   const isPending = pendingNodeId === id;
   const isSelected = selectedNodeId === id;
 
-  // We need to get the onDecision callback from the component tree.
-  // We'll use a global event approach since react-flow custom nodes
-  // can't easily receive props from the parent component.
   const handleApprove = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     window.dispatchEvent(
       new CustomEvent("sentinel-decision", {
         detail: { nodeId: id, decision: "approve" },
@@ -115,6 +119,7 @@ function ToolNode({ data, id }: NodeProps<Node<NodeData>>) {
 
   const handleDeny = (e: React.MouseEvent) => {
     e.stopPropagation();
+    e.preventDefault();
     window.dispatchEvent(
       new CustomEvent("sentinel-decision", {
         detail: { nodeId: id, decision: "deny" },
@@ -156,11 +161,19 @@ function ToolNode({ data, id }: NodeProps<Node<NodeData>>) {
           : data.label}
       </div>
       {isPending && (
-        <div className="flow-node-actions">
-          <button className="btn-approve" onClick={handleApprove}>
+        <div className="flow-node-actions nodrag nopan">
+          <button
+            className="btn-approve nodrag nopan"
+            onClick={handleApprove}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             Approve
           </button>
-          <button className="btn-deny" onClick={handleDeny}>
+          <button
+            className="btn-deny nodrag nopan"
+            onClick={handleDeny}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
             Deny
           </button>
         </div>
@@ -172,7 +185,7 @@ function ToolNode({ data, id }: NodeProps<Node<NodeData>>) {
 // ===== CUSTOM NODE: Replan =====
 // Same as ToolNode but with a dashed orange border.
 
-function ReplanNode(props: NodeProps<Node<NodeData>>) {
+function ReplanNode(props: SentinelNodeProps) {
   return (
     <div className="replan-wrapper">
       <ToolNode {...props} />
@@ -182,11 +195,11 @@ function ReplanNode(props: NodeProps<Node<NodeData>>) {
 
 // ===== NODE TYPE REGISTRY =====
 // react-flow needs to know which component to render for each node type.
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 const nodeTypes: NodeTypes = {
-  reasoning: ReasoningNode,
-  tool: ToolNode,
-  replan: ReplanNode,
+  reasoning: ReasoningNode as any,
+  tool: ToolNode as any,
+  replan: ReplanNode as any,
 };
 
 // ===== INNER COMPONENT (needs ReactFlowProvider) =====
@@ -209,7 +222,6 @@ function KillChainInner({
   // Auto-fit the view when nodes change
   useEffect(() => {
     if (layoutedNodes.length > 0) {
-      // Small timeout to let react-flow render the nodes first
       const timer = setTimeout(() => fitView({ padding: 0.2 }), 50);
       return () => clearTimeout(timer);
     }
@@ -227,14 +239,16 @@ function KillChainInner({
 
   return (
     <ReactFlow
-      nodes={layoutedNodes}
+      nodes={layoutedNodes as any}
       edges={layoutedEdges}
-      nodeTypes={nodeTypes}
+      nodeTypes={nodeTypes as any}
       fitView
       proOptions={{ hideAttribution: true }}
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}
+      panOnDrag={true}
+      zoomOnScroll={true}
       minZoom={0.3}
       maxZoom={1.5}
       defaultEdgeOptions={{
@@ -256,7 +270,6 @@ interface KillChainProps {
 export function KillChain({ onDecision }: KillChainProps) {
   const nodes = useSessionStore((s) => s.nodes);
 
-  // Stabilize the callback reference so it doesn't change on every render
   const stableOnDecision = useCallback(onDecision, [onDecision]);
 
   return (
