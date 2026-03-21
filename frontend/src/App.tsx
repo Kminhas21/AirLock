@@ -19,6 +19,7 @@ import { TaskInput } from "./components/TaskInput";
 import { KillChain } from "./components/KillChain";
 import { DriftMonitor } from "./components/DriftMonitor";
 import { AlertBanner } from "./components/AlertBanner";
+import { NodeDetail } from "./components/NodeDetail";
 
 function App() {
   // Connect to WebSocket and get the send function
@@ -67,6 +68,9 @@ function App() {
 
       {/* Alert banner at the bottom — only shows when there's an active alert */}
       <AlertBanner />
+
+      {/* Node detail drawer — slides in from the right when a node is selected */}
+      <NodeDetail />
     </div>
   );
 }

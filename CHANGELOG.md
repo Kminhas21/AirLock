@@ -66,3 +66,43 @@ All changes to the Bravo (frontend) workstream are documented here so the whole 
 - **CustomEvent pattern** — custom nodes use `window.dispatchEvent` to send approve/deny decisions back up to App.tsx, since react-flow custom nodes can't receive props directly
 - **Updated** App.css with react-flow node styles (replaced old placeholder node styles)
 - **Verified** TypeScript + production build pass
+
+### B6: Drift Monitor (Completed)
+- **Replaced** placeholder DriftMonitor.tsx with full Plotly.js implementation
+- **3D Scatter Plot (top, 75% of panel):**
+  - `scatter3d` trace showing agent trajectory through PCA embedding space
+  - Trajectory line connecting points in order (grey)
+  - Baseline cluster: first 3 points as larger cyan markers
+  - Post-baseline points colored by step index: blue (early) → amber → red (late)
+  - Hover shows step number, node ID, and distance
+  - Click a point to highlight the corresponding kill chain node (cross-panel linking)
+- **Drift Score Line Chart (bottom, 25% of panel):**
+  - Line chart: x = step_index, y = mahalanobis_distance
+  - Horizontal dashed red line at threshold (2.5) with label
+  - Points colored: green below threshold, red above
+- **Drift score badge** in panel title shows current score, turns red when threshold breached
+- **Dark theme integration** — transparent backgrounds, matching axis/grid colors
+- **Note:** Plotly.js adds ~5MB to the bundle (expected for a hackathon)
+- **Verified** TypeScript + production build pass
+
+### B7: Alert Banner + Node Detail Drawer (Completed)
+- **Upgraded** AlertBanner.tsx with:
+  - Structured layout: severity icon, label, message, trigger, drift score
+  - Auto-dismiss after 8 seconds via `useEffect` timer
+  - Click-to-dismiss functionality
+  - Distinct styling for critical (red) vs warning (amber) severity
+- **Created** `src/components/NodeDetail.tsx` — slide-in drawer from the right
+  - Shows full node info: ID, type badge, tool name, risk level, decision status
+  - Reasoning context and tool parameters displayed in code blocks
+  - Result text and agent response (for post-denial messages)
+  - Drift metrics table when a matching drift point exists (distance, compliance, persistence, hedging, length)
+  - Color-coded values: red for high drift, amber for high persistence, green for approved
+  - Click overlay background or Close button to dismiss
+- **Updated** App.tsx to include NodeDetail component
+- **Updated** App.css with drawer styles (slideIn animation, overlay, metric rows)
+- **Cross-panel linking is now complete:**
+  - Click a node in the kill chain → drawer opens with full details
+  - Click a point in the drift monitor → highlights corresponding kill chain node + opens drawer
+  - Alert fires → pulsing red border on the linked kill chain node
+- **Verified** TypeScript + production build pass
+- **ALL B TASKS (B1–B7) COMPLETE** — frontend is fully functional
