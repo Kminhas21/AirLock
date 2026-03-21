@@ -3,4 +3,6 @@
 .venv
 __pycache__/
 *.pyc
-.env
+server/.env
+SENTINEL_PLAN_v2.md
+CLAUDE_ALPHA.md
