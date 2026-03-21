@@ -38,3 +38,31 @@ All changes to the Bravo (frontend) workstream are documented here so the whole 
   - Exposes `send()` function for sending tool_decision and start_task messages
   - Returns `{ connected, send }` for components to use
 - **Verified** zero TypeScript errors
+
+### B4: App Layout (Completed)
+- **Replaced** Vite boilerplate App.tsx with SENTINEL layout: top bar → two-panel grid → alert banner
+- **Created** `src/components/TaskInput.tsx` — top bar with task input, scenario dropdown (aligned/adversarial), Run button, connection indicator dot
+- **Created** placeholder `KillChain.tsx` — renders nodes as a simple list with approve/deny buttons (will become react-flow graph in B5)
+- **Created** placeholder `DriftMonitor.tsx` — renders drift data as text (will become Plotly charts in B6)
+- **Created** placeholder `AlertBanner.tsx` — slide-up alert bar (will be polished in B7)
+- **Replaced** `index.css` — dark theme global reset (#0f1117 background, full viewport)
+- **Replaced** `App.css` — complete styling: dark panels, color-coded nodes, green/red action buttons, CSS grid layout (55%/45% split)
+- **App is now fully functional** with the mock server — you can run scenarios and approve/deny tool calls
+- **Verified** TypeScript compiles and production build succeeds
+
+### B5: Kill Chain Graph (Completed)
+- **Replaced** placeholder KillChain.tsx with full `@xyflow/react` implementation
+- **3 custom node types:**
+  - `ReasoningNode` — blue left border, shows truncated chain-of-thought text
+  - `ToolNode` — amber (medium risk) or red (high/critical risk), shows tool name + params, Approve/Deny buttons when pending, decision badge after resolved
+  - `ReplanNode` — wraps ToolNode with dashed orange border to indicate post-denial replan
+- **dagre auto-layout** — automatically positions nodes top-to-bottom with proper spacing; recalculates every time a node is added
+- **Edge styling:** solid grey for normal flow, dashed red animated for denial forks
+- **Interactive features:**
+  - Click any node to select it (blue highlight ring) — will connect to NodeDetail drawer in B7
+  - Approve/Deny buttons only appear on the currently pending node
+  - Pulsing red glow on nodes targeted by alignment alerts
+  - Auto-fits viewport as nodes are added
+- **CustomEvent pattern** — custom nodes use `window.dispatchEvent` to send approve/deny decisions back up to App.tsx, since react-flow custom nodes can't receive props directly
+- **Updated** App.css with react-flow node styles (replaced old placeholder node styles)
+- **Verified** TypeScript + production build pass
