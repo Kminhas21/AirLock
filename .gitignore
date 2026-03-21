@@ -1,5 +1,7 @@
-
-
+CLAUDE_CHARLIE.md
+CLAUDE.md
+.*
+SENTINEL_PLAN_v2.md
 .venv
 __pycache__/
 *.pyc
