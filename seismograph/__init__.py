@@ -5,6 +5,7 @@
 #   from seismograph.analyzer import SeismographAnalyzer
 
 from .analyzer import SeismographAnalyzer
+from .embedder import Embedder, StubEmbedder
 from .metrics import extract_metrics
 
-__all__ = ["SeismographAnalyzer", "extract_metrics"]
+__all__ = ["SeismographAnalyzer", "Embedder", "StubEmbedder", "extract_metrics"]

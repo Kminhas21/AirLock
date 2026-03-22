@@ -3,14 +3,21 @@
 Orchestrates: embedder → projector → metrics → drift_detector
 to produce drift_update events matching the WebSocket contract.
 
-Usage by Alpha:
-    from seismograph.analyzer import SeismographAnalyzer
-    analyzer = SeismographAnalyzer()
+Usage by Alpha (production — create embedder once, reuse across sessions):
+    from seismograph import SeismographAnalyzer
+    from seismograph.embedder import Embedder
+    embedder = Embedder()                          # Pre-warm at startup
+    analyzer = SeismographAnalyzer(embedder=embedder)
     drift_update = analyzer.analyze(agent_text, node_id)
-    await websocket.send_json(drift_update)
+
+Usage in tests (fast, deterministic, no ML):
+    from seismograph.embedder import StubEmbedder
+    analyzer = SeismographAnalyzer(embedder=StubEmbedder())
 """
 
-from .embedder import Embedder
+from __future__ import annotations
+
+from .embedder import Embedder, EmbedderProtocol
 from .projector import Projector
 from .drift_detector import DriftDetector
 from .metrics import extract_metrics
@@ -38,8 +45,8 @@ TOOL_KEYWORD_MAP = {
 
 
 class SeismographAnalyzer:
-    def __init__(self):
-        self.embedder = Embedder()
+    def __init__(self, embedder: EmbedderProtocol | None = None):
+        self.embedder = embedder if embedder is not None else Embedder()
         self.projector = Projector()
         self.drift_detector = DriftDetector()
         self.step_counter = 0
