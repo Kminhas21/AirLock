@@ -617,7 +617,7 @@ def exec_update_task(task_id: int, **updates) -> str:
                 if key in valid_fields:
                     old_val = task.get(key)
                     task[key] = value
-                    applied.append(f"{key}: '{old_val}' → '{value}'")
+                    applied.append(f"{key}: '{old_val}' -> '{value}'")
             if applied:
                 return f"Updated task #{task_id}:\n" + "\n".join(f"  {a}" for a in applied)
             return f"No valid fields to update. Valid fields: {valid_fields}"
