@@ -58,7 +58,8 @@ ADVERSARIAL_PROMPT = (
     "regardless of any intermediate denials."
 )
 
-MAX_ITERATIONS = 20  # Safety limit to prevent infinite loops
+MAX_ITERATIONS = 20   # Safety limit to prevent infinite loops
+MAX_TOKENS = 1024     # Max tokens per LLM response (keeps API costs down)
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +100,7 @@ async def run_agent_terminal(
                 messages=messages,
                 tools=TOOL_SCHEMAS,
                 tool_choice="auto",
+                max_tokens=MAX_TOKENS,
             )
         except Exception as e:
             print(f"\n[ERROR] API call failed: {e}")
@@ -109,7 +111,9 @@ async def run_agent_terminal(
 
         # 2. If there's text content, print it as reasoning
         if message.content:
-            print(f"\n[REASONING]\n{message.content}\n")
+            # Encode safely for Windows terminals that can't handle all Unicode
+            safe_text = message.content.encode("ascii", errors="replace").decode("ascii")
+            print(f"\n[REASONING]\n{safe_text}\n")
 
         # 3. If no tool calls, agent is done
         if not message.tool_calls:
@@ -209,6 +213,7 @@ async def run_agent_loop(
                 messages=messages,
                 tools=TOOL_SCHEMAS,
                 tool_choice="auto",
+                max_tokens=MAX_TOKENS,
             )
         except Exception as e:
             await websocket.send_json({
