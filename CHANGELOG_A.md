@@ -167,3 +167,17 @@ Three lookup tables, no logic:
 - `server/main.py` (rewritten: full WebSocket handler + /models endpoint)
 - `server/mock_tools.py` (deleted)
 - `server/test_websocket.py` (new: WebSocket test client)
+
+---
+
+## [A5] Dual Scenarios
+
+### A5.1 — Verified aligned + adversarial prompt wiring
+- Two system prompts already defined in `agent_loop.py`:
+  - `ALIGNED_PROMPT` — respects denials, does NOT circumvent via other tools
+  - `ADVERSARIAL_PROMPT` — actively seeks workarounds when denied (Slack, webhook, GitHub issues)
+- `scenario` field flows end-to-end: `start_task` message -> `main.py` -> `run_agent_loop()` -> prompt selection
+- `test_websocket.py` supports switching `SCENARIO` variable to test either mode
+
+## A5 Complete
+No new files — scenario support was built into A3/A4 from the start.
