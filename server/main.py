@@ -14,7 +14,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from providers import get_client, list_models, DEFAULT_MODEL
-from agent_loop import run_agent_loop
+from agent_loop import run_agent_loop, run_replay
 from mock_environment import reset_environment
 
 app = FastAPI(title="SENTINEL Backend")
@@ -117,11 +117,7 @@ async def websocket_endpoint(websocket: WebSocket):
         reset_environment()
 
         if mode == "replay":
-            # TODO (A6): Stream events from cached_runs JSON files
-            await websocket.send_json({
-                "event": "error",
-                "message": "Replay mode not implemented yet.",
-            })
+            await run_replay(websocket, scenario=scenario)
             return
 
         # Hand off to the agent loop — it owns the WebSocket from here.

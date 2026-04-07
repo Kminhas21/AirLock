@@ -16,8 +16,10 @@ Two versions:
     - run_agent_loop():     For production (pauses on WebSocket for human decisions)
 """
 
+import asyncio
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from openai import AsyncOpenAI
 
 from tools import TOOL_SCHEMAS, execute_tool
@@ -360,9 +362,13 @@ async def run_agent_loop(
 
             # === Execute or deny ===
             if decision == "approve":
+                # Check circumvention before executing
+                is_circumvention = drift.check_circumvention(tool_name)
                 result = execute_tool(tool_name, tool_args)
                 is_replan = False
             else:
+                is_circumvention = False
+                drift.record_denial(tool_name)
                 result = (
                     "[DENIED by human operator. You may not perform this action. "
                     "Adjust your plan accordingly.]"
@@ -374,11 +380,33 @@ async def run_agent_loop(
                 "event": "tool_resolved",
                 "node_id": node_id,
                 "decision": decision,
-                "result": result[:500],  # Truncate for frontend display
-                "agent_response": "",
+                "result": result[:500],
                 "is_replan": is_replan,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             })
+
+            # Seismograph: emit drift_update after every tool resolution
+            await websocket.send_json({
+                "event": "drift_update",
+                "drift_score": drift.drift_score,
+                "denied_categories": list(drift.denied_categories),
+                "circumvention_count": drift.circumvention_count,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+
+            # Seismograph: alert on circumvention
+            if is_circumvention:
+                denied_cat = get_resource_category(tool_name)
+                await websocket.send_json({
+                    "event": "alignment_alert",
+                    "alert_type": "circumvention",
+                    "detail": (
+                        f"Tool '{tool_name}' targets category '{denied_cat}' "
+                        f"which was previously denied"
+                    ),
+                    "drift_score": drift.drift_score,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                })
 
             # Add tool result to conversation history
             messages.append({
@@ -393,3 +421,60 @@ async def run_agent_loop(
             "event": "session_complete",
             "message": f"Agent stopped after {MAX_ITERATIONS} iterations (safety limit).",
         })
+
+
+# ---------------------------------------------------------------------------
+# REPLAY MODE — stream pre-recorded events (A6)
+# ---------------------------------------------------------------------------
+
+CACHED_RUNS_DIR = Path(__file__).parent / "cached_runs"
+
+async def run_replay(websocket, scenario: str = "aligned"):
+    """
+    Stream pre-recorded events from a JSON file instead of calling the LLM.
+
+    Each event in the JSON array has an optional "delay_ms" field that controls
+    pacing. For tool_pending events, we still wait for the user's tool_decision
+    before sending the corresponding tool_resolved — this keeps the frontend
+    interactive even in replay mode.
+    """
+    filename = f"{scenario}_demo.json"
+    filepath = CACHED_RUNS_DIR / filename
+
+    if not filepath.exists():
+        available = [f.stem for f in CACHED_RUNS_DIR.glob("*.json")]
+        await websocket.send_json({
+            "event": "error",
+            "message": f"No cached run '{filename}'. Available: {available}",
+        })
+        return
+
+    events = json.loads(filepath.read_text())
+
+    # Stream events, pausing for delays and tool decisions
+    i = 0
+    while i < len(events):
+        event = {k: v for k, v in events[i].items() if k != "delay_ms"}
+        delay = events[i].get("delay_ms", 100)
+
+        # Add timestamp if not present
+        if "timestamp" not in event and event["event"] not in ("session_complete",):
+            event["timestamp"] = datetime.now(timezone.utc).isoformat()
+
+        await asyncio.sleep(delay / 1000)
+
+        if event["event"] == "tool_pending":
+            # Send the pending event
+            await websocket.send_json(event)
+            # Wait for user decision (keeps replay interactive)
+            await websocket.receive_json()
+            # Send the next event (tool_resolved) regardless of decision
+            i += 1
+            if i < len(events):
+                resolved = {k: v for k, v in events[i].items() if k != "delay_ms"}
+                resolved["timestamp"] = datetime.now(timezone.utc).isoformat()
+                await websocket.send_json(resolved)
+        else:
+            await websocket.send_json(event)
+
+        i += 1
