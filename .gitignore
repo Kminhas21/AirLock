@@ -8,3 +8,6 @@ SENTINEL_PLAN_v2.md
 CLAUDE_ALPHA.md
 CHANGELOG_A.md
 .aider*
+.env
+CLAUDE.md
+CLAUDE_BRAVO.md
