@@ -1,0 +1,19 @@
+/* index.css — Global styles and CSS reset */
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background: #0f1117;
+  color: #e5e7eb;
+  overflow: hidden; /* prevent scrolling — the app fills the viewport */
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+}
