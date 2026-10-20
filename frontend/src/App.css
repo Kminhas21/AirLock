@@ -595,3 +595,6 @@
   font-weight: 600;
   color: #e5e7eb;
 }
+
+/* Handles exist so react-flow can draw edges; they are not interactive. */
+.flow-handle { opacity: 0; pointer-events: none; }

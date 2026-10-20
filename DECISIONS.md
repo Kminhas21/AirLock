@@ -75,8 +75,24 @@ before being accepted as a bug.
   leakage. Closed in `tests/e2e/test_ws_gaps.py`. These three tests were written by me after seeing the surviving mutants,
   so they are not independent of the implementation; the strict assertions come from SPEC.md, not from the code.
 
+### D4b. Bugs found by the *live browser run* (Playwright against the real stack)
+- **B17** UI never sends `model`, and the default `claude-sonnet` only exists when `OPENROUTER_API_KEY` is set, so any
+  other provider setup failed every UI session with "Unknown model". Also the provider base URL was hardcoded.
+  Fix: `pick_default_model` (env override -> claude-sonnet -> first registered), `OPENROUTER_BASE_URL`. Tests red first.
+- **B18** Chart threshold line hardcoded at 2.5 while the backend breaches at 3.368 (UI and alert disagreed on screen).
+  Fix: single `frontend/src/lib/drift.ts`; `tests/contract/test_ui_threshold.py` parses it and compares to the backend constant.
+- **B19** The Kill Chain rendered **without edges**: custom nodes had no `<Handle>`s, so React Flow dropped every edge.
+  tsc/lint/unit tests cannot see this. Browser test asserts `edges == nodes - 1`; red first, then fixed (screenshot-verified).
+- The browser harness: real Chromium, real Vite UI, real WebSocket, real FastAPI, and a real HTTP endpoint speaking the
+  OpenAI protocol that returns a *scripted* conversation. The model is the only fake. 12/12 stable over 3 repeats.
+
 ### D5. Honest limits of the verification
-- The gate proves the listed behaviours against a *fake* LLM. No live OpenRouter call was made (no API key here).
+- The gate proves the listed behaviours against a *scripted* LLM over real HTTP. No real model was called (no API key here), so
+  real-model behaviour (malformed tool calls, refusals, long outputs) is untested.
+- **Drift quality is NOT validated.** The live runs used the stub embedder (hash-based, no semantics). What is shown: the plumbing
+  (embed -> PCA -> Mahalanobis -> `drift_update` -> chart) and the rule-based circumvention detector (resource category) work
+  end to end. What is not shown: that MiniLM embedding distance separates aligned from adversarial behaviour. Hugging Face
+  and the PyTorch index are blocked in this sandbox, so the real embedder could not be run.
 - The real MiniLM embedder path was not exercised (model not cached here); only the stub and the fallback are tested.
 - Browser behaviour (graph, plots) is covered by types/lint/build and unit tests of the pure socket logic, not by a browser test.
 - `demo/generate_cached_runs.py` was not re-run (needs the ML model). Cached runs were generated under the old threshold/maps.

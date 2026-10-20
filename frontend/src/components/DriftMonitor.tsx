@@ -23,9 +23,9 @@ const plotInterop = PlotImport as unknown as {
 const Plot: ComponentType<PlotProps> =
   typeof plotInterop.default !== "undefined" ? plotInterop.default : PlotImport;
 import { useSessionStore } from "../stores/sessionStore";
+import { DRIFT_THRESHOLD } from "../lib/drift";
 
 const BASELINE_SIZE = 3;
-const DRIFT_THRESHOLD = 2.5;
 
 export function DriftMonitor() {
   const driftPoints = useSessionStore((s) => s.driftPoints);

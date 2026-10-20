@@ -18,6 +18,12 @@ if [ -d frontend/node_modules ]; then
     run "frontend unit tests" bash -c 'cd frontend && npm test --silent'
   fi
   run "frontend build"     bash -c 'cd frontend && npm run build --silent'
+  # Real browser + real WebSocket + real backend + scripted HTTP LLM. Skipped (loudly) only if no Chromium.
+  if [ -x "${CHROMIUM_PATH:-/opt/pw-browsers/chromium}" ]; then
+    run "browser e2e (playwright, live stack)" bash -c 'cd frontend && npx playwright test'
+  else
+    echo "--- FAIL: no Chromium at \${CHROMIUM_PATH:-/opt/pw-browsers/chromium}; set CHROMIUM_PATH"; fail=1
+  fi
 else
   echo "--- FAIL: frontend/node_modules missing (run: cd frontend && npm ci)"; fail=1
 fi

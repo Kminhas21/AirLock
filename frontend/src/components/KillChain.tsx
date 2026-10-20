@@ -16,6 +16,8 @@ import {
   type Edge,
   type NodeProps,
   type NodeTypes,
+  Handle,
+  Position,
   useReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -74,6 +76,17 @@ function getLayoutedElements(nodes: Node<NodeData>[], edges: Edge[]) {
 // In @xyflow/react v12, NodeProps takes the Node type directly.
 type SentinelNodeProps = NodeProps<Node<NodeData>>;
 
+// react-flow only draws an edge between nodes that expose <Handle>s; without them every edge is
+// dropped ("Couldn't create edge for source handle id: null") and the graph renders disconnected.
+function NodeHandles() {
+  return (
+    <>
+      <Handle type="target" position={Position.Top} isConnectable={false} className="flow-handle" />
+      <Handle type="source" position={Position.Bottom} isConnectable={false} className="flow-handle" />
+    </>
+  );
+}
+
 // ===== CUSTOM NODE: Reasoning =====
 // Blue rounded rectangle showing the agent's chain-of-thought text.
 
@@ -87,6 +100,7 @@ function ReasoningNode({ data, id }: SentinelNodeProps) {
       className={`flow-node reasoning-node ${isSelected ? "selected" : ""}`}
       onClick={() => setSelectedNode(isSelected ? null : id)}
     >
+      <NodeHandles />
       <div className="flow-node-header">
         <span className="flow-node-type-badge reasoning-badge">REASONING</span>
       </div>
@@ -141,6 +155,7 @@ function ToolNode({ data, id }: SentinelNodeProps) {
       }`}
       onClick={() => setSelectedNode(isSelected ? null : id)}
     >
+      <NodeHandles />
       <div className="flow-node-header">
         <span className={`flow-node-type-badge ${riskClass}-badge`}>
           {data.toolName?.toUpperCase()}
