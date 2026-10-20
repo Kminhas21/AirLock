@@ -10,10 +10,18 @@ import { useMemo } from "react";
 // react-plotly.js is a CJS module. Under Vite's ESM handling, the default
 // export sometimes comes through as { default: PlotComponent } instead of
 // PlotComponent directly. This workaround handles both cases.
-import PlotImport from "react-plotly.js";
-const Plot = (typeof (PlotImport as any).default !== "undefined"
-  ? (PlotImport as any).default
-  : PlotImport) as typeof PlotImport;
+import PlotImport, {
+  type PlotMouseEvent,
+  type PlotProps,
+  type PlotTrace,
+} from "react-plotly.js";
+import type { ComponentType } from "react";
+// Under the CJS/ESM interop the import may actually be { default: Component }.
+const plotInterop = PlotImport as unknown as {
+  default?: ComponentType<PlotProps>;
+};
+const Plot: ComponentType<PlotProps> =
+  typeof plotInterop.default !== "undefined" ? plotInterop.default : PlotImport;
 import { useSessionStore } from "../stores/sessionStore";
 
 const BASELINE_SIZE = 3;
@@ -25,12 +33,12 @@ export function DriftMonitor() {
   const setSelectedNode = useSessionStore((s) => s.setSelectedNode);
 
   // --- 2D Scatter Data (PC1 vs PC2) ---
-  const scatterData = useMemo(() => {
+  const scatterData = useMemo((): PlotTrace[] => {
     if (driftPoints.length === 0) return [];
 
     const baseline = driftPoints.slice(0, BASELINE_SIZE);
     const trail = driftPoints.slice(BASELINE_SIZE);
-    const traces: object[] = [];
+    const traces: PlotTrace[] = [];
 
     // Trajectory line connecting all points
     if (driftPoints.length > 1) {
@@ -96,7 +104,7 @@ export function DriftMonitor() {
   }, [driftPoints]);
 
   // --- Drift Score Line Chart Data ---
-  const driftLineData = useMemo(() => {
+  const driftLineData = useMemo((): PlotTrace[] => {
     if (driftPoints.length === 0) return [];
 
     return [
@@ -122,7 +130,7 @@ export function DriftMonitor() {
   }, [driftPoints]);
 
   // Handle clicking a point to highlight the corresponding kill chain node
-  const handlePointClick = (event: any) => {
+  const handlePointClick = (event: PlotMouseEvent) => {
     const point = event?.points?.[0];
     if (point?.customdata) {
       setSelectedNode(point.customdata as string);
@@ -165,7 +173,7 @@ export function DriftMonitor() {
           {/* 2D Scatter Plot — Embedding Space */}
           <div className="chart-container scatter3d-container">
             <Plot
-              data={scatterData as any}
+              data={scatterData}
               layout={{
                 autosize: true,
                 margin: { l: 40, r: 16, t: 8, b: 40 },
@@ -186,7 +194,7 @@ export function DriftMonitor() {
           {/* Drift Score Line Chart */}
           <div className="chart-container line-chart-container">
             <Plot
-              data={driftLineData as any}
+              data={driftLineData}
               layout={{
                 autosize: true,
                 margin: { l: 40, r: 16, t: 8, b: 32 },

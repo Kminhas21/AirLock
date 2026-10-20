@@ -8,12 +8,13 @@
 // - ToolNode: Amber/red based on risk, has Approve/Deny buttons when pending
 // - ReplanNode: Same as ToolNode but with dashed orange border (appears after denial)
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
   type Node,
   type Edge,
+  type NodeProps,
   type NodeTypes,
   useReactFlow,
   ReactFlowProvider,
@@ -71,10 +72,7 @@ function getLayoutedElements(nodes: Node<NodeData>[], edges: Edge[]) {
 
 // ===== Type for custom node props =====
 // In @xyflow/react v12, NodeProps takes the Node type directly.
-type SentinelNodeProps = {
-  id: string;
-  data: NodeData;
-};
+type SentinelNodeProps = NodeProps<Node<NodeData>>;
 
 // ===== CUSTOM NODE: Reasoning =====
 // Blue rounded rectangle showing the agent's chain-of-thought text.
@@ -195,12 +193,11 @@ function ReplanNode(props: SentinelNodeProps) {
 
 // ===== NODE TYPE REGISTRY =====
 // react-flow needs to know which component to render for each node type.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const nodeTypes: NodeTypes = {
-  reasoning: ReasoningNode as any,
-  tool: ToolNode as any,
-  replan: ReplanNode as any,
-};
+const nodeTypes = {
+  reasoning: ReasoningNode,
+  tool: ToolNode,
+  replan: ReplanNode,
+} satisfies NodeTypes;
 
 // ===== INNER COMPONENT (needs ReactFlowProvider) =====
 
@@ -230,7 +227,9 @@ function KillChainInner({
   // Listen for decision events from custom nodes
   useEffect(() => {
     const handler = (e: Event) => {
-      const { nodeId, decision } = (e as CustomEvent).detail;
+      const { nodeId, decision } = (
+        e as CustomEvent<{ nodeId: string; decision: "approve" | "deny" }>
+      ).detail;
       onDecision(nodeId, decision);
     };
     window.addEventListener("sentinel-decision", handler);
@@ -239,9 +238,9 @@ function KillChainInner({
 
   return (
     <ReactFlow
-      nodes={layoutedNodes as any}
+      nodes={layoutedNodes}
       edges={layoutedEdges}
-      nodeTypes={nodeTypes as any}
+      nodeTypes={nodeTypes}
       fitView
       proOptions={{ hideAttribution: true }}
       nodesDraggable={false}
@@ -270,8 +269,6 @@ interface KillChainProps {
 export function KillChain({ onDecision }: KillChainProps) {
   const nodes = useSessionStore((s) => s.nodes);
 
-  const stableOnDecision = useCallback(onDecision, [onDecision]);
-
   return (
     <div className="panel kill-chain-panel">
       <h2 className="panel-title">Kill Chain</h2>
@@ -283,7 +280,7 @@ export function KillChain({ onDecision }: KillChainProps) {
       ) : (
         <div style={{ flex: 1, minHeight: 0 }}>
           <ReactFlowProvider>
-            <KillChainInner onDecision={stableOnDecision} />
+            <KillChainInner onDecision={onDecision} />
           </ReactFlowProvider>
         </div>
       )}

@@ -1,30 +1,33 @@
-// useWebSocket.ts — Custom React hook that manages the WebSocket connection.
+// useWebSocket.ts — React hook that manages the WebSocket connection.
 //
-// This hook:
-// 1. Connects to the WebSocket server when the component mounts
-// 2. Parses incoming JSON messages
-// 3. Routes each message to the correct Zustand store handler based on the "event" field
-// 4. Exposes a send() function so components can send messages back (like approve/deny)
-// 5. Auto-reconnects if the connection drops
+// - URL comes from VITE_SENTINEL_WS_URL (default ws://localhost:8080/ws), with
+//   optional VITE_SENTINEL_WS_TOKEN appended as ?token=.
+// - Incoming messages are parsed defensively and dispatched via lib/routeEvent.
+// - Reconnects with exponential, capped, jittered backoff (reset on open).
+// - Exposes send() for client messages (approve/deny, start_task).
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSessionStore } from "../stores/sessionStore";
-import type { ServerEvent, ClientMessage } from "../types/contracts";
+import type { ClientMessage } from "../types/contracts";
+import { buildWsUrl } from "../lib/wsUrl";
+import { createBackoff } from "../lib/backoff";
+import { routeEvent, type EventHandlers } from "../lib/routeEvent";
 
-// Default WebSocket URL — matches both the mock server and the real backend
-const WS_URL = "ws://localhost:8000/ws";
+const WS_URL = buildWsUrl({
+  url: import.meta.env.VITE_SENTINEL_WS_URL,
+  token: import.meta.env.VITE_SENTINEL_WS_TOKEN,
+});
 
 export function useWebSocket(url: string = WS_URL) {
-  // Track connection status so the UI can show "Connected" / "Disconnected"
   const [connected, setConnected] = useState(false);
 
-  // useRef keeps a value that persists across re-renders without causing re-renders.
-  // We use it for the WebSocket instance because we don't want the component to
-  // re-render every time the socket object changes internally.
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
+  const backoffRef = useRef(createBackoff());
+  // Holds the latest connect function so onclose can call it without
+  // referencing the const being defined (avoids use-before-declare).
+  const connectRef = useRef<() => void>(() => {});
 
-  // Get all the store handler functions. We grab them once so they stay stable.
   const handleReasoningEvent = useSessionStore((s) => s.handleReasoningEvent);
   const handleToolPendingEvent = useSessionStore((s) => s.handleToolPendingEvent);
   const handleToolResolvedEvent = useSessionStore((s) => s.handleToolResolvedEvent);
@@ -32,62 +35,47 @@ export function useWebSocket(url: string = WS_URL) {
   const handleAlignmentAlertEvent = useSessionStore((s) => s.handleAlignmentAlertEvent);
   const setIsRunning = useSessionStore((s) => s.setIsRunning);
 
-  // --- Connect to the WebSocket server ---
   const connect = useCallback(() => {
-    // Don't connect if we already have an open connection
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    const state = wsRef.current?.readyState;
+    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
 
-    console.log(`[WS] Connecting to ${url}...`);
+    const handlers: EventHandlers = {
+      onReasoning: handleReasoningEvent,
+      onToolPending: handleToolPendingEvent,
+      onToolResolved: handleToolResolvedEvent,
+      onDriftUpdate: handleDriftUpdateEvent,
+      onAlignmentAlert: handleAlignmentAlertEvent,
+      setIsRunning,
+      onError: (message) => console.error("[WS] Server error:", message),
+      onUnknown: (data) => console.warn("[WS] Unknown event:", data),
+    };
+
     const ws = new WebSocket(url);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      console.log("[WS] Connected!");
+      backoffRef.current.reset();
       setConnected(true);
     };
 
     ws.onmessage = (event) => {
-      // Parse the incoming JSON message
-      const data = JSON.parse(event.data) as ServerEvent;
-
-      // Route to the correct store handler based on the "event" field.
-      // This is like a traffic controller — each event type goes to
-      // a different function that knows how to handle it.
-      switch (data.event) {
-        case "reasoning":
-          handleReasoningEvent(data);
-          break;
-        case "tool_pending":
-          handleToolPendingEvent(data);
-          break;
-        case "tool_resolved":
-          handleToolResolvedEvent(data);
-          break;
-        case "drift_update":
-          handleDriftUpdateEvent(data);
-          break;
-        case "alignment_alert":
-          handleAlignmentAlertEvent(data);
-          break;
-        case "task_complete":
-          setIsRunning(false);
-          break;
-        default:
-          console.warn("[WS] Unknown event type:", data);
+      let data: unknown;
+      try {
+        data = JSON.parse(event.data as string);
+      } catch {
+        console.warn("[WS] Ignoring non-JSON message");
+        return;
       }
+      routeEvent(data, handlers);
     };
 
     ws.onclose = () => {
-      console.log("[WS] Disconnected. Reconnecting in 2s...");
       setConnected(false);
-      // Try to reconnect after 2 seconds
-      reconnectTimeoutRef.current = window.setTimeout(() => {
-        connect();
-      }, 2000);
+      const delay = backoffRef.current.next();
+      reconnectTimeoutRef.current = window.setTimeout(() => connectRef.current(), delay);
     };
 
-    ws.onerror = (err) => {
-      console.error("[WS] Error:", err);
+    ws.onerror = () => {
       ws.close();
     };
   }, [
@@ -100,28 +88,29 @@ export function useWebSocket(url: string = WS_URL) {
     setIsRunning,
   ]);
 
-  // --- Send a message to the server ---
+  useEffect(() => {
+    connectRef.current = connect;
+  }, [connect]);
+
   const send = useCallback((message: ClientMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message));
-      console.log("[WS] Sent:", message.event);
     } else {
       console.warn("[WS] Cannot send — not connected.");
     }
   }, []);
 
-  // --- Connect on mount, disconnect on unmount ---
   useEffect(() => {
     connect();
-
-    // Cleanup: close connection and cancel reconnect timer when component unmounts
     return () => {
-      if (reconnectTimeoutRef.current) {
+      if (reconnectTimeoutRef.current !== null) {
         clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
       }
       if (wsRef.current) {
-        wsRef.current.onclose = null; // prevent reconnect on intentional close
+        wsRef.current.onclose = null; // no reconnect on intentional close
         wsRef.current.close();
+        wsRef.current = null;
       }
     };
   }, [connect]);

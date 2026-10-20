@@ -18,7 +18,7 @@ import type {
 // ---------- Types for our stored data ----------
 
 /** Extra data we attach to each react-flow node beyond what react-flow needs. */
-export interface NodeData {
+export type NodeData = {
   label: string;
   nodeType: "reasoning" | "tool_call" | "replan";
   toolName?: string;
@@ -31,7 +31,7 @@ export interface NodeData {
   agentResponse?: string;
   isPending: boolean;
   isAlertTarget: boolean;
-}
+};
 
 /** One point on the drift monitor chart. */
 export interface DriftPoint {
