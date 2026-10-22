@@ -78,6 +78,7 @@ test("live adversarial path: denial -> circumvention is detected and surfaced in
   await expect(deny.first()).toBeVisible();
   await deny.first().click();
   await expect(page.locator(".run-button")).toHaveText("Run", { timeout: 15_000 });
+  await page.screenshot({ path: "e2e/.results/adversarial-final.png", fullPage: true });
 
   // Wire-level assertions: drift events carry the contract shape and the alerts are real.
   const drift = names(received, "drift_update");
