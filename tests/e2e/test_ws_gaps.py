@@ -72,3 +72,22 @@ def test_unexpected_server_exception_text_is_not_leaked(client, monkeypatch):
 
     assert of(events, "error"), "client was not told the session failed"
     assert "sk-LEAK-777" not in json.dumps(events) and "/etc/shadow" not in json.dumps(events)
+
+
+def test_tool_proposed_right_after_a_denial_is_marked_replan(client, monkeypatch):
+    """contracts.ts: node_type is "tool_call" | "replan". The UI draws replans dashed; nothing ever emitted one."""
+    email = call("send_email", {"to": "a@b.c", "subject": "s", "body": "b"}, "e1")
+    lst = call("list_directory", {"path": "/project"}, "l1")
+    lst2 = call("list_directory", {"path": "/project"}, "l2")
+    fake = FakeClient([turn("List.", [lst]), turn("Email.", [email]), turn("Plan B.", [lst2]), turn("Done.")])
+    monkeypatch.setattr(main, "get_client", lambda key: (fake, "fake-model"))
+
+    def policy(ev, events):
+        if ev["event"] == "tool_pending":
+            from fakes import decision
+            return [decision(ev["node_id"], "deny" if ev["tool_name"] == "send_email" else "approve")]
+        return ()
+
+    events = run_session(client, policy)
+    kinds = [(p["tool_name"], p["node_type"]) for p in of(events, "tool_pending")]
+    assert kinds == [("list_directory", "tool_call"), ("send_email", "tool_call"), ("list_directory", "replan")]

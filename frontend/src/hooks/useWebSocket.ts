@@ -11,6 +11,7 @@ import { useSessionStore } from "../stores/sessionStore";
 import type { ClientMessage } from "../types/contracts";
 import { buildWsUrl } from "../lib/wsUrl";
 import { createBackoff } from "../lib/backoff";
+import { planReconnect, type ConnectionStatus } from "../lib/reconnect";
 import { routeEvent, type EventHandlers } from "../lib/routeEvent";
 
 const WS_URL = buildWsUrl({
@@ -19,11 +20,13 @@ const WS_URL = buildWsUrl({
 });
 
 export function useWebSocket(url: string = WS_URL) {
-  const [connected, setConnected] = useState(false);
+  const [status, setStatus] = useState<ConnectionStatus>("disconnected");
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
   const backoffRef = useRef(createBackoff());
+  // True once a terminal event (session_complete / error) arrived: the server closing the socket is then expected.
+  const sessionEndedRef = useRef(false);
   // Holds the latest connect function so onclose can call it without
   // referencing the const being defined (avoids use-before-declare).
   const connectRef = useRef<() => void>(() => {});
@@ -45,7 +48,10 @@ export function useWebSocket(url: string = WS_URL) {
       onToolResolved: handleToolResolvedEvent,
       onDriftUpdate: handleDriftUpdateEvent,
       onAlignmentAlert: handleAlignmentAlertEvent,
-      setIsRunning,
+      setIsRunning: (running) => {
+        if (!running) sessionEndedRef.current = true;
+        setIsRunning(running);
+      },
       onError: (message) => console.error("[WS] Server error:", message),
       onUnknown: (data) => console.warn("[WS] Unknown event:", data),
     };
@@ -55,7 +61,8 @@ export function useWebSocket(url: string = WS_URL) {
 
     ws.onopen = () => {
       backoffRef.current.reset();
-      setConnected(true);
+      sessionEndedRef.current = false;
+      setStatus("connected");
     };
 
     ws.onmessage = (event) => {
@@ -70,9 +77,9 @@ export function useWebSocket(url: string = WS_URL) {
     };
 
     ws.onclose = () => {
-      setConnected(false);
-      const delay = backoffRef.current.next();
-      reconnectTimeoutRef.current = window.setTimeout(() => connectRef.current(), delay);
+      const plan = planReconnect({ sessionEnded: sessionEndedRef.current, backoff: backoffRef.current });
+      setStatus(plan.status);
+      reconnectTimeoutRef.current = window.setTimeout(() => connectRef.current(), plan.delayMs);
     };
 
     ws.onerror = () => {
@@ -115,5 +122,5 @@ export function useWebSocket(url: string = WS_URL) {
     };
   }, [connect]);
 
-  return { connected, send };
+  return { connected: status === "connected", reconnecting: status === "reconnecting", send };
 }

@@ -234,6 +234,7 @@ async def run_agent_loop(
         {"role": "user", "content": task},
     ]
     last_reasoning_id = None
+    last_was_denied = False  # the next tool proposed after a denial is a "replan"
 
     for _ in range(MAX_ITERATIONS):
         # 1. Call the LLM (timeout + bounded retries; never leaks provider text)
@@ -299,6 +300,7 @@ async def run_agent_loop(
             await emit(events.tool_pending(
                 node_id, last_reasoning_id, tool_name, tool_args,
                 get_risk_level(tool_name), message.content or "",
+                "replan" if last_was_denied else "tool_call",
             ))
 
             # === AIRLOCK: BLOCK until the matching, valid human decision (or deadline) ===
@@ -312,6 +314,7 @@ async def run_agent_loop(
                 result = DENIED_RESULT
                 is_replan = True
 
+            last_was_denied = is_replan
             await emit(events.tool_resolved(
                 node_id, outcome.decision, result[:500], is_replan,
             ))

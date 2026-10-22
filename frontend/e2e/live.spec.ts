@@ -129,3 +129,100 @@ test("operator reload mid-gate: UI reconnects and can start a fresh session", as
   expect((await request.get(`${LLM}/_calls`)).ok()).toBeTruthy();
   expect(names(received, "session_complete")).toHaveLength(0); // no phantom completion for the abandoned session
 });
+
+
+// ---- cases that were previously unchecked -------------------------------------------------------
+
+/** Every time the connection dot's class changes, remember it; lets us catch a transient red flash. */
+async function watchDot(page: Page) {
+  await page.evaluate(() => {
+    const dot = document.querySelector(".connection-dot")!;
+    const w = window as unknown as { __dotStates: string[] };
+    w.__dotStates = [dot.className];
+    new MutationObserver(() => w.__dotStates.push(dot.className)).observe(dot, { attributes: true });
+  });
+}
+const dotStates = (page: Page) => page.evaluate(() => (window as unknown as { __dotStates: string[] }).__dotStates);
+
+test("connection dot never shows 'disconnected' (red) when the server merely ended a finished session", async ({ page }) => {
+  await start(page, "aligned");
+  await watchDot(page);
+  for (let i = 0; i < 6; i++) {
+    if ((await page.locator(".run-button").innerText()) === "Run") break;
+    const approve = page.locator(".btn-approve");
+    if ((await approve.count()) > 0) await approve.first().click();
+    await page.waitForTimeout(250);
+  }
+  await expect(page.locator(".run-button")).toHaveText("Run", { timeout: 15_000 });
+  await expect(page.locator(".connection-dot.connected")).toBeVisible({ timeout: 5_000 }); // came back
+  const states = await dotStates(page);
+  const red = states.filter((c) => !/\bconnected\b|\breconnecting\b/.test(c));
+  expect(red, `dot class history: ${JSON.stringify(states)}`).toEqual([]);
+  await expect(page.locator(".run-button")).toBeEnabled();
+});
+
+test("a long session (25+ nodes) stays one connected, non-overlapping graph", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator(".connection-dot.connected")).toBeVisible();
+  await page.fill(".task-input", "LONG_RUN please");
+  await page.click(".run-button");
+  for (let i = 0; i < 20; i++) {
+    if ((await page.locator(".run-button").innerText()) === "Run") break;
+    const approve = page.locator(".btn-approve");
+    if ((await approve.count()) > 0) await approve.first().click();
+    await page.waitForTimeout(200);
+  }
+  await expect(page.locator(".run-button")).toHaveText("Run", { timeout: 20_000 });
+
+  const nodeCount = await page.locator(".react-flow__node").count();
+  expect(nodeCount).toBeGreaterThanOrEqual(25);
+  await expect(page.locator(".react-flow__edge")).toHaveCount(nodeCount - 1);
+
+  const overlaps = await page.evaluate(() => {
+    const boxes = [...document.querySelectorAll(".react-flow__node")].map((n) => n.getBoundingClientRect());
+    let n = 0;
+    for (let i = 0; i < boxes.length; i++)
+      for (let j = i + 1; j < boxes.length; j++) {
+        const a = boxes[i], b = boxes[j];
+        if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) n++;
+      }
+    return n;
+  });
+  expect(overlaps).toBe(0);
+  await page.screenshot({ path: "e2e/.results/long-session.png", fullPage: true });
+});
+
+test("replan nodes after a denial are drawn with the dashed denial-fork edge", async ({ page }) => {
+  const { received } = recordFrames(page);
+  await start(page, "adversarial");
+  await expect(page.locator(".btn-approve").first()).toBeVisible();
+  await page.locator(".btn-approve").first().click(); // list_directory
+  await expect(page.locator(".btn-deny").first()).toBeVisible();
+  await page.locator(".btn-deny").first().click(); // send_email
+  await expect(page.locator(".btn-deny").first()).toBeVisible(); // slack: first replan
+  expect(names(received, "tool_pending").map((p) => p.node_type)).toEqual(["tool_call", "tool_call", "replan"]);
+  await expect(page.locator(".replan-wrapper")).toHaveCount(1);
+  const dashed = await page.locator(".react-flow__edge-path").evaluateAll(
+    (els) => els.filter((e) => (e.getAttribute("style") ?? "").includes("stroke-dasharray")).length,
+  );
+  expect(dashed).toBeGreaterThanOrEqual(1);
+});
+
+test.describe("narrow viewport", () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test("no horizontal page overflow; controls and both panels fit the screen", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator(".connection-dot.connected")).toBeVisible();
+    const m = await page.evaluate(() => ({
+      scrollW: document.documentElement.scrollWidth,
+      innerW: window.innerWidth,
+      panels: [...document.querySelectorAll(".panel")].map((p) => Math.round(p.getBoundingClientRect().width)),
+      run: document.querySelector(".run-button")!.getBoundingClientRect().right,
+    }));
+    expect(m.scrollW, JSON.stringify(m)).toBeLessThanOrEqual(m.innerW);
+    expect(m.run).toBeLessThanOrEqual(m.innerW);
+    expect(m.panels.length).toBeGreaterThanOrEqual(2);
+    for (const w of m.panels) expect(w).toBeLessThanOrEqual(m.innerW);
+    await page.screenshot({ path: "e2e/.results/mobile.png", fullPage: true });
+  });
+});

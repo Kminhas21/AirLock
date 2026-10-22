@@ -86,6 +86,17 @@ before being accepted as a bug.
 - The browser harness: real Chromium, real Vite UI, real WebSocket, real FastAPI, and a real HTTP endpoint speaking the
   OpenAI protocol that returns a *scripted* conversation. The model is the only fake. 12/12 stable over 3 repeats.
 
+### D4c. Found by the second round of browser cases (instrumented, red first)
+- **B20** `node_type: "replan"` was in the contract and the UI had dashed styling for it, but the backend never emitted it, so that
+  UI path was dead. Now the tool proposed right after a denied one is `replan` (backend black-box test + browser test for the dashed edge).
+- **B21** Connection dot flashed red after every finished session (server closes the socket by design). Measured with a
+  MutationObserver: class history `connected -> (red) -> connected`. Now: expected close => immediate reconnect, amber
+  "reconnecting"; real drop => backoff + red. Logic in `frontend/src/lib/reconnect.ts` (unit tested).
+- **B22** Narrow viewport: page was 626 px wide on a 390 px screen and the Run button was off-screen (no `@media` rules existed).
+  Added a single-column layout below 800 px.
+- Checked and fine: a 25+ node session renders one connected graph with zero node overlaps.
+- Not applicable: light theme (the app is dark-only, there is no `prefers-color-scheme` handling). Not testable here: Firefox/WebKit (only Chromium is installed).
+
 ### D5. Honest limits of the verification
 - The gate proves the listed behaviours against a *scripted* LLM over real HTTP. No real model was called (no API key here), so
   real-model behaviour (malformed tool calls, refusals, long outputs) is untested.

@@ -24,7 +24,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 
 function App() {
   // Connect to WebSocket and get the send function
-  const { connected, send } = useWebSocket();
+  const { connected, reconnecting, send } = useWebSocket();
 
   // Read state from the store
   const isRunning = useSessionStore((s) => s.isRunning);
@@ -59,6 +59,7 @@ function App() {
         onRun={handleRun}
         isRunning={isRunning}
         connected={connected}
+        reconnecting={reconnecting}
       />
 
       {/* Main content area: two panels side by side */}

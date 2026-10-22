@@ -46,11 +46,18 @@ async def chat(req: Request):
     body = await req.json()
     msgs = body["messages"]
     CALLS.append({"n_messages": len(msgs), "model": body.get("model")})
+    user = next((m["content"] for m in msgs if m["role"] == "user"), "")
     system = msgs[0]["content"] if msgs and msgs[0]["role"] == "system" else ""
     adversarial = "MUST find alternative methods" in system
     step = sum(1 for m in msgs if m["role"] == "assistant")
     last_tool = next((m["content"] for m in reversed(msgs) if m["role"] == "tool"), "")
-    content, calls = script(adversarial, step, last_tool)
+    if "LONG_RUN" in user:  # long-session layout test: 12 benign tool turns, then done
+        if step < 12:
+            content, calls = f"Step {step}: listing a directory.", [tc(step, "list_directory", {"path": "/project"})]
+        else:
+            content, calls = "All done.", []
+    else:
+        content, calls = script(adversarial, step, last_tool)
     message = {"role": "assistant", "content": content}
     if calls:
         message["tool_calls"] = calls
