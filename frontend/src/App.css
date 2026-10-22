@@ -97,6 +97,10 @@
   background: #22c55e;
 }
 
+.connection-dot.reconnecting {
+  background: #f59e0b;
+}
+
 /* ===== MAIN PANELS ===== */
 
 .main-panels {
@@ -594,4 +598,16 @@
   font-family: ui-monospace, monospace;
   font-weight: 600;
   color: #e5e7eb;
+}
+
+/* Handles exist so react-flow can draw edges; they are not interactive. */
+.flow-handle { opacity: 0; pointer-events: none; }
+
+/* ===== NARROW VIEWPORTS (phones / small windows) ===== */
+@media (max-width: 800px) {
+  .app { height: auto; min-height: 100vh; }
+  .task-input-bar { flex-wrap: wrap; padding: 10px 12px; }
+  .task-input { flex: 1 1 100%; min-width: 0; order: 3; }
+  .main-panels { grid-template-columns: 1fr; grid-auto-rows: minmax(420px, auto); }
+  .panel { min-width: 0; }
 }

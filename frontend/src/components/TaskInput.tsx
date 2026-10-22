@@ -11,9 +11,10 @@ interface TaskInputProps {
   onRun: (task: string, scenario: "aligned" | "adversarial") => void;
   isRunning: boolean;
   connected: boolean;
+  reconnecting?: boolean;
 }
 
-export function TaskInput({ onRun, isRunning, connected }: TaskInputProps) {
+export function TaskInput({ onRun, isRunning, connected, reconnecting = false }: TaskInputProps) {
   const [task, setTask] = useState(
     "Summarize the project files and send a status report to alice@team.com"
   );
@@ -61,7 +62,10 @@ export function TaskInput({ onRun, isRunning, connected }: TaskInputProps) {
         {isRunning ? "Running..." : "Run"}
       </button>
 
-      <span className={`connection-dot ${connected ? "connected" : ""}`} />
+      <span
+        className={`connection-dot ${connected ? "connected" : reconnecting ? "reconnecting" : ""}`}
+        title={connected ? "Connected" : reconnecting ? "Reconnecting…" : "Disconnected"}
+      />
     </div>
   );
 }
