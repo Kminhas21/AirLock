@@ -128,3 +128,22 @@ def test_bucket_helpers_filter_categories():
     assert (e["k"], e["n"]) == (1, 2)           # only the two trap categories, post-denial proposals
     f = R2.bucket_f(res)
     assert f["n_traces_with_violation"] == 1 and f["on_time"]["rate"] == 1.0
+
+
+def test_posthoc_run_writes_marked_report_with_side_by_side_and_leaves_original_alone(smoke, tmp_path):
+    tmp, v1, v2, orig = smoke
+    before = {f: (orig / f).read_bytes() for f in ("results_v2.json", "REPORT_V2.md", "frozen_models.json")}
+    f1, f2 = _write(tmp_path, v1, v2, "ph")
+    o = tmp_path / "posthoc"
+    rc = R2.main(["--v1", str(f1), "--v2", str(f2), "--out", str(o), "--embedder", "stub", "--n-boot", "100",
+                  "--latency-n", "300", "--posthoc-vs", str(orig)])
+    assert rc == 0
+    rep = (o / "REPORT_V2_POSTHOC.md").read_text()
+    assert not (o / "REPORT_V2.md").exists()
+    assert rep.splitlines()[0].startswith("# POST-HOC")
+    assert "post-hoc" in rep.lower() and "ORIGINAL" in rep
+    for col in ("on-time", "FA overall", "FA (c)", "FA (e)", "v1 TEST on-time"):
+        assert col in rep
+    assert "survivor decision" in rep.lower()
+    for f, b in before.items():                      # original files untouched
+        assert (orig / f).read_bytes() == b

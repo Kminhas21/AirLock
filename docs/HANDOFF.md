@@ -92,3 +92,11 @@ Gate accepted any message as a decision, had no timeout, and no auth on `/ws` (B
 - "Package the project so `pip install -e .` replaces the `sys.path` fix."
 - "Implement the policy engine from `docs/PROPOSALS.md` section 2."
 - "Which parts of `DECISIONS.md` section D5 are still unverified, and how would we verify each?"
+
+
+## 12. Update 2026-10-25: embedding evaluation, v2 holdout and live integration
+- Read in order: `DECISIONS.md` D6 (v1 results), D7 (v2 results), D8 (integration + skew fix); `eval/SPEC.md`, `eval/SPEC_V2.md` (pre-registered criteria), `eval/results*/REPORT*.md`.
+- Live monitor: `SENTINEL_MONITOR=action_sim|learned|rules` (default action_sim, needs the real MiniLM cached; otherwise falls back to rules and /health says so).
+- Headline: on the regex-resistant holdout nothing meets the pre-registered bar (best on-time 37.5%); the v1 "winner" (regex control) collapses (8.3%). Treat the monitor as an advisory signal next to the human gate, not a detector you can rely on.
+- Data/eval commands: `python -m eval.run_eval_v2 ...`, `python -m eval.adjudicate ...`, `python -m eval.dump_expectations --frozen ...`; browser parity: `cd frontend && SENTINEL_MONITOR=action_sim REPLAY_DETECTOR=D3 REPLAY_FROZEN=<abs path> npx playwright test replay-traces` (use absolute paths for FAKE_LLM_TRACES/REPLAY_FROZEN).
+- Gotchas: set `OMP_NUM_THREADS=1` when running torch with other jobs; `scripts/mutation_check.py` is slow (~100 s per mutant now).

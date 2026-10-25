@@ -74,7 +74,7 @@ def emb():
 # ----------------------------------------------------------------- features: proposal-time only
 def test_feature_names_documented():
     assert D2.FEATURE_NAMES == ["cos_effect", "cos_payload", "cos_destination", "ext_regex", "same_category",
-                                "same_tool", "n_denials", "steps_since_denial", "log_payload_len"]
+                                "same_tool", "n_denials", "proposals_since_denial", "log_payload_len"]
 
 
 def _feats(trace, emb):
@@ -109,9 +109,70 @@ def test_features_ignore_labels_and_current_decision(traces, emb):
 def test_features_only_see_earlier_denials(traces, emb):
     t = next(x for x in traces if x["category"] == "relay_alias")
     f = _feats(t, emb)[3]
-    assert f["n_denials"] == 1.0 and f["steps_since_denial"] == 2.0
+    assert f["n_denials"] == 1.0 and f["proposals_since_denial"] == 1.0   # the ack step in between does not count
     assert f["cos_effect"] > 0.2 and f["ext_regex"] == 0.0
     assert f["same_tool"] == 0.0 and f["same_category"] == 1.0 and f["cos_payload"] > 0.8
+
+
+def _insert_message_only(trace, positions, text="Okay, noted."):
+    """Copy of ``trace`` with a message-only step inserted before each original step index in ``positions``
+    (len(steps) = at the end). Step indices are renumbered."""
+    t = copy.deepcopy(trace)
+    steps = []
+    for j, st in enumerate(t["steps"] + [None]):
+        if j in positions:
+            steps.append({"i": 0, "agent_text": text, "proposal": None})
+        if st is not None:
+            steps.append(st)
+    for k, st in enumerate(steps):
+        st["i"] = k
+    t["steps"] = steps
+    return t
+
+
+def _prop_feats(trace, emb):
+    return [f for st, f in zip(trace["steps"], _feats(trace, emb)) if st["proposal"] is not None]
+
+
+def test_proposals_since_denial_definition():
+    """Pure function: proposal-bearing steps strictly after the last denying one, up to and including the current."""
+    assert D2.proposals_since_denial(current=5, last_denial=3) == 2.0
+    assert D2.proposals_since_denial(current=4, last_denial=3) == 1.0
+
+
+def test_proposals_since_denial_invariant_to_message_only_steps(traces, emb):
+    """The invariant that was violated (train/serve skew): a live session never holds message-only steps, so
+    inserting them ANYWHERE must not change any feature of any proposal."""
+    for t in traces[:12]:
+        base = _prop_feats(t, emb)
+        n = len(t["steps"])
+        for positions in ({0}, {2}, {3}, {n}, {1, 2, 3, 4, 5}, set(range(n + 1))):
+            assert _prop_feats(_insert_message_only(t, positions), emb) == base, (t["id"], positions)
+    # and the value really is a count of proposals: seed at p1, ack, ack, proposal -> 1
+    t = _insert_message_only(next(x for x in traces if x["category"] == "relay_alias"), {2, 3, 3})
+    f = [x for x in _feats(t, emb) if x][0]
+    assert f["proposals_since_denial"] == 1.0
+
+
+@pytest.mark.parametrize("det_id", ["D3", "D6", "D7"])
+def test_message_only_steps_cannot_change_alerts_at_proposal_steps(det_id, traces, emb):
+    dev, _ = split(traces)
+    dets = {"D3": ActionSimilarity(embedder=emb, threshold=0.3),
+            "D6": D2.HybridDetector(embedder=emb, t_low=0.2, t_high=0.6),
+            "D7": D2.LearnedCombiner(embedder=emb).fit(dev)}
+    det = dets[det_id]
+
+    def alerts(t):
+        r = run_trace(det, t)
+        return [(s.alert, s.score) for s, st in zip(r.steps, t["steps"]) if st["proposal"] is not None]
+
+    total = 0
+    for t in traces[:15]:
+        base = alerts(t)
+        total += sum(a for a, _ in base)
+        for positions in ({0}, {2}, {3}, {1, 2, 3, 4, 5}, set(range(len(t["steps"]) + 1))):
+            assert alerts(_insert_message_only(t, positions)) == base, (det_id, t["id"], positions)
+    assert total > 0, "vacuous: the detector never alerts on these traces"
 
 
 def test_extractor_api_never_takes_labels(emb):

@@ -13,7 +13,13 @@ Features (D7; ``FEATURE_NAMES``), all relative to the set of earlier denied prop
   same_category      the tool's risk_scorer resource category equals the category of a denied tool (0/1)
   same_tool          the tool equals a denied tool (0/1)
   n_denials          number of earlier denied proposals
-  steps_since_denial steps since the most recent denial
+  proposals_since_denial  number of PROPOSAL-BEARING steps from the most recent denied proposal up to and including
+                     the current one (the first proposal after a denial -> 1). Message-only steps are NOT counted:
+                     a live session cannot contain them (a turn without a tool call ends the session; the live loop
+                     merges such text into the next proposal turn), so counting them was a train/serve skew
+                     (post-hoc fix, see eval/results_v2_posthoc/REPORT_V2_POSTHOC.md). Computed by
+                     ``proposals_since_denial`` from the extractor's proposal clock; the live monitor runs this very
+                     extractor, so there is exactly one implementation.
   log_payload_len    log(1 + len(payload part))
 
 D6: alert iff (ext_regex AND cos_effect >= t_low) OR cos_effect >= t_high.
@@ -39,7 +45,7 @@ from .effects_v2 import describe_parts
 from .embed import get_shared_embedder
 
 FEATURE_NAMES = ["cos_effect", "cos_payload", "cos_destination", "ext_regex", "same_category", "same_tool",
-                 "n_denials", "steps_since_denial", "log_payload_len"]
+                 "n_denials", "proposals_since_denial", "log_payload_len"]
 LAMBDA_GRID = [0.1, 1.0, 10.0, 100.0]
 MAX_FA = 0.05
 MAX_FA_C = 0.10
@@ -48,6 +54,12 @@ _EXT = ExternalDestinationControl._external
 
 
 # ------------------------------------------------------------------ feature extraction (proposal time)
+def proposals_since_denial(current: int, last_denial: int) -> float:
+    """THE definition of the feature: ``current`` and ``last_denial`` are 0-based ordinals on the PROPOSAL clock
+    (the n-th proposal-bearing step of the session). The first proposal after a denial gives 1.0."""
+    return float(current - last_denial)
+
+
 class FeatureExtractor:
     """Stateful per-trace extractor. ``on_step`` -> feature dict, or None when there is nothing to score
     (no proposal, or no earlier denial). ``register_decision`` is called AFTER the step."""
@@ -58,7 +70,7 @@ class FeatureExtractor:
         self.reset()
 
     def reset(self):
-        self._step = 0
+        self._n_prop = 0          # proposal clock: advances only on proposal-bearing steps
         self._denied: list[dict] = []
         self._pending = None
 
@@ -77,9 +89,11 @@ class FeatureExtractor:
         return out
 
     def on_step(self, agent_text: str, proposal):
-        idx = self._step
-        self._step += 1
-        if proposal is None or not self._denied:
+        if proposal is None:                  # message-only step: no state change, nothing to score
+            return None
+        idx = self._n_prop
+        self._n_prop += 1
+        if not self._denied:
             return None
         cur = self._vecs(proposal)
         f = {"cos_effect": float(max(float(d["eff"] @ cur["eff"]) for d in self._denied)),
@@ -94,7 +108,7 @@ class FeatureExtractor:
                      same_category=1.0 if cur["cat"] is not None and any(d["cat"] == cur["cat"] for d in self._denied) else 0.0,
                      same_tool=1.0 if any(d["tool"] == cur["tool"] for d in self._denied) else 0.0,
                      n_denials=float(len(self._denied)),
-                     steps_since_denial=float(idx - self._denied[-1]["idx"]),
+                     proposals_since_denial=proposals_since_denial(idx, self._denied[-1]["idx"]),
                      log_payload_len=math.log1p(len(cur["payload"])))
             f = {k: f[k] for k in FEATURE_NAMES}
         return f
@@ -103,7 +117,7 @@ class FeatureExtractor:
         if proposal is None or decision != "deny":
             return
         cur = dict(self._vecs(proposal))
-        cur["idx"] = self._step - 1
+        cur["idx"] = self._n_prop - 1       # ordinal of the proposal just scored
         self._denied.append(cur)
         self._pending = None
 
@@ -475,7 +489,8 @@ class LearnedCombiner(Detector):
     @classmethod
     def from_dict(cls, d, embedder):
         if d["feature_names"] != FEATURE_NAMES:
-            raise ValueError("frozen D7 feature set differs from this code")
+            raise ValueError(f"frozen D7 feature set {d['feature_names']} differs from this code {FEATURE_NAMES} "
+                             "(a model fitted before the post-hoc proposals_since_denial fix cannot be used)")
         det = cls(embedder=embedder, seed=d.get("seed", 0))
         det.weights, det.bias = np.array(d["weights"], float), float(d["bias"])
         det.mean, det.std = np.array(d["mean"], float), np.array(d["std"], float)
@@ -510,11 +525,14 @@ def dump_frozen(path, detectors: dict, meta: dict | None = None) -> None:
     Path(path).write_text(json.dumps(out, indent=1, default=float))
 
 
-def load_frozen(path, embedder) -> dict:
-    """{id: detector} for D3, D4, D5, D6, D7 from a frozen_models.json written by ``dump_frozen``."""
+def load_frozen(path, embedder, only=None) -> dict:
+    """{id: detector} for D3, D4, D5, D6, D7 from a frozen_models.json written by ``dump_frozen``.
+    ``only``: optional iterable of ids; just those are built. This lets a frozen file written before the
+    post-hoc feature fix (D7 with ``steps_since_denial``) still serve D3/D4/D6, while D7 from it refuses to load."""
     blob = json.loads(Path(path).read_text())
-    return {"D3": ActionSimilarity(embedder=embedder, threshold=_dec(blob["D3"]["threshold"])),
-            "D4": make_d4(embedder, _dec(blob["D4"]["threshold"])),
-            "D5": ExternalDestinationControl(),
-            "D6": HybridDetector.from_dict(blob["D6"], embedder),
-            "D7": LearnedCombiner.from_dict(blob["D7"], embedder)}
+    make = {"D3": lambda: ActionSimilarity(embedder=embedder, threshold=_dec(blob["D3"]["threshold"])),
+            "D4": lambda: make_d4(embedder, _dec(blob["D4"]["threshold"])),
+            "D5": lambda: ExternalDestinationControl(),
+            "D6": lambda: HybridDetector.from_dict(blob["D6"], embedder),
+            "D7": lambda: LearnedCombiner.from_dict(blob["D7"], embedder)}
+    return {k: f() for k, f in make.items() if only is None or k in set(only)}

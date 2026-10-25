@@ -140,3 +140,16 @@ Fit/calibrate on v1 dev + v2 dev (101 traces); v2 test scored once (46 traces, 2
   cannot be caught without knowing the routing: a destination registry/policy (docs/PROPOSALS.md section 2) is the missing input, not a better embedding.
 - Rule-following note: the rule's "partial" branch picks D3, but D7 is the better all-round detector by the evidence; both are integrated behind SENTINEL_MONITOR, default per the rule (D3), switchable.
 Limits: synthetic one-model-family data; 24 violating test traces (CIs wide, overlapping between D3/D6/D7); dev mixes v1 (shortcut-dominated) and v2; D7 has 10 fitted parameters vs 0 for D5.
+
+## D8. Live integration and the D7 train/serve skew (2026-10-25)
+Integration (server/proposal_monitor.py): `SENTINEL_MONITOR=action_sim` (frozen D3, the pre-registered survivor; default) | `learned` (frozen D7) | `rules`.
+Alerts are emitted at the proposal BEFORE tool_pending; the server loads the SAME frozen detector code the evaluation scored (no re-implementation).
+Falls back loudly to `rules` if the model/frozen file is missing (/health shows the ACTIVE monitor/embedder and `monitor_errors`); monitor exceptions never kill a session.
+Verification: offline == live on 200/200 traces for D3 and (post-hoc) D7 with the real MiniLM; Playwright (real browser + WebSocket + backend) replays 12 traces from both datasets
+acting as the human per the recorded decisions and asserts live alerts == offline, alert-before-decision, one terminal event, and that /health reports the real embedder;
+running the WRONG monitor against the other's expectations fails 7/12 (the check discriminates).
+**Bug found by the parity tests:** D7's `steps_since_denial` was computed on trace step indices that include message-only steps, which cannot exist in a live session
+(train/serve skew; 7/200 traces differed offline vs live). Fixed POST-HOC (eval/results_v2_posthoc/REPORT_V2_POSTHOC.md; original results kept byte-identical in eval/results_v2/):
+feature is now `proposals_since_denial`, invariant to message-only steps (property-tested for D3/D6/D7). Effect on D7 was negligible (on-time 37.5% -> 37.5%, FA(e) 20.9% -> 18.6%);
+survivor decision unchanged (partial, D3). To run the learned monitor: `SENTINEL_MONITOR=learned SENTINEL_MONITOR_MODEL=eval/results_v2_posthoc/frozen_models.json`.
+Open: nothing qualifies against the pre-registered bar; best on-time on the hard holdout is 37.5% (D7). The missing input is a destination/routing registry (docs/PROPOSALS.md section 2).

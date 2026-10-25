@@ -413,12 +413,69 @@ def _honesty():
     ]
 
 
+# ------------------------------------------------------------------ post-hoc comparison (SPEC_V2 honesty rule)
+_CMP_COLS = [("on_time", "on-time (v2 TEST)"), ("fa_overall", "FA overall"), ("fa_c", "FA (c)"), ("fa_e", "FA (e)"),
+             ("v1_on_time", "v1 TEST on-time")]
+
+
+def render_posthoc_header(res: dict, orig: dict, orig_dir: str, what: str) -> str:
+    """Top-of-report block for a post-hoc rerun: banner, why, ORIGINAL vs POST-HOC for every detector, which detectors'
+    numbers moved, and the survivor decision of both runs. ``orig`` is the original results_v2.json."""
+    L, A = [], None
+    A = L.append
+    A("# POST-HOC rerun: Evaluation v2 after the proposals_since_denial fix\n")
+    A("> **POST-HOC.** A train/serve skew in D7 was found AFTER the v2 TEST numbers had been seen (see eval/SPEC_V2.md, honesty rules): "
+      "the feature `steps_since_denial` counted message-only (acknowledgement) steps, which a live session cannot contain. "
+      "It was replaced by `proposals_since_denial` (proposal-bearing steps only; one implementation shared by training, offline eval and the live monitor) "
+      "and D7 was refitted on the same DEV with the same grids, constraints and seeds. Nothing else was retuned. "
+      f"The ORIGINAL run is kept untouched in `{orig_dir}`; its numbers are reproduced below. {what}\n")
+    A("## ORIGINAL vs POST-HOC (v2 TEST unless stated)\n")
+    rows, changed = [], []
+    po, oo = res["survivor_inputs"], orig["survivor_inputs"]
+    for d in DET_ORDER:
+        for k, lab in _CMP_COLS:
+            a, b = oo[d].get(k), po[d].get(k)
+            same = (a == b) or (not _isnum(a) and not _isnum(b))
+            rows.append([d, lab, _pct(a), _pct(b), "same" if same else "CHANGED"])
+            if not same:
+                changed.append(d)
+    A(_table(["detector", "metric", "ORIGINAL", "POST-HOC", ""], rows))
+    A("")
+    cal_same = {d: orig["calibration"][d].get("threshold", (orig["calibration"][d].get("t_low"), orig["calibration"][d].get("t_high")))
+                == res["calibration"][d].get("threshold", (res["calibration"][d].get("t_low"), res["calibration"][d].get("t_high")))
+                for d in ("D3", "D4", "D6", "D7")}
+    A("Fitted operating points identical to the original run: " + ", ".join(f"{d} {'yes' if v else 'NO'}" for d, v in cal_same.items())
+      + f". Detectors whose scored numbers moved: {', '.join(sorted(set(changed))) or 'none'} "
+      "(only D7 uses the feature; D6 does not, so it can only move through shared code, which it does not).\n")
+    A("### D7 headline, ORIGINAL vs POST-HOC\n")
+    od, pd_ = orig["detectors"]["D7"], res["detectors"]["D7"]
+    A(_table(["", "ORIGINAL D7", "POST-HOC D7"], [
+        ["on-time v2 TEST", f"{_pct(od['timing']['on_time']['rate'])} {_ci_pct(od['timing']['on_time']['ci'])}", f"{_pct(pd_['timing']['on_time']['rate'])} {_ci_pct(pd_['timing']['on_time']['ci'])}"],
+        ["FA overall", _rate(od["false_alarms"]["overall"]), _rate(pd_["false_alarms"]["overall"])],
+        ["FA (c) benign after denial", _rate(od["false_alarms"]["c_benign_proposal"]), _rate(pd_["false_alarms"]["c_benign_proposal"])],
+        ["FA (e) regex traps", _rate(od["bucket_e_regex_traps"]), _rate(pd_["bucket_e_regex_traps"])],
+        ["v1 TEST on-time (regression)", _pct(orig["v1_regression"]["D7"]["timing"]["on_time"]["rate"]), _pct(res["v1_regression"]["D7"]["timing"]["on_time"]["rate"])],
+        ["gain over D5 [95% CI]", f"{_pct(orig['gain_vs_D5']['D7']['diff'])} {_ci_pct(orig['gain_vs_D5']['D7']['ci'])}", f"{_pct(res['gain_vs_D5']['D7']['diff'])} {_ci_pct(res['gain_vs_D5']['D7']['ci'])}"],
+        ["threshold / lambda", f"{_num(orig['calibration']['D7']['threshold'], 4)} / {orig['calibration']['D7']['lambda']}", f"{_num(res['calibration']['D7']['threshold'], 4)} / {res['calibration']['D7']['lambda']}"],
+    ]))
+    A("")
+    A("### Survivor decision (recomputed mechanically)\n")
+    A(f"- ORIGINAL: label `{orig['decision']['label']}`, survivor `{orig['decision']['survivor']}`. {orig['decision']['message']}")
+    A(f"- POST-HOC: label `{res['decision']['label']}`, survivor `{res['decision']['survivor']}`. {res['decision']['message']}")
+    same_dec = (orig["decision"]["label"], orig["decision"]["survivor"]) == (res["decision"]["label"], res["decision"]["survivor"])
+    A(f"- The survivor decision {'is UNCHANGED' if same_dec else 'CHANGED'} by the post-hoc fix.\n")
+    A("---\n")
+    return "\n".join(L) + "\n"
+
+
 # ------------------------------------------------------------------ CLI
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="python -m eval.run_eval_v2", description=__doc__.splitlines()[0])
     ap.add_argument("--v1", nargs="+", required=True, help="v1 adjudicated traces (file/glob)")
     ap.add_argument("--v2", nargs="+", required=True, help="v2 adjudicated traces (file/glob)")
     ap.add_argument("--out", default="eval/results_v2")
+    ap.add_argument("--posthoc-vs", metavar="ORIGINAL_DIR", help="mark this run POST-HOC: write REPORT_V2_POSTHOC.md (not "
+                    "REPORT_V2.md) with an ORIGINAL-vs-POST-HOC table against ORIGINAL_DIR/results_v2.json")
     ap.add_argument("--embedder", choices=["minilm", "stub"], default="minilm")
     ap.add_argument("--n-boot", type=int, default=M.DEFAULT_N_BOOT)
     ap.add_argument("--seed", type=int, default=M.DEFAULT_SEED)
@@ -441,8 +498,17 @@ def main(argv=None) -> int:
     res = run(v1, v2, out, a.embedder, a.n_boot, a.seed, a.latency_n, a.allow_small_latency,
               argv=list(argv) if argv is not None else sys.argv[1:])
     (out / "results_v2.json").write_text(json.dumps(res, indent=1, allow_nan=False))
-    (out / "REPORT_V2.md").write_text(render_report(res))
-    print(f"wrote {out / 'results_v2.json'}, {out / 'REPORT_V2.md'} and {out / 'frozen_models.json'}")
+    if a.posthoc_vs:
+        orig = json.loads((Path(a.posthoc_vs) / "results_v2.json").read_text())
+        head = render_posthoc_header(res, orig, a.posthoc_vs, "")
+        rep_name = "REPORT_V2_POSTHOC.md"
+        body = render_report(res).replace("# Evaluation v2: regex-resistant holdout, learned combiner, survivor selection",
+                                          "## Full post-hoc report (same layout as REPORT_V2.md)", 1)
+        (out / rep_name).write_text(head + body)
+    else:
+        rep_name = "REPORT_V2.md"
+        (out / rep_name).write_text(render_report(res))
+    print(f"wrote {out / 'results_v2.json'}, {out / rep_name} and {out / 'frozen_models.json'}")
     print("DECISION:", res["decision"]["message"])
     return 0
 

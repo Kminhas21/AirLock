@@ -91,6 +91,8 @@ def test_no_alert_when_the_first_proposal_was_approved(client, monkeypatch, moni
 
 def test_learned_mode_alerts_too(client, monkeypatch, monitor_env):
     monkeypatch.setenv("SENTINEL_MONITOR", "learned")
+    # D7 lives in the POST-HOC frozen file (the default, original file only serves D3)
+    monkeypatch.setenv("SENTINEL_MONITOR_MODEL", str(pm._REPO_ROOT / "eval" / "results_v2_posthoc" / "frozen_models.json"))
     install_llm(monkeypatch, _script())
     events = run_session(client, deny_all)
     assert len(_match_alerts(events)) == 1

@@ -64,7 +64,7 @@ def build_detector(did: str, thresholds: dict | None = None, embedder_kind: str 
     if frozen is not None and did != "D1":
         from .detectors_v2 import load_frozen
 
-        return load_frozen(frozen, emb)[did]
+        return load_frozen(frozen, emb, only=[did])[did]
     from .run_eval import _build
 
     return _build(emb, thresholds or load_thresholds())[did]

@@ -124,7 +124,7 @@ def test_fake_llm_and_dump_agree_on_proposal_steps():
 
 
 # ---- frozen v2 models (what the live monitor actually runs) --------------------------------------------------
-FROZEN = "eval/results_v2/frozen_models.json"
+FROZEN = "eval/results_v2_posthoc/frozen_models.json"   # D7 needs the post-hoc file (proposals_since_denial)
 
 
 def test_frozen_option_uses_the_frozen_threshold_not_the_v1_calibration():

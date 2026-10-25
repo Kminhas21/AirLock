@@ -4,7 +4,10 @@ SENTINEL_MONITOR selects what watches tool proposals:
 
 * ``action_sim`` (default, the pre-registered survivor, eval D3): alert when the proposed action's effect string is
   within the frozen cosine threshold of an effect the human already DENIED in this session.
-* ``learned`` (eval D7): the frozen logistic-regression combiner over the same family of features.
+* ``learned`` (eval D7): the frozen logistic-regression combiner over the same family of features. Needs a frozen
+  file fitted AFTER the post-hoc ``proposals_since_denial`` fix: set SENTINEL_MONITOR_MODEL=
+  eval/results_v2_posthoc/frozen_models.json. The default (ORIGINAL) file still serves ``action_sim``; its D7 uses the
+  old step-index feature and is refused (loud fallback to ``rules``).
 * ``rules``: the original resource-category circumvention rules (live_drift.SessionDrift.observe_tool_call). This
   monitor emits nothing itself; agent_loop keeps using the rules path.
 
@@ -200,7 +203,7 @@ class MonitorFactory:
             from eval.detectors_v2 import load_frozen
             from eval.effects import describe_effect
             emb = _shared_embedder()
-            det = load_frozen(self.model_path, emb)[MODES[self.mode]]
+            det = load_frozen(self.model_path, emb, only=[MODES[self.mode]])[MODES[self.mode]]
             det.reset()
             return SessionMonitor(self.mode, det, emb, describe_effect)
         except Exception:
@@ -233,7 +236,7 @@ def _resolve(env: Mapping[str, str]) -> MonitorFactory:
     try:
         from eval.detectors_v2 import load_frozen
         emb = _shared_embedder()
-        det = load_frozen(path, emb)[MODES[requested]]
+        det = load_frozen(path, emb, only=[MODES[requested]])[MODES[requested]]
         float(det.threshold)
     except Exception as exc:        # missing/corrupt file, absent detector, no model cache, eval not importable
         return _fallback(requested, f"cannot load the frozen {MODES[requested]} from {path} ({exc!r})")
