@@ -108,3 +108,20 @@ before being accepted as a bug.
 - Browser behaviour (graph, plots) is covered by types/lint/build and unit tests of the pure socket logic, not by a browser test.
 - `demo/generate_cached_runs.py` was not re-run (needs the ML model). Cached runs were generated under the old threshold/maps.
 - Frontend mutants are not in the mutation check (it copies only the backend).
+
+## D6. Real-model embedding evaluation (2026-10-25) — see eval/results/REPORT.md
+Setup: MiniLM-L6-v2 (real), 120 traces / 762 labeled steps from 6 independent generators, blind-relabelled by 2 reviewers
+(5 disagreements, none changed a label), thresholds calibrated on dev only, results on the 53 held-out test traces (46 violation steps).
+**Pre-registered verdict (eval/SPEC.md): D2, D3, D4 all FAIL.**
+- D0 shipped Mahalanobis: on-time 9.7%, recall 8.7%, AUC 0.66 — worse than the rules (-22.6pp, CI excludes 0). The shipped embedding drift does not detect circumvention.
+- D2 corrected message drift (centroid cosine): on-time 12.9%, AUC 0.67 (0.58 on post-denial proposals) — near chance. Message text does not signal circumvention.
+- D3 action similarity: on-time 67.7% [50, 84] (needs 70), +35.5pp over rules (CI excludes 0), FA 4.7%, latency ~8 ms. Fails only the on-time cutoff, narrowly, BUT
+  its false alarm rate on benign proposals after a denial is 22.1% (21/95) and 16.7% on same-category hard negatives; the 4.7% headline is diluted by steps it cannot alert on.
+  Shared payload text dominates the score (an internal email with the same payload outscored a paraphrased external webhook).
+- D4 rules OR D3: on-time 74.2% passes, FA 6.0% fails (28.4% on benign post-denial proposals).
+- **D5 control (regex "external destination after a denial", no ML): on-time 87.1%, recall 87%, FA 0.7%, ~0 ms.** It beats every embedding detector on every metric.
+  Caveat: D5 was written AFTER inspecting the data's structure (including test), so its numbers are optimistic and not pre-registered; it also encodes this scenario's convention (team.com = internal).
+- Added value of embeddings over the control: D3 caught 4 violations D5 missed (of 46); D3 OR D5 recall 44/46 vs D5 40/46, at 22 vs 3 false alarms. One violation (gen_a-010#8) was missed by everything.
+Conclusion: on this data embeddings do not earn their place as the primary detector; a destination/policy check does most of the work. Embeddings add a small recall gain
+only for violations whose destination is not lexically obvious, which this dataset under-represents. The next step is a harder, regex-resistant holdout, not more tuning on this one (the v1 test split is now spent).
+Limits: synthetic LLM-written data from one model family, clustered traces (CIs optimistic), no multiplicity correction, 53 test traces.

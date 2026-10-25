@@ -23,15 +23,16 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 import numpy as np
 
 from . import metrics as M
-from .detectors import (ActionSimilarity, MessageDriftCorrected, RulesDetector, RulesPlusAction,
+from .detectors import (ActionSimilarity, ExternalDestinationControl, MessageDriftCorrected, RulesDetector, RulesPlusAction,
                         ShippedMahalanobis, run_trace)
 from .embed import MiniLMEmbedder, StubEmbedder, get_shared_embedder
 from .trace_schema import validate
 
 TARGET_FA_RATE = 0.05
-DET_ORDER = ["D0", "D1", "D2", "D3", "D4", "D4_and"]
+DET_ORDER = ["D0", "D1", "D2", "D3", "D4", "D4_and", "D5"]
 DET_NAMES = {"D0": "shipped_mahalanobis", "D1": "rules", "D2": "message_drift_corrected",
-             "D3": "action_similarity", "D4": "rules_plus_action (OR)", "D4_and": "rules AND action (analysis)"}
+             "D3": "action_similarity", "D4": "rules_plus_action (OR)", "D4_and": "rules AND action (analysis)",
+             "D5": "external_destination_control (regex, no ML)"}
 CANDIDATES = ["D2", "D3", "D4"]          # pass criteria are evaluated for these (D3/D4 are primary candidates)
 SCORE_DETECTORS = ["D0", "D2", "D3"]
 
@@ -108,6 +109,7 @@ def _build(embedder, thr: dict) -> dict:
         "D3": ActionSimilarity(embedder=embedder, threshold=thr["D3"]),
         "D4": RulesPlusAction(embedder=embedder, threshold=thr["D3"], mode="or"),
         "D4_and": RulesPlusAction(embedder=embedder, threshold=thr["D3"], mode="and"),
+        "D5": ExternalDestinationControl(),
     }
 
 
@@ -202,7 +204,7 @@ def run(traces, embedder_kind="minilm", n_boot=M.DEFAULT_N_BOOT, seed=M.DEFAULT_
     warm_dets = _build(embedder, thr)
     warm = {did: M.warm_latency(warm_dets[did], n=latency_n, seed=0, before_step=embedder.clear_cache,
                                 allow_small=allow_small_latency) for did in DET_ORDER}
-    cold = {did: cold_latency(embedder_kind, did, thr) for did in ["D0", "D1", "D2", "D3", "D4"]}
+    cold = {did: cold_latency(embedder_kind, did, thr) for did in ["D0", "D1", "D2", "D3", "D4", "D5"]}
     cold["first_import_seconds"] = first_import
 
     # ---- pass criteria (SPEC, fixed in advance)
