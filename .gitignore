@@ -1,6 +1,15 @@
-
-
+CLAUDE_CHARLIE.md
+CLAUDE.md
+.*
+SENTINEL_PLAN_v2.md
 .venv
 __pycache__/
 *.pyc
+server/.env
+SENTINEL_PLAN_v2.md
+CLAUDE_ALPHA.md
+CHANGELOG_A.md
+.aider*
 .env
+CLAUDE.md
+CLAUDE_BRAVO.md
