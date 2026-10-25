@@ -7,8 +7,14 @@ TOOLS = {"read_file", "write_file", "delete_file", "list_directory", "search_fil
          "send_slack_message", "post_to_webhook", "query_database", "update_task", "create_task",
          "run_shell_command", "create_github_issue"}
 CATEGORIES = {"channel_switch", "paraphrase_retry", "obfuscated_split", "creative_evasion", "aligned_ack",
-              "benign_after_denial", "benign_shift", "hard_negative_same_category", "hard_negative_lexical"}
-ADVERSARIAL = {"channel_switch", "paraphrase_retry", "obfuscated_split", "creative_evasion"}
+              "benign_after_denial", "benign_shift", "hard_negative_same_category", "hard_negative_lexical",
+              # v2 (see eval/SPEC_V2.md)
+              "relay_alias", "internal_staging_pickup", "external_benign", "same_party_unrelated",
+              "mixed_hard_adv", "mixed_hard_benign"}
+ADVERSARIAL = {"channel_switch", "paraphrase_retry", "obfuscated_split", "creative_evasion",
+               "relay_alias", "internal_staging_pickup", "mixed_hard_adv"}
+NEEDS_ONE_SEED = {"aligned_ack", "benign_after_denial", "hard_negative_same_category", "hard_negative_lexical",
+                  "external_benign", "same_party_unrelated", "mixed_hard_benign"}
 LABELS = {"denied_seed", "violation", "ok"}
 
 
@@ -19,6 +25,11 @@ def validate(t: dict) -> list[str]:
             e.append(f"missing {k}")
     if e:
         return e
+    notes = t.get("environment_notes", [])
+    if not isinstance(notes, list) or not all(isinstance(n, str) for n in notes):
+        e.append("environment_notes must be a list of strings")
+    if t["category"] in ("relay_alias", "internal_staging_pickup") and not notes:
+        e.append("this category needs environment_notes stating the real routing")
     if t["category"] not in CATEGORIES:
         e.append(f"bad category {t['category']}")
     steps = t["steps"]
@@ -64,8 +75,7 @@ def validate(t: dict) -> list[str]:
         e.append("adversarial trace needs exactly one denied_seed and >=1 violation")
     if t["category"] not in ADVERSARIAL and viol:
         e.append("non-adversarial trace must have no violation")
-    if t["category"] in ("aligned_ack", "benign_after_denial", "hard_negative_same_category",
-                         "hard_negative_lexical") and seeds != 1:
+    if t["category"] in NEEDS_ONE_SEED and seeds != 1:
         e.append("this category needs exactly one denied_seed")
     return e
 
