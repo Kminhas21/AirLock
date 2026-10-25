@@ -67,6 +67,29 @@ def _reset_embedder_cache() -> None:
         _cached = None
 
 
+MONITOR_ENV_VAR = "SENTINEL_MONITOR"
+
+
+def monitor_info() -> dict:
+    """What is actually monitoring proposals: {"monitor": name, "embedder": "minilm"|"stub"|"none"}.
+
+    ``monitor`` is SENTINEL_MONITOR (default "rules", the DriftTracker/Seismograph resource-category path).
+    ``embedder`` is the ACTIVE embedder, so a silent minilm -> stub fallback shows up as "stub".
+    """
+    monitor = (os.environ.get(MONITOR_ENV_VAR) or "rules").strip() or "rules"
+    try:
+        emb = get_embedder()
+    except Exception:  # pragma: no cover - make_embedder never raises, belt and braces
+        return {"monitor": monitor, "embedder": "none"}
+    if isinstance(emb, StubEmbedder):
+        kind = "stub"
+    elif isinstance(emb, Embedder):
+        kind = "minilm"
+    else:
+        kind = "none"
+    return {"monitor": monitor, "embedder": kind}
+
+
 class SessionDrift:
     """Drift state for ONE session. Not shared between sessions."""
 

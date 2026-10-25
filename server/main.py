@@ -5,11 +5,12 @@ This is the entry point. Run with:
     uvicorn main:app --reload --port 8080
 
 Endpoints:
-    GET  /health  — Returns {"status": "ok"}
+    GET  /health  — Returns {"status": "ok", "monitor": <name>, "embedder": "minilm"|"stub"|"none"}
     GET  /models  — Returns list of available models for the frontend dropdown
     WS   /ws      — WebSocket endpoint for the full agent session
 """
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -19,6 +20,7 @@ import events
 from auth import check_ws_access
 from providers import get_client, list_models, DEFAULT_MODEL
 from agent_loop import run_agent_loop
+from live_drift import monitor_info
 from replay import run_replay
 from mock_environment import reset_environment
 
@@ -42,8 +44,9 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    """Simple health check — hit this to verify the server is running."""
-    return {"status": "ok"}
+    """Health check; also says which proposal monitor and embedder are ACTIVE (a stub fallback is visible here)."""
+    # monitor_info() may load the embedding model on first use, so keep it off the event loop
+    return {"status": "ok", **await asyncio.to_thread(monitor_info)}
 
 
 @app.get("/models")

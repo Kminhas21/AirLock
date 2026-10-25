@@ -172,3 +172,40 @@ def test_session_survives_failing_minilm(monkeypatch):
     monkeypatch.setenv("SENTINEL_EMBEDDER", "minilm")
     out = SessionDrift().observe_reasoning("hello", "n1")
     assert out[0]["event"] == "drift_update"
+
+
+# ---- monitor_info (reported by /health) ----------------------------------------------------------
+def test_monitor_info_defaults_to_rules_and_stub(monkeypatch):
+    monkeypatch.delenv("SENTINEL_MONITOR", raising=False)
+    monkeypatch.delenv("SENTINEL_EMBEDDER", raising=False)
+    assert live_drift.monitor_info() == {"monitor": "rules", "embedder": "stub"}
+
+
+def test_monitor_info_reports_configured_monitor_name(monkeypatch):
+    monkeypatch.setenv("SENTINEL_MONITOR", "action_similarity")
+    monkeypatch.setenv("SENTINEL_EMBEDDER", "stub")
+    assert live_drift.monitor_info()["monitor"] == "action_similarity"
+
+
+@pytest.mark.real_model
+def test_monitor_info_reports_minilm_when_real_model_loads(monkeypatch):
+    monkeypatch.setenv("SENTINEL_EMBEDDER", "minilm")
+    info = live_drift.monitor_info()
+    if info["embedder"] == "stub":
+        pytest.skip("MiniLM not cached; fallback is reported honestly as 'stub'")
+    assert info["embedder"] == "minilm"
+
+
+def test_monitor_info_reports_stub_on_silent_fallback(monkeypatch):
+    """SENTINEL_EMBEDDER=minilm but the model fails to load -> must say 'stub', never 'minilm'."""
+    class Boom:
+        def __init__(self, *a, **k): ...
+        def embed(self, t): raise RuntimeError("no model")
+    monkeypatch.setattr(live_drift, "Embedder", Boom)
+    monkeypatch.setenv("SENTINEL_EMBEDDER", "minilm")
+    assert live_drift.monitor_info()["embedder"] == "stub"
+
+
+def test_monitor_info_none_when_embedder_unavailable(monkeypatch):
+    monkeypatch.setattr(live_drift, "get_embedder", lambda: (_ for _ in ()).throw(RuntimeError("x")))
+    assert live_drift.monitor_info()["embedder"] == "none"
