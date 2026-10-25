@@ -28,11 +28,12 @@ ENV_VAR = "SENTINEL_EMBEDDER"
 
 
 def make_embedder(env: Mapping[str, str] = os.environ) -> EmbedderProtocol:
-    """Build an embedder from SENTINEL_EMBEDDER ('stub' default | 'minilm').
+    """Build an embedder from SENTINEL_EMBEDDER ('minilm' default | 'stub').
 
-    Never raises: any failure of the real embedder falls back to the stub.
+    The proposal monitors need real embeddings, hence the default. Never raises: any failure of the real
+    embedder falls back to the stub with a WARNING (and the monitor then falls back to rules, see /health).
     """
-    choice = (env.get(ENV_VAR) or "stub").strip().lower()
+    choice = (env.get(ENV_VAR) or "minilm").strip().lower()
     if choice == "stub":
         return StubEmbedder()
     if choice != "minilm":
@@ -43,7 +44,8 @@ def make_embedder(env: Mapping[str, str] = os.environ) -> EmbedderProtocol:
         emb.embed("warmup")  # Embedder loads lazily; surface failures now
         return emb
     except Exception as exc:  # missing package, model cache, anything
-        log.warning("MiniLM embedder unavailable (%s); falling back to StubEmbedder", exc)
+        log.warning("MiniLM embedder unavailable (%s); falling back to StubEmbedder "
+                    "(proposal monitors that need embeddings will fall back to rules)", exc)
         return StubEmbedder()
 
 
@@ -65,29 +67,40 @@ def _reset_embedder_cache() -> None:
     global _cached
     with _lock:
         _cached = None
+    pm = sys.modules.get("proposal_monitor")      # the monitor factory depends on the embedder choice
+    if pm is not None:                            # (outside _lock: the factory takes its own lock, then ours)
+        pm._reset_factory_cache()
 
 
 MONITOR_ENV_VAR = "SENTINEL_MONITOR"
 
 
 def monitor_info() -> dict:
-    """What is actually monitoring proposals: {"monitor": name, "embedder": "minilm"|"stub"|"none"}.
+    """What is ACTUALLY monitoring proposals (reported by /health):
+    {"monitor": "action_sim"|"learned"|"rules", "embedder": "minilm"|"stub"|"none", "monitor_errors": int}.
 
-    ``monitor`` is SENTINEL_MONITOR (default "rules", the DriftTracker/Seismograph resource-category path).
-    ``embedder`` is the ACTIVE embedder, so a silent minilm -> stub fallback shows up as "stub".
+    ``monitor`` is the ACTIVE mode, not the requested one: a fallback to rules (stub embedder, missing or corrupt
+    frozen file, unknown mode) shows up as "rules". ``embedder`` is the active embedder. ``monitor_errors`` counts
+    runtime monitor exceptions (each one was logged and the proposal went to the human without an alert).
     """
-    monitor = (os.environ.get(MONITOR_ENV_VAR) or "rules").strip() or "rules"
+    import proposal_monitor    # lazy: proposal_monitor imports this module
+    try:
+        monitor = proposal_monitor.get_monitor_factory().mode
+    except Exception:  # pragma: no cover - the factory degrades instead of raising; belt and braces
+        log.exception("monitor factory failed")
+        monitor = "rules"
+    errors = proposal_monitor.error_count()
     try:
         emb = get_embedder()
     except Exception:  # pragma: no cover - make_embedder never raises, belt and braces
-        return {"monitor": monitor, "embedder": "none"}
+        return {"monitor": monitor, "embedder": "none", "monitor_errors": errors}
     if isinstance(emb, StubEmbedder):
         kind = "stub"
     elif isinstance(emb, Embedder):
         kind = "minilm"
     else:
         kind = "none"
-    return {"monitor": monitor, "embedder": kind}
+    return {"monitor": monitor, "embedder": kind, "monitor_errors": errors}
 
 
 class SessionDrift:

@@ -15,7 +15,8 @@ from tests.contract.test_events_contract import CONTRACT, keyset_problems  # noq
 
 
 @pytest.fixture(autouse=True)
-def _reset_cache():
+def _reset_cache(monkeypatch):
+    monkeypatch.setenv("SENTINEL_EMBEDDER", "stub")      # these tests are about plumbing: fast path, explicitly
     live_drift._reset_embedder_cache()
     yield
     live_drift._reset_embedder_cache()
@@ -108,8 +109,13 @@ def test_per_session_isolation():
 
 # ---------- embedder selection ----------
 
-def test_make_embedder_default_is_stub():
-    assert isinstance(make_embedder({}), StubEmbedder)
+def test_make_embedder_default_is_minilm_and_stub_is_explicit(monkeypatch):
+    class Good:
+        def __init__(self, *a, **k): pass
+        def embed(self, text): return [0.0] * 4
+
+    monkeypatch.setattr(live_drift, "Embedder", Good)
+    assert isinstance(make_embedder({}), Good)
     assert isinstance(make_embedder({"SENTINEL_EMBEDDER": "stub"}), StubEmbedder)
 
 
@@ -175,16 +181,18 @@ def test_session_survives_failing_minilm(monkeypatch):
 
 
 # ---- monitor_info (reported by /health) ----------------------------------------------------------
-def test_monitor_info_defaults_to_rules_and_stub(monkeypatch):
+def test_monitor_info_default_monitor_falls_back_to_rules_on_stub(monkeypatch):
     monkeypatch.delenv("SENTINEL_MONITOR", raising=False)
-    monkeypatch.delenv("SENTINEL_EMBEDDER", raising=False)
-    assert live_drift.monitor_info() == {"monitor": "rules", "embedder": "stub"}
-
-
-def test_monitor_info_reports_configured_monitor_name(monkeypatch):
-    monkeypatch.setenv("SENTINEL_MONITOR", "action_similarity")
     monkeypatch.setenv("SENTINEL_EMBEDDER", "stub")
-    assert live_drift.monitor_info()["monitor"] == "action_similarity"
+    assert live_drift.monitor_info() == {"monitor": "rules", "embedder": "stub", "monitor_errors": 0}
+
+
+def test_monitor_info_reports_the_active_monitor_not_the_requested_one(monkeypatch):
+    monkeypatch.setenv("SENTINEL_MONITOR", "learned")
+    monkeypatch.setenv("SENTINEL_EMBEDDER", "stub")
+    assert live_drift.monitor_info()["monitor"] == "rules"          # learned needs embeddings
+    monkeypatch.setenv("SENTINEL_MONITOR", "rules")
+    assert live_drift.monitor_info()["monitor"] == "rules"
 
 
 @pytest.mark.real_model

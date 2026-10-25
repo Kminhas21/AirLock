@@ -21,7 +21,7 @@ MUTANTS = [
      'global _SHARED\n    try:\n        return _SHARED\n    except NameError:\n        _SHARED = Environment()\n        return _SHARED', 1),
     ("B5 LLM retries disabled", "server/llm_call.py", 'retries=2,', 'retries=0,', 1),
     ("B6 circumvention only counted after decision", "server/agent_loop.py",
-     '            await emit(*drift.observe_tool_call(tool_name, node_id))\n', '', 1),
+     '            rules_alerts = drift.observe_tool_call(tool_name, node_id)\n', '            rules_alerts = []\n', 1),
     ("B1 deny path still executes", "server/agent_loop.py", 'if outcome.decision == "approve" and ledger.claim(node_id):', 'if True:', 1),
     ("B5 no terminal event on LLM error", "server/agent_loop.py", 'await emit(events.session_complete("llm_error", "The model API is unavailable."))\n            return', 'return', 1),
     ("B8 contract field renamed", "server/events.py", '"reason": reason, "message": message,', '"why": reason, "message": message,', 1),

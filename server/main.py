@@ -5,13 +5,15 @@ This is the entry point. Run with:
     uvicorn main:app --reload --port 8080
 
 Endpoints:
-    GET  /health  — Returns {"status": "ok", "monitor": <name>, "embedder": "minilm"|"stub"|"none"}
+    GET  /health  — Returns {"status": "ok", "monitor": <ACTIVE monitor>, "embedder": "minilm"|"stub"|"none",
+                             "monitor_errors": <count>}
     GET  /models  — Returns list of available models for the frontend dropdown
     WS   /ws      — WebSocket endpoint for the full agent session
 """
 
 import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,6 +23,7 @@ from auth import check_ws_access
 from providers import get_client, list_models, DEFAULT_MODEL
 from agent_loop import run_agent_loop
 from live_drift import monitor_info
+import proposal_monitor
 from replay import run_replay
 from mock_environment import reset_environment
 
@@ -28,7 +31,14 @@ logger = logging.getLogger(__name__)
 
 SCENARIOS = ("aligned", "adversarial")
 
-app = FastAPI(title="SENTINEL Backend")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Load MiniLM (Seismograph + proposal monitor) in the background so the first session does not pay for it.
+    proposal_monitor.warm_up_in_background()
+    yield
+
+
+app = FastAPI(title="SENTINEL Backend", lifespan=lifespan)
 
 # Allow the Vite dev server (frontend) to connect.
 # Without this, the browser blocks WebSocket connections from localhost:5173

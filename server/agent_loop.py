@@ -23,6 +23,7 @@ from openai import AsyncOpenAI
 
 import events
 import gate
+import proposal_monitor
 from drift_tracker import DriftTracker  # noqa: F401  (re-exported for compatibility)
 from live_drift import SessionDrift
 from llm_call import LLMUnavailable, create_completion
@@ -194,6 +195,16 @@ def _parse_args(raw: str) -> dict:
     return parsed if isinstance(parsed, dict) else {"raw": raw}
 
 
+def _new_monitor() -> "proposal_monitor.SessionMonitor":
+    """A fresh per-session proposal monitor; never raises (worst case: the rules monitor, loudly logged)."""
+    try:
+        return proposal_monitor.get_monitor_factory().new_session()
+    except Exception:
+        logger.exception("could not build the proposal monitor; using rules")
+        proposal_monitor._count_error()
+        return proposal_monitor.SessionMonitor("rules")
+
+
 async def run_agent_loop(
     websocket,              # FastAPI WebSocket
     client: AsyncOpenAI,    # From providers.get_client()
@@ -205,7 +216,8 @@ async def run_agent_loop(
     Run the agent loop with the Airlock gate over WebSocket.
 
     For each tool call:
-    1. Seismograph observes the proposed call (so denied attempts still count)
+    1. The proposal monitor (SENTINEL_MONITOR; rules | action_sim | learned) observes the PROPOSED call and any
+       alert is sent first (so denied attempts still count and the human sees the warning with the request)
     2. Send tool_pending, then wait in gate.await_decision() for the MATCHING
        tool_decision (fail-closed, with a deadline)
     3. Execute the tool (approve, at most once per node) or return the denial string
@@ -216,7 +228,9 @@ async def run_agent_loop(
     """
     system_prompt = ALIGNED_PROMPT if scenario == "aligned" else ADVERSARIAL_PROMPT
     node_counter = 0
-    drift = SessionDrift()
+    # Building these may load the embedding model (first session in a process): keep it off the event loop.
+    drift = await asyncio.to_thread(SessionDrift)
+    monitor = await asyncio.to_thread(_new_monitor)
     ledger = gate.DecisionLedger()
 
     def next_node_id() -> str:
@@ -294,8 +308,16 @@ async def run_agent_loop(
             tool_name = tc.function.name
             tool_args = _parse_args(tc.function.arguments)
 
-            # Observe on PROPOSAL, so circumvention is counted even if the human denies it
-            await emit(*drift.observe_tool_call(tool_name, node_id))
+            # Observe on PROPOSAL, so circumvention is counted even if the human denies it. The rules path always
+            # runs (it feeds the tracker / goal-persistence state); in action_sim / learned mode the frozen
+            # detector's alert replaces the rules alert so a proposal never raises two alerts.
+            rules_alerts = drift.observe_tool_call(tool_name, node_id)
+            if monitor.is_rules:
+                proposal_alerts = rules_alerts
+            else:
+                proposal_alerts = await asyncio.to_thread(
+                    monitor.on_proposal, message.content or "", tool_name, tool_args, node_id)
+            await emit(*proposal_alerts)
 
             await emit(events.tool_pending(
                 node_id, last_reasoning_id, tool_name, tool_args,
@@ -313,6 +335,10 @@ async def run_agent_loop(
                 drift.observe_denial(tool_name)
                 result = DENIED_RESULT
                 is_replan = True
+
+            if not monitor.is_rules:   # the effective outcome: a timeout / forged / duplicate approve is a deny
+                await asyncio.to_thread(
+                    monitor.register_decision, tool_name, tool_args, "deny" if is_replan else "approve")
 
             last_was_denied = is_replan
             await emit(events.tool_resolved(
