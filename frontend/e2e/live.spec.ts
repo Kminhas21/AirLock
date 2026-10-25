@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 
-const LLM = "http://127.0.0.1:9101";
+const LLM = `http://127.0.0.1:${process.env.LLM_PORT ?? 9101}`;
 
 /** Collect every WebSocket frame the page receives/sends, so assertions are about the wire, not just pixels. */
 function recordFrames(page: Page) {

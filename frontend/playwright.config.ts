@@ -2,8 +2,9 @@ import { defineConfig } from "@playwright/test";
 
 // Real stack: Vite UI <-> real WebSocket <-> real FastAPI backend <-> HTTP LLM endpoint (scripted).
 // Chromium comes from the pre-installed browser (no download).
-const LLM_PORT = 9101;
-const API_PORT = 8081;
+// Ports are overridable: LLM_PORT / API_PORT (e2e/helpers/traces.ts reads the same variables).
+const LLM_PORT = Number(process.env.LLM_PORT ?? 9101);
+const API_PORT = Number(process.env.API_PORT ?? 8081);
 const UI_PORT = 5173; // the backend's default Origin allow-list is http://localhost:5173
 
 export default defineConfig({
@@ -23,6 +24,7 @@ export default defineConfig({
       command: `python ../tests/browser/fake_llm.py ${LLM_PORT}`,
       url: `http://127.0.0.1:${LLM_PORT}/_calls`,
       reuseExistingServer: false,
+      env: process.env.FAKE_LLM_TRACES ? { FAKE_LLM_TRACES: process.env.FAKE_LLM_TRACES } : {},
     },
     {
       command: `python -m uvicorn main:app --port ${API_PORT} --log-level warning`,
@@ -33,7 +35,11 @@ export default defineConfig({
         OPENROUTER_API_KEY: "test-key",
         OPENROUTER_BASE_URL: `http://127.0.0.1:${LLM_PORT}/v1`,
         SENTINEL_GATE_TIMEOUT_S: "30",
-        SENTINEL_EMBEDDER: process.env.SENTINEL_EMBEDDER ?? "stub",
+        // The real MiniLM model (cached locally, never downloaded) is the default so a stub fallback is visible:
+        // replay-traces asserts /health reports the embedder in EXPECT_EMBEDDER (default minilm).
+        SENTINEL_EMBEDDER: process.env.SENTINEL_EMBEDDER ?? "minilm",
+        HF_HUB_OFFLINE: "1",
+        ...(process.env.SENTINEL_MONITOR ? { SENTINEL_MONITOR: process.env.SENTINEL_MONITOR } : {}),
       },
     },
     {
