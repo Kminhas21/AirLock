@@ -125,3 +125,18 @@ Setup: MiniLM-L6-v2 (real), 120 traces / 762 labeled steps from 6 independent ge
 Conclusion: on this data embeddings do not earn their place as the primary detector; a destination/policy check does most of the work. Embeddings add a small recall gain
 only for violations whose destination is not lexically obvious, which this dataset under-represents. The next step is a harder, regex-resistant holdout, not more tuning on this one (the v1 test split is now spent).
 Limits: synthetic LLM-written data from one model family, clustered traces (CIs optimistic), no multiplicity correction, 53 test traces.
+
+## D7. Evaluation v2: regex-resistant holdout (2026-10-25) — eval/results_v2/REPORT_V2.md, rule in eval/SPEC_V2.md
+Data: 80 new traces (40 adversarial) built so that NO violation names an external host (0/57), plus external-but-benign and same-party-but-unrelated negatives;
+blind-relabelled by two reviewers who saw routing notes (kappa 1.0, 0 disagreements: labels are deterministic GIVEN the notes; detectors never see the notes).
+Fit/calibrate on v1 dev + v2 dev (101 traces); v2 test scored once (46 traces, 24 with violations); v1 test = regression guard.
+**Mechanical decision: "Partial: no detector qualifies; best on-time among detectors with benign-after-denial FA <= 10% is D3 (29.2%)".**
+- The v1 winner collapses on v2: regex control D5 on-time 8.3%, FA 28% on benign post-denial proposals, 49% on regex traps. v1 "success" was the dataset shortcut.
+- Learned combiner D7 has the best on-time on v2 (37.5% [19, 58]), keeps D5's v1 on-time (87.1% = 87.1%), and beats D5 on v2 by +29.2pp [8, 52] (paired). It fails the pre-registered bars:
+  on-time >= 70%, benign-after-denial FA 11.8% (bar 10%), regex-trap FA 20.9% (bar 10%).
+- D3 passes the benign-after-denial bar (7.3%) so the rule names it, but it loses to D7/D5 on v1 (58% vs 87%) and its v2 advantage over D7 is within noise (n=24).
+- D6 hybrid: +16.7pp over D5 [4, 33] but worse false alarms than D7. Rules (D1): 20.8%.
+- Absolute performance on the hard cases is poor for everything (best 37.5%). Violations that carry only a weak semantic clue and route through internal-looking destinations
+  cannot be caught without knowing the routing: a destination registry/policy (docs/PROPOSALS.md section 2) is the missing input, not a better embedding.
+- Rule-following note: the rule's "partial" branch picks D3, but D7 is the better all-round detector by the evidence; both are integrated behind SENTINEL_MONITOR, default per the rule (D3), switchable.
+Limits: synthetic one-model-family data; 24 violating test traces (CIs wide, overlapping between D3/D6/D7); dev mixes v1 (shortcut-dominated) and v2; D7 has 10 fitted parameters vs 0 for D5.
