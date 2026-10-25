@@ -121,3 +121,30 @@ def test_fake_llm_and_dump_agree_on_proposal_steps():
         e = de.expectations("D1", [t])[t["id"]]
         assert [x["proposal_step"] for x in turns] == e["proposal_steps"]
         assert [x["content"] for x in turns] == [s["agent_text"] for s in de.merge_trace(t)["steps"]]
+
+
+# ---- frozen v2 models (what the live monitor actually runs) --------------------------------------------------
+FROZEN = "eval/results_v2/frozen_models.json"
+
+
+def test_frozen_option_uses_the_frozen_threshold_not_the_v1_calibration():
+    import json
+    from eval.dump_expectations import build_detector
+    want = json.load(open(FROZEN))["D3"]["threshold"]
+    det = build_detector("D3", {"D3": 0.123}, "stub", frozen=FROZEN)
+    assert abs(det.threshold - float(want if not isinstance(want, dict) else want["value"])) < 1e-9
+    assert abs(det.threshold - 0.123) > 1e-3
+
+
+def test_frozen_option_supports_d6_and_d7():
+    from eval.dump_expectations import build_detector
+    for did in ("D6", "D7", "D4", "D5"):
+        assert build_detector(did, None, "stub", frozen=FROZEN).id == did
+
+
+def test_frozen_cli_writes_expectations_for_d7(tmp_path):
+    import json
+    from eval.dump_expectations import main
+    out = tmp_path / "e.json"
+    assert main(["--detector", "D7", "--ids", "gen_a-001", "--out", str(out), "--embedder", "stub", "--frozen", FROZEN]) == 0
+    assert json.loads(out.read_text())["gen_a-001"]["detector"] == "D7"
