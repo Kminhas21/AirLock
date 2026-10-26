@@ -200,3 +200,70 @@ helpers `degrade(reg, fraction, seed)` and `corrupt(reg, fraction, seed)`, both 
   are not seen; `ALTER`/`DROP` are not destinations. Only the first `COPY` of a statement is examined.
 - Inputs are cut at 200,000 characters per string and nesting at depth 12.
 - `merge` detects conflicts only for entries with the same match key and value; run `lint` on the result.
+
+## Running it live
+
+The registry detectors are **opt-in** (DECISIONS.md D9: the pre-registered criteria were not met, so the default monitor is
+unchanged). Switch them on per deployment:
+
+```
+SENTINEL_MONITOR=registry_learned      # or: registry   (frozen D9 / frozen D8)
+SENTINEL_REGISTRY=/etc/sentinel/registry.json
+# optional
+SENTINEL_REGISTRY_MODEL=eval/results_registry/frozen_registry_models.json   # the default
+SENTINEL_MONITOR_THRESHOLD=0.7          # UNCALIBRATED override, see below
+```
+
+### Writing a registry
+
+1. Start from the format above. List only what the defaults get wrong: **relays** (internal-looking destinations that
+   deliver to an outside party: aliases, bridged channels, forwarding webhooks, synced shares) and **external** parties.
+   Everything not listed is resolved by the defaults (`team.com`, `/project`, `#internal-*` are internal; anything else is an
+   unregistered external party named after its domain / channel / first path component).
+2. Give every entry a stable `id`, the `party` it really reaches (use the SAME slug for every destination of one company)
+   and a `note` saying why you believe it (ticket, directory entry, config). The note is shown to the human in the alert.
+3. Lint it before pointing a server at it:
+   `cd server && python -m registry_cli lint /etc/sentinel/registry.json` (exit 0 = usable).
+   `python -m registry_cli resolve ... --tool send_email --args '{"to":"partners@team.com"}'` shows what a proposal resolves to.
+4. To combine registries from several teams: `server.registry.merge([...])` reports conflicts (same destination, different
+   decision; the earlier registry wins); `scripts/make_replay_registry.py` is a worked example that refuses to write on conflicts.
+
+### What happens at runtime
+
+- The file is read, parsed and **linted at the start of every session** (cached by path + mtime + size + inode). Edit it and the
+  next session uses the new content without a restart; sessions that are already running keep the registry they started with.
+  Each session has its own detector state and its own copy of the registry, so concurrent sessions cannot affect each other.
+- An alert is raised **before** `tool_pending`: `severity: critical`, `trigger: registry_denied_party_match`, linked to the
+  proposal's node. Example (D9):
+  "Registry match: send_email to partners@team.com reaches party 'acme' - registry entry r1 (relay, party 'acme'): "alias,
+  forwards to Acme staff (ticket OPS-12)". An earlier DENIED proposal reached the same party 'acme': send_email to
+  dana.whitlock@acme-corp.example. Registry-learned score 1.00 exceeds the 0.42 threshold; payload similarity 0.98. Top
+  feature contributions: reaches_relay +4.73, cos_payload +4.43."
+  D8 ends with "Payload similarity 0.98 >= t_same 0.28." instead of the contributions. `drift_score` / `threshold` are the
+  compared numbers (D8: payload cosine vs `t_same` or `t_other`; D9: probability vs threshold).
+- **Fallback.** If `SENTINEL_REGISTRY` is unset, missing, unparseable or has lint errors (each error is logged, the whole file is
+  rejected), if the frozen file is missing/corrupt, or if the embedder is the stub, the server logs a WARNING and runs
+  `action_sim` (frozen D3; `rules` if even that cannot run). It does NOT run a registry-trained detector without a registry:
+  in the evaluation that was worse than not having one (D9 16.7% on-time vs D7 37.5%). It never refuses to start and never
+  crashes a session. `GET /health` shows `monitor` (active), `requested_monitor` and `registry` (`null` during a fallback,
+  else `{"path", "digest", "entries"}`), so a silent downgrade is visible. Fix the file and the next session recovers.
+- `SENTINEL_MONITOR_THRESHOLD` (finite float in [0, 1]) replaces D9's threshold, or both of D8's (`t_same = t_other`). It is
+  **uncalibrated**: the frozen thresholds are the only pre-registered ones. The post-hoc sweep
+  (`eval/results_registry/D9_threshold_sweep_DESCRIPTIVE.md`) suggests 0.70-0.80 trades false alarms for nothing on v2 TEST, but
+  that test set had already been seen, the registries were extracted from the notes that define the labels, and it is 24
+  violating traces: it is a hint, not a calibration. Invalid values are ignored with a WARNING. It does not affect the other modes.
+
+### Honest limits (DECISIONS.md D9)
+
+- **Verdict: shortfall.** No registry detector met the pre-registered `full` criteria. D9 on a complete registry alerts on the
+  first violation of 24/24 v2 test traces, but raises false alarms on 16.4% of benign proposals after a denial and 27.9% of
+  proposals to the regex-trap destinations (bars: 10%). D8 is the opposite: few false alarms (0.7% overall) but 50% on-time.
+- **Quality is the registry's quality.** D9 on-time with 30% of the entries missing: 74%; 60% missing: 47.5%; 10% of entries
+  wrong: 96%; no registry at all: 16.7%. A stale or incomplete registry silently weakens the monitor, and the fallback only
+  covers a registry that is absent or invalid, not one that is wrong.
+- The evaluated registries are an **upper bound**: they were extracted from the same routing notes that define the labels, by
+  one model family; only 17 of 40 v2 dev traces had entries; the v2 test set was not fresh. Real operators will write
+  worse registries. A fresh holdout with operator-style (incomplete, stale) registries has not been run.
+- Synthetic data from one model family, a scripted-LLM verification (no real model), and the destination scanner is lexical
+  (see Decisions and limitations above): a destination hidden in free text or built at run time is invisible.
+- The alert is advice to the human gate: it never blocks an action by itself.

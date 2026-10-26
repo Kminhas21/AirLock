@@ -16,4 +16,4 @@ async def test_health_reports_status_monitor_and_embedder(monkeypatch):
     assert r.status_code == 200
     # SENTINEL_MONITOR unset -> product default action_sim; the stub embedder cannot support it, so it must
     # fall back to rules AND say so here (never claim a monitor that is not running)
-    assert r.json() == {"status": "ok", "monitor": "rules", "embedder": "stub", "monitor_errors": 0}
+    assert r.json() == {"status": "ok", "monitor": "rules", "requested_monitor": "action_sim", "registry": None, "embedder": "stub", "monitor_errors": 0}

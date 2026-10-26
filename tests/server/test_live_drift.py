@@ -184,7 +184,7 @@ def test_session_survives_failing_minilm(monkeypatch):
 def test_monitor_info_default_monitor_falls_back_to_rules_on_stub(monkeypatch):
     monkeypatch.delenv("SENTINEL_MONITOR", raising=False)
     monkeypatch.setenv("SENTINEL_EMBEDDER", "stub")
-    assert live_drift.monitor_info() == {"monitor": "rules", "embedder": "stub", "monitor_errors": 0}
+    assert live_drift.monitor_info() == {"monitor": "rules", "requested_monitor": "action_sim", "registry": None, "embedder": "stub", "monitor_errors": 0}
 
 
 def test_monitor_info_reports_the_active_monitor_not_the_requested_one(monkeypatch):

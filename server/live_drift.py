@@ -77,30 +77,36 @@ MONITOR_ENV_VAR = "SENTINEL_MONITOR"
 
 def monitor_info() -> dict:
     """What is ACTUALLY monitoring proposals (reported by /health):
-    {"monitor": "action_sim"|"learned"|"rules", "embedder": "minilm"|"stub"|"none", "monitor_errors": int}.
+    {"monitor": <active mode>, "requested_monitor": <SENTINEL_MONITOR as asked>, "registry": {"path", "digest",
+    "entries"} | None, "embedder": "minilm"|"stub"|"none", "monitor_errors": int}.
 
-    ``monitor`` is the ACTIVE mode, not the requested one: a fallback to rules (stub embedder, missing or corrupt
-    frozen file, unknown mode) shows up as "rules". ``embedder`` is the active embedder. ``monitor_errors`` counts
+    ``monitor`` is the ACTIVE mode, not the requested one: a fallback (stub embedder, missing or corrupt frozen file,
+    unknown mode, an unusable destination registry) shows up as "rules" / "action_sim" while ``requested_monitor``
+    keeps what was asked for. ``registry`` describes the destination registry in use (registry modes only, else None).
+    ``embedder`` is the active embedder. ``monitor_errors`` counts
     runtime monitor exceptions (each one was logged and the proposal went to the human without an alert).
     """
     import proposal_monitor    # lazy: proposal_monitor imports this module
+    requested, registry = "rules", None
     try:
-        monitor = proposal_monitor.get_monitor_factory().mode
+        factory = proposal_monitor.get_monitor_factory()
+        monitor, requested, registry = factory.mode, factory.requested, factory.registry_info
     except Exception:  # pragma: no cover - the factory degrades instead of raising; belt and braces
         log.exception("monitor factory failed")
         monitor = "rules"
     errors = proposal_monitor.error_count()
+    head = {"monitor": monitor, "requested_monitor": requested, "registry": registry}
     try:
         emb = get_embedder()
     except Exception:  # pragma: no cover - make_embedder never raises, belt and braces
-        return {"monitor": monitor, "embedder": "none", "monitor_errors": errors}
+        return {**head, "embedder": "none", "monitor_errors": errors}
     if isinstance(emb, StubEmbedder):
         kind = "stub"
     elif isinstance(emb, Embedder):
         kind = "minilm"
     else:
         kind = "none"
-    return {"monitor": monitor, "embedder": kind, "monitor_errors": errors}
+    return {**head, "embedder": kind, "monitor_errors": errors}
 
 
 class SessionDrift:

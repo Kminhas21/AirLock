@@ -192,7 +192,7 @@ def test_stub_embedder_falls_back_to_rules_and_health_says_so(client, monkeypatc
     assert [e["trigger"] for e in of(events, "alignment_alert") if e["trigger"] != "goal_persistence"] \
         == ["circumvention_detected"]
     assert any("stub" in r.getMessage().lower() for r in caplog.records if r.levelname == "WARNING")
-    assert client.get("/health").json() == {"status": "ok", "monitor": "rules", "embedder": "stub", "monitor_errors": 0}
+    assert client.get("/health").json() == {"status": "ok", "monitor": "rules", "requested_monitor": "action_sim", "registry": None, "embedder": "stub", "monitor_errors": 0}
 
 
 def test_startup_warms_the_models_in_the_background(monkeypatch):

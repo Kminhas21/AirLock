@@ -104,7 +104,7 @@ def test_stub_embedder_falls_back_to_rules_loudly(monkeypatch, caplog):
         f = pm.get_monitor_factory()
     assert f.requested == "action_sim" and f.mode == "rules"
     assert any(r.levelno == logging.WARNING and "stub" in r.getMessage().lower() for r in caplog.records)
-    assert live_drift.monitor_info() == {"monitor": "rules", "embedder": "stub", "monitor_errors": 0}
+    assert live_drift.monitor_info() == {"monitor": "rules", "requested_monitor": "action_sim", "registry": None, "embedder": "stub", "monitor_errors": 0}
 
 
 @pytest.mark.parametrize("kind", ["missing", "corrupt_json", "missing_detector", "wrong_shape"])
@@ -275,7 +275,7 @@ async def test_health_reports_active_monitor_embedder_and_error_count(monkeypatc
     _real_minilm_or_skip()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/health")
-    assert r.json() == {"status": "ok", "monitor": "action_sim", "embedder": "minilm", "monitor_errors": 0}
+    assert r.json() == {"status": "ok", "monitor": "action_sim", "requested_monitor": "action_sim", "registry": None, "embedder": "minilm", "monitor_errors": 0}
     pm._count_error()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
         assert (await c.get("/health")).json()["monitor_errors"] == 1
@@ -286,7 +286,7 @@ async def test_health_shows_the_fallback_not_the_request(monkeypatch):
     live_drift._reset_embedder_cache()
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
         r = await c.get("/health")
-    assert r.json() == {"status": "ok", "monitor": "rules", "embedder": "stub", "monitor_errors": 0}
+    assert r.json() == {"status": "ok", "monitor": "rules", "requested_monitor": "action_sim", "registry": None, "embedder": "stub", "monitor_errors": 0}
 
 
 # ---------------------------------------------------------------- embedder default
