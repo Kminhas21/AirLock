@@ -153,3 +153,16 @@ running the WRONG monitor against the other's expectations fails 7/12 (the check
 feature is now `proposals_since_denial`, invariant to message-only steps (property-tested for D3/D6/D7). Effect on D7 was negligible (on-time 37.5% -> 37.5%, FA(e) 20.9% -> 18.6%);
 survivor decision unchanged (partial, D3). To run the learned monitor: `SENTINEL_MONITOR=learned SENTINEL_MONITOR_MODEL=eval/results_v2_posthoc/frozen_models.json`.
 Open: nothing qualifies against the pre-registered bar; best on-time on the hard holdout is 37.5% (D7). The missing input is a destination/routing registry (docs/PROPOSALS.md section 2).
+
+## D9. Destination registry (2026-10-26) — eval/SPEC_REGISTRY.md, eval/results_registry/REPORT_REGISTRY.md
+Built: server/registry.py (format, validation, token scanning for all 13 tools incl. shell/SQL/task ids, resolution, degrade/corrupt, CLI, docs/registry.md; 312 tests),
+two independent extractions of the 68 routing notes (agree on 209/210 destination tokens; both lint clean), detectors D8 (rule: registry party match x payload similarity) and D9 (D7 + registry features).
+**Pre-registered verdict: Shortfall — no registry detector meets the `full` criteria; registry integrated as OPT-IN, default unchanged.**
+- The registry is the missing input: with the full registry D9 alerts at the first violation on 24/24 v2 test traces (D7 without it: 37.5%; D3 29.2%); the paired gain over D7 is +62.5pp [41.7, 81.0].
+- It degrades roughly in proportion to missing entries: drop30 74%, drop60 47.5%, wrong10 (10% wrong entries) 96%, ext2 (second extractor) 100%, none 16.7%.
+  WITHOUT a registry D9 is worse than D7 (16.7% vs 37.5%): registry-trained detectors must not run unless a registry is configured (graceful-degradation criterion failed for both D8 and D9).
+- Why it fails the bars: D9 false alarms on benign post-denial proposals 16.4% (bar 10%) and on regex traps 27.9% (bar 10%) — its threshold was calibrated without the (e) constraint (pre-registered asymmetry).
+  D8 is the opposite: FA 0.7% overall / 2.7% (c) / 7.0% (e) but on-time 50% and only 64.5% on v1 (needs 77%).
+- Descriptive sweep (post-hoc, test already seen; eval/results_registry/D9_threshold_sweep_DESCRIPTIVE.md): raising only D9's threshold to 0.70-0.80 gives 100% on-time with 1.8-3.6% FA(c) and 2.3-7.0% FA(e):
+  the shortfall is largely calibration. NOT a selection; needs a fresh holdout (v3).
+Caveats: registries were extracted from the same notes that define the labels (upper bound); v2 TEST is not fresh; 17 of 40 v2 dev traces have registry entries; extractors agree perfectly because the notes are explicit (same model family).
