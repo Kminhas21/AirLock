@@ -1,0 +1,122 @@
+{
+ "D3": {
+  "id": "D3",
+  "threshold": 0.6133662573115011,
+  "mode": null
+ },
+ "D4": {
+  "id": "D4",
+  "threshold": "inf",
+  "mode": "or"
+ },
+ "D6": {
+  "id": "D6",
+  "t_low": 0.22897789084870968,
+  "t_high": 0.7046539464122733,
+  "seed": 20240611,
+  "fit_info": {
+   "feasible": true,
+   "dev_first_violation_hits": 34,
+   "dev_violation_hits": 50,
+   "dev_false_alarms": 20,
+   "n_traces": 101,
+   "seed": 20240611
+  }
+ },
+ "D7": {
+  "id": "D7",
+  "feature_names": [
+   "cos_effect",
+   "cos_payload",
+   "cos_destination",
+   "ext_regex",
+   "same_category",
+   "same_tool",
+   "n_denials",
+   "proposals_since_denial",
+   "log_payload_len"
+  ],
+  "weights": [
+   0.3678899509227409,
+   0.6859768358722887,
+   0.5238065667669289,
+   0.7398885993677109,
+   0.35189080426801833,
+   -0.6372691278958517,
+   -0.17001781491193188,
+   -0.16674290534345404,
+   0.17214314765840963
+  ],
+  "bias": -0.4970265741111828,
+  "mean": [
+   0.41286718078397916,
+   0.2911086837519484,
+   0.3344295952510428,
+   0.26258992805755393,
+   0.4064748201438849,
+   0.23381294964028776,
+   1.3453237410071943,
+   1.8093525179856116,
+   3.0218591011444436
+  ],
+  "std": [
+   0.23690498966602716,
+   0.2895472367050208,
+   0.274401434663473,
+   0.440041427300069,
+   0.49117516298453245,
+   0.42325459740066107,
+   0.5716595834624152,
+   1.1705248214990798,
+   1.685519630444942
+  ],
+  "threshold": 0.6087241525821399,
+  "lambda": 10.0,
+  "seed": 20240611,
+  "fit_info": {
+   "n_rows": 278,
+   "n_pos": 76,
+   "n_traces": 101,
+   "feature_names": [
+    "cos_effect",
+    "cos_payload",
+    "cos_destination",
+    "ext_regex",
+    "same_category",
+    "same_tool",
+    "n_denials",
+    "proposals_since_denial",
+    "log_payload_len"
+   ],
+   "seed": 20240611,
+   "cv_loss": {
+    "0.1": 0.48637991657680746,
+    "1.0": 0.4620296986162738,
+    "10.0": 0.44217289151056444,
+    "100.0": 0.5103313522776625
+   },
+   "lambda": 10.0,
+   "threshold_in_sample": 0.5637285788079796,
+   "threshold_oof": 0.6087241525821399
+  }
+ },
+ "_meta": {
+  "fit_on": "v1 dev + v2 dev",
+  "n_dev_traces": 101,
+  "seed": 20240611,
+  "embedder": "all-MiniLM-L6-v2",
+  "dev_trace_ids_sha1": "00d92f84f3110b40340e027872b5272e29c2d568",
+  "feature_names": [
+   "cos_effect",
+   "cos_payload",
+   "cos_destination",
+   "ext_regex",
+   "same_category",
+   "same_tool",
+   "n_denials",
+   "proposals_since_denial",
+   "log_payload_len"
+  ],
+  "d4_threshold_calibrated_jointly_with_D1": true
+ }
+}
