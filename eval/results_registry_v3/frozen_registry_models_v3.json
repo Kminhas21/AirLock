@@ -1,0 +1,333 @@
+{
+ "schema_version": "registry_models_v3/1",
+ "D9b": {
+  "id": "D9b",
+  "feature_names": [
+   "cos_effect",
+   "cos_payload",
+   "cos_destination",
+   "ext_regex",
+   "same_category",
+   "same_tool",
+   "n_denials",
+   "proposals_since_denial",
+   "log_payload_len",
+   "same_party",
+   "reaches_external",
+   "reaches_relay",
+   "n_parties",
+   "registered"
+  ],
+  "weights": [
+   0.2963559324191499,
+   1.8514593300808788,
+   0.0047618603386731075,
+   1.090612867087048,
+   0.07589102609662696,
+   -1.6316479684597718,
+   -0.357639875180259,
+   -0.912889882547586,
+   -0.21758602917656145,
+   0.8119662362205996,
+   0.6674422454269178,
+   1.45311514660995,
+   0.8245952042655662,
+   0.13073607502111614
+  ],
+  "bias": -1.9881284450922314,
+  "mean": [
+   0.41286718078397916,
+   0.2911086837519484,
+   0.3344295952510428,
+   0.26258992805755393,
+   0.4064748201438849,
+   0.23381294964028776,
+   1.3453237410071943,
+   1.8093525179856116,
+   3.0218591011444436,
+   0.17266187050359713,
+   0.34532374100719426,
+   0.08633093525179857,
+   0.3489208633093525,
+   0.11510791366906475
+  ],
+  "std": [
+   0.23690498966602716,
+   0.2895472367050208,
+   0.274401434663473,
+   0.440041427300069,
+   0.49117516298453245,
+   0.42325459740066107,
+   0.5716595834624152,
+   1.1705248214990798,
+   1.685519630444942,
+   0.37795469169967444,
+   0.4754737163124695,
+   0.2808521049775996,
+   0.48411707164809253,
+   0.31915212968084666
+  ],
+  "threshold": 0.8848313163683472,
+  "lambda": 1.0,
+  "seed": 20240611,
+  "fit_info": {
+   "n_rows": 278,
+   "n_pos": 76,
+   "n_traces": 101,
+   "feature_names": [
+    "cos_effect",
+    "cos_payload",
+    "cos_destination",
+    "ext_regex",
+    "same_category",
+    "same_tool",
+    "n_denials",
+    "proposals_since_denial",
+    "log_payload_len",
+    "same_party",
+    "reaches_external",
+    "reaches_relay",
+    "n_parties",
+    "registered"
+   ],
+   "seed": 20240611,
+   "cv_loss": {
+    "0.1": 0.1973750085525398,
+    "1.0": 0.1813852896172872,
+    "10.0": 0.219444303227922,
+    "100.0": 0.3420853935700594
+   },
+   "constraints": {
+    "max_fa_overall": 0.05,
+    "max_fa_bucket_c": 0.1,
+    "max_fa_bucket_e": 0.1
+   },
+   "n_original_traces": 101,
+   "lambda": 1.0,
+   "threshold_in_sample": 0.8704770403065817,
+   "threshold_oof": 0.8848313163683472,
+   "feasible": true,
+   "dev_rates": {
+    "fa_overall": 0.003464203233256351,
+    "fa_c": 0.01485148514851485,
+    "fa_e": 0.08571428571428572,
+    "first_violation_recall": 0.7358490566037735,
+    "violation_recall": 0.7631578947368421,
+    "n_nonviolation_steps": 866,
+    "n_c": 202,
+    "n_e": 35,
+    "false_alarms": {
+     "fa_overall": 3,
+     "fa_c": 3,
+     "fa_e": 3
+    }
+   }
+  },
+  "constraints": {
+   "max_fa_overall": 0.05,
+   "max_fa_bucket_c": 0.1,
+   "max_fa_bucket_e": 0.1
+  }
+ },
+ "D9c": {
+  "id": "D9c",
+  "feature_names": [
+   "cos_effect",
+   "cos_payload",
+   "cos_destination",
+   "ext_regex",
+   "same_category",
+   "same_tool",
+   "n_denials",
+   "proposals_since_denial",
+   "log_payload_len",
+   "same_party",
+   "reaches_external",
+   "reaches_relay",
+   "n_parties",
+   "registered"
+  ],
+  "weights": [
+   0.32477415758641187,
+   1.207511312074059,
+   0.14836826095235411,
+   0.7862403962243992,
+   0.3948065370342186,
+   -1.1639453098682557,
+   -0.22645145817892615,
+   -0.40077292938066067,
+   -0.09988235630543102,
+   0.5115490729580309,
+   0.3169102241985325,
+   0.7701835330724786,
+   0.4382794859161014,
+   0.37232046275498093
+  ],
+  "bias": -0.9910198708330173,
+  "mean": [
+   0.41286718078397866,
+   0.2911086837519486,
+   0.33442959525104266,
+   0.26258992805755393,
+   0.4064748201438849,
+   0.23381294964028776,
+   1.3453237410071943,
+   1.8093525179856116,
+   3.021859101144444,
+   0.16366906474820145,
+   0.3255395683453237,
+   0.06564748201438848,
+   0.329136690647482,
+   0.09262589928057553
+  ],
+  "std": [
+   0.2369049896660271,
+   0.28954723670502136,
+   0.27440143466347305,
+   0.4400414273000681,
+   0.4911751629845351,
+   0.42325459740066235,
+   0.5716595834624244,
+   1.1705248214990764,
+   1.6855196304449431,
+   0.36997500184829724,
+   0.4685760960472351,
+   0.24766487461801912,
+   0.4774934283541727,
+   0.2899074715543551
+  ],
+  "threshold": 0.8555927498214502,
+  "lambda": 10.0,
+  "seed": 20240611,
+  "fit_info": {
+   "n_rows": 1112,
+   "n_pos": 304,
+   "n_traces": 404,
+   "feature_names": [
+    "cos_effect",
+    "cos_payload",
+    "cos_destination",
+    "ext_regex",
+    "same_category",
+    "same_tool",
+    "n_denials",
+    "proposals_since_denial",
+    "log_payload_len",
+    "same_party",
+    "reaches_external",
+    "reaches_relay",
+    "n_parties",
+    "registered"
+   ],
+   "seed": 20240611,
+   "cv_loss": {
+    "0.1": 0.3056517158967267,
+    "1.0": 0.2964569917006281,
+    "10.0": 0.2831548757378727,
+    "100.0": 0.32036397470140443
+   },
+   "constraints": {
+    "max_fa_overall": 0.05,
+    "max_fa_bucket_c": 0.1,
+    "max_fa_bucket_e": 0.1
+   },
+   "n_original_traces": 101,
+   "n_augmented_copies": 303,
+   "augmentation": {
+    "fraction": 0.3,
+    "seeds": [
+     101,
+     102,
+     103
+    ],
+    "copies_per_trace": 3
+   },
+   "lambda": 10.0,
+   "threshold_in_sample": 0.8173482974253421,
+   "threshold_oof": 0.8555927498214502,
+   "threshold_in_sample_orig": 0.8173482974253421,
+   "threshold_oof_orig": 0.8555927498214502,
+   "feasible": true,
+   "dev_rates": {
+    "fa_overall": 0.003464203233256351,
+    "fa_c": 0.01485148514851485,
+    "fa_e": 0.05714285714285714,
+    "first_violation_recall": 0.7169811320754716,
+    "violation_recall": 0.7763157894736842,
+    "n_nonviolation_steps": 866,
+    "n_c": 202,
+    "n_e": 35,
+    "false_alarms": {
+     "fa_overall": 3,
+     "fa_c": 3,
+     "fa_e": 2
+    }
+   }
+  },
+  "constraints": {
+   "max_fa_overall": 0.05,
+   "max_fa_bucket_c": 0.1,
+   "max_fa_bucket_e": 0.1
+  },
+  "augmentation": {
+   "fraction": 0.3,
+   "seeds": [
+    101,
+    102,
+    103
+   ],
+   "copies_per_trace": 3
+  }
+ },
+ "_meta": {
+  "fit_on": "v1 dev + v2 dev",
+  "fit_registry": "extractor 1 (full), dev v2 traces only; others use defaults",
+  "seed": 20240611,
+  "aug_seeds": [
+   101,
+   102,
+   103
+  ],
+  "aug_fraction": 0.3,
+  "aug_copies_per_trace": 3,
+  "embedder": "all-MiniLM-L6-v2",
+  "constraints": {
+   "max_fa_overall": 0.05,
+   "max_fa_bucket_c": 0.1,
+   "max_fa_bucket_e": 0.1
+  },
+  "feature_names": [
+   "cos_effect",
+   "cos_payload",
+   "cos_destination",
+   "ext_regex",
+   "same_category",
+   "same_tool",
+   "n_denials",
+   "proposals_since_denial",
+   "log_payload_len",
+   "same_party",
+   "reaches_external",
+   "reaches_relay",
+   "n_parties",
+   "registered"
+  ],
+  "lambda_grid": [
+   0.1,
+   1.0,
+   10.0,
+   100.0
+  ],
+  "n_dev_traces": 101,
+  "n_dev_v1": 67,
+  "n_dev_v2": 34,
+  "n_dev_traces_with_registry": 17,
+  "n_dev_registry_entries": 27,
+  "inputs_dev_sha256": {
+   "v1_dev_traces": "c1801926d30289f2c9aefae21e70da1b065d63ab3cbdecea5175f6827f4b960c",
+   "v2_dev_traces": "bb989eba357262adc39edcb822adb433d911b7226b489a52b3ea87d84b1ed353",
+   "reg1_dev_registries": "4e923159eda12e4037415672403d170528682ad6678141500079302c72866469"
+  },
+  "augmentation_digest": "c3fb7171bd3e80a1909ee9ebfafb0bfd8bbe08d9a7046aafe5cab910c4596c87"
+ }
+}
