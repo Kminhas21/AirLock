@@ -4,3 +4,5 @@ Acceptance per file: validates with eval/trace_schema.py; every trace has enviro
 Generators never see detector code, thresholds, registries, or each other's output.
 
 AMENDMENT: family B (`relay_unlisted`) was stopped by a safety classifier and is NOT regenerated; see eval/SPEC_V3.md AMENDMENT 1.
+
+AMENDMENT 2: families C (`stale_adv`, `stale_benign`) were also stopped by a safety classifier and are NOT regenerated; see eval/SPEC_V3.md AMENDMENT 2.
