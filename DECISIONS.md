@@ -166,3 +166,18 @@ two independent extractions of the 68 routing notes (agree on 209/210 destinatio
 - Descriptive sweep (post-hoc, test already seen; eval/results_registry/D9_threshold_sweep_DESCRIPTIVE.md): raising only D9's threshold to 0.70-0.80 gives 100% on-time with 1.8-3.6% FA(c) and 2.3-7.0% FA(e):
   the shortfall is largely calibration. NOT a selection; needs a fresh holdout (v3).
 Caveats: registries were extracted from the same notes that define the labels (upper bound); v2 TEST is not fresh; 17 of 40 v2 dev traces have registry entries; extractors agree perfectly because the notes are explicit (same model family).
+
+## D10. v3 fresh holdout with realistic registries (2026-11-04) — eval/SPEC_V3.md (+ Amendments 1-3), eval/results_v3/REPORT_V3.md
+Process: PRD + 9 tickets; every code ticket went implement -> spec-compliance review -> code-quality review -> fix -> re-check (docs/v3/reviews/); detectors D9b/D9c frozen from v1+v2 dev
+(sha256 6864d477...), runner provenance guard passed; scored ONCE (60 traces, 30 with a violation; all test data).
+**Deviations, all recorded before scoring:** (1) two of five data generators were stopped by a safety classifier (relay-unlisted and stale-inventory families); NOT retried or reworded; v3 is 60 traces
+and cannot test stale/sparse inventories well; (2) the freeze commit came after label adjudication (fit was blind to v3 by construction and verified by provenance hashes); (3) strata defined mechanically.
+**Verdict (mechanical, PROVISIONAL): D9b qualifies on every ASSESSABLE criterion; D8 and D9 do not; C6 and C8 were not assessable.** No default recommended (spec).
+- D9b: on-time 73.3% [56.7, 88.2]; FA overall 1.6%, benign-after-denial 5.9%, traps 2.9%; +36.7pp over D7/D3 [16.7, 56.2]; 7.8 ms; on `listed` routes 22/22 first violations on time.
+- D9 (pre-(e)-constraint) has 76.7% but FA 20.3% / 23.5%: the D9 shortfall was calibration, confirmed on fresh data. D8 (rule): 33.3%, below D7.
+- **The criteria that probe the registry's failure modes were NOT assessable and their point estimates are bad:** C6 (benign proposals reaching a stale relay entry): D9b alarmed on 6/7 = 85.7% (bar 20%, n=7 < 15);
+  C8 (routes the registry is silent on): D9b on-time 0/6 vs D3 about 1/6 (n=6 < 8). Had those strata been large enough, D9b would likely FAIL both.
+- Without any registry the registry-trained detectors are useless: on-time D9b 0%, D9 16.7%, D8 3.3% vs D3 36.7%. They must only run when a valid registry is configured (the live monitor already falls back to D3).
+- On the mixed traces (partial inventories) D9b is on time on only 40% of first violations (rules D1: 60%; D3/D7: 10%); relay_known (complete inventory): D9b 90%, D3 50%.
+- Oracle registry (perfect): D9b 86.7%; the two operator-authors agreed (identical v3 scores).
+Limits: synthetic one-model-family data; 30 violating traces; strata small (stale 2, missing 6); no multiplicity correction; labels deterministic given truth notes (kappa 1.0).
