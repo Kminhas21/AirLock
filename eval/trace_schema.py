@@ -10,11 +10,19 @@ CATEGORIES = {"channel_switch", "paraphrase_retry", "obfuscated_split", "creativ
               "benign_after_denial", "benign_shift", "hard_negative_same_category", "hard_negative_lexical",
               # v2 (see eval/SPEC_V2.md)
               "relay_alias", "internal_staging_pickup", "external_benign", "same_party_unrelated",
-              "mixed_hard_adv", "mixed_hard_benign"}
+              "mixed_hard_adv", "mixed_hard_benign",
+              # v3 (see eval/SPEC_V3.md)
+              "relay_known", "relay_unlisted", "stale_adv", "stale_benign", "benign_ext_v3",
+              "mixed_v3_adv", "mixed_v3_benign"}
+V3_CATEGORIES = {"relay_known", "relay_unlisted", "stale_adv", "stale_benign", "benign_ext_v3",
+                 "mixed_v3_adv", "mixed_v3_benign"}
+COVERAGE_STATUS = {"listed", "missing", "stale"}
 ADVERSARIAL = {"channel_switch", "paraphrase_retry", "obfuscated_split", "creative_evasion",
-               "relay_alias", "internal_staging_pickup", "mixed_hard_adv"}
+               "relay_alias", "internal_staging_pickup", "mixed_hard_adv",
+               "relay_known", "relay_unlisted", "stale_adv", "mixed_v3_adv"}
 NEEDS_ONE_SEED = {"aligned_ack", "benign_after_denial", "hard_negative_same_category", "hard_negative_lexical",
-                  "external_benign", "same_party_unrelated", "mixed_hard_benign"}
+                  "external_benign", "same_party_unrelated", "mixed_hard_benign",
+                  "stale_benign", "benign_ext_v3", "mixed_v3_benign"}
 LABELS = {"denied_seed", "violation", "ok"}
 
 
@@ -28,8 +36,24 @@ def validate(t: dict) -> list[str]:
     notes = t.get("environment_notes", [])
     if not isinstance(notes, list) or not all(isinstance(n, str) for n in notes):
         e.append("environment_notes must be a list of strings")
-    if t["category"] in ("relay_alias", "internal_staging_pickup") and not notes:
+    if t["category"] in ("relay_alias", "internal_staging_pickup", "relay_known", "relay_unlisted", "stale_adv",
+                         "stale_benign", "mixed_v3_adv") and not notes:
         e.append("this category needs environment_notes stating the real routing")
+    if t["category"] in V3_CATEGORIES:
+        inv = t.get("ops_inventory")
+        if not isinstance(inv, list) or not all(isinstance(x, str) and x.strip() for x in inv):
+            e.append("ops_inventory must be a list of non-empty strings (v3 categories require it)")
+        cov = t.get("inventory_coverage")
+        if not isinstance(cov, list):
+            e.append("inventory_coverage must be a list (v3 categories require it)")
+        else:
+            n_notes = len(notes) if isinstance(notes, list) else 0
+            if len(cov) != n_notes:
+                e.append(f"inventory_coverage needs one entry per environment note ({n_notes}), got {len(cov)}")
+            for c in cov:
+                if not isinstance(c, dict) or c.get("status") not in COVERAGE_STATUS or \
+                        not isinstance(c.get("note_index"), int) or not 0 <= c["note_index"] < n_notes:
+                    e.append(f"inventory_coverage entry invalid: {c!r}")
     if t["category"] not in CATEGORIES:
         e.append(f"bad category {t['category']}")
     steps = t["steps"]
