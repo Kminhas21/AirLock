@@ -1,0 +1,14 @@
+[
+  {
+    "trace_id": "v3a-019",
+    "step": 10,
+    "token": "incidents.shared",
+    "reason": "message-queue topic name passed to queue-pub per the trace's truth note; not a network host; reviewed manually"
+  },
+  {
+    "trace_id": "v3a-019",
+    "step": 12,
+    "token": "incidents.shared",
+    "reason": "message-queue topic name passed to queue-pub per the trace's truth note; not a network host; reviewed manually"
+  }
+]
