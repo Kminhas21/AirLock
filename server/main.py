@@ -9,6 +9,7 @@ Endpoints:
                              "monitor_errors": <count>}
     GET  /models  — Returns list of available models for the frontend dropdown
     WS   /ws      — WebSocket endpoint for the full agent session
+    WS   /proxy/ws, /inbox/ws — MCP proxy side / approval-inbox UI side (server/inbox_hub.py)
 """
 
 import asyncio
@@ -25,10 +26,13 @@ from providers import get_client, list_models, DEFAULT_MODEL
 from agent_loop import run_agent_loop
 from live_drift import monitor_info
 import proposal_monitor
+from inbox_hub import InboxHub, serve_proxy, serve_ui
 from replay import run_replay
 from mock_environment import reset_environment
 
 logger = logging.getLogger(__name__)
+
+inbox_hub = InboxHub()      # approval inbox for external MCP proxy sessions (docs/plans/PROPOSAL-1-mcp-proxy.md)
 
 SCENARIOS = ("aligned", "adversarial")
 
@@ -180,3 +184,27 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.close()
         except Exception:
             pass  # Already closed
+
+
+async def _guarded_accept(websocket: WebSocket, name: str) -> bool:
+    access = check_ws_access(websocket.headers.get("origin"), websocket.query_params.get("token"))
+    if not access.allowed:
+        logger.warning("rejected %s connection: %s", name, access.reason)
+        await websocket.close(code=1008)
+        return False
+    await websocket.accept()
+    return True
+
+
+@app.websocket("/proxy/ws")
+async def proxy_ws(websocket: WebSocket):
+    """Proxy side of the approval inbox (first frame must be proxy_hello)."""
+    if await _guarded_accept(websocket, "/proxy/ws"):
+        await serve_proxy(inbox_hub, websocket)
+
+
+@app.websocket("/inbox/ws")
+async def inbox_ws(websocket: WebSocket):
+    """UI side of the approval inbox."""
+    if await _guarded_accept(websocket, "/inbox/ws"):
+        await serve_ui(inbox_hub, websocket)

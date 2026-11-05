@@ -617,3 +617,45 @@
 .agent-text { counter-reset: agentline; }
 .agent-line { display: block; counter-increment: agentline; padding-left: 3ch; position: relative; white-space: pre-wrap; }
 .agent-line::before { content: counter(agentline); position: absolute; left: 0; width: 2.5ch; text-align: right; color: #4b5563; user-select: none; }
+
+/* ===== VIEW TABS + INBOX ===== */
+.view-tabs { display: flex; gap: 4px; padding: 6px 20px 0; background: #1a1d27; border-bottom: 1px solid #2a2d37; flex-shrink: 0; }
+.view-tab { padding: 6px 16px; background: transparent; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; color: #9ca3af; font-size: 13px; font-weight: 600; cursor: pointer; }
+.view-tab.active { background: #0f1117; border-color: #2a2d37; color: #e5e7eb; }
+
+.inbox-view { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 16px 20px; color: #e5e7eb; }
+.inbox-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.inbox-title { margin: 0; font-size: 18px; }
+.inbox-conn { font-size: 12px; padding: 2px 10px; border-radius: 10px; border: 1px solid #2a2d37; color: #9ca3af; }
+.inbox-conn[data-state="connected"] { color: #22c55e; border-color: #22c55e; }
+.inbox-section { margin-top: 16px; min-width: 0; }
+.inbox-subtitle { margin: 0 0 8px; font-size: 12px; letter-spacing: 1px; text-transform: uppercase; color: #6b7280; }
+.inbox-empty { margin: 0; font-size: 13px; color: #6b7280; }
+.inbox-sessions, .inbox-pending, .inbox-resolved { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.inbox-session { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; min-width: 0; }
+.inbox-session-id { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.inbox-state { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 10px; border: 1px solid; }
+.inbox-state.open { color: #22c55e; border-color: #22c55e; }
+.inbox-state.closed { color: #6b7280; border-color: #6b7280; }
+.inbox-servers { color: #9ca3af; overflow-wrap: anywhere; }
+.inbox-card { background: #1a1d27; border: 1px solid #2a2d37; border-radius: 8px; padding: 12px; min-width: 0; }
+.inbox-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.inbox-tool { font-family: ui-monospace, monospace; font-weight: 700; overflow-wrap: anywhere; min-width: 0; }
+.inbox-auto { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 10px; background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+.inbox-countdown { margin-left: auto; font-size: 12px; color: #f59e0b; font-family: ui-monospace, monospace; }
+.inbox-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; color: #9ca3af; margin-bottom: 8px; overflow-wrap: anywhere; }
+.inbox-card .agent-text { max-width: 100%; max-height: 260px; overflow: auto; margin: 0 0 8px; box-sizing: border-box; }
+.inbox-alert { cursor: default; animation: none; margin-bottom: 8px; flex-wrap: wrap; border-radius: 6px; }
+.inbox-alert .alert-content { min-width: 0; overflow-wrap: anywhere; }
+.inbox-actions { display: flex; gap: 8px; }
+.inbox-actions .btn-approve, .inbox-actions .btn-deny { flex: 1; padding: 10px 12px; font-size: 14px; }
+.inbox-actions button:disabled { opacity: 0.4; cursor: not-allowed; }
+.inbox-resolved-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; font-size: 13px; min-width: 0; }
+.inbox-decision { font-size: 11px; font-weight: 700; }
+.inbox-decision.approve { color: #22c55e; }
+.inbox-decision.deny { color: #ef4444; }
+.inbox-reason, .inbox-result { color: #9ca3af; font-size: 12px; overflow-wrap: anywhere; }
+@media (max-width: 800px) {
+  .view-tabs { padding: 6px 12px 0; }
+  .inbox-view { padding: 12px; }
+}

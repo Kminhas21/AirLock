@@ -5,23 +5,9 @@
 // (pretty-printed JSON), risk level, decision status, and result text.
 
 import { DRIFT_THRESHOLD } from "../lib/drift";
-import { panelLines, singleLine } from "../lib/safeText";
+import { singleLine } from "../lib/safeText";
+import { AgentText } from "./AgentText";
 import { useSessionStore } from "../stores/sessionStore";
-
-// Agent-controlled multi-line text. Every line carries a numbered gutter (CSS counter, not selectable text), so a line the
-// agent forged inside the panel ("Decision: APPROVE") is visibly just a numbered line of the agent's own text.
-function AgentText({ text }: { text: unknown }) {
-  return (
-    <pre className="detail-code agent-text">
-      {panelLines(text).map((line, i) => (
-        <span className="agent-line" key={i}>
-          {line}
-          {"\n"}
-        </span>
-      ))}
-    </pre>
-  );
-}
 
 export function NodeDetail() {
   const selectedNodeId = useSessionStore((s) => s.selectedNodeId);
