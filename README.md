@@ -54,4 +54,8 @@ v3 registry monitors (OPT-IN, PROVISIONAL, DECISIONS.md D10; default unchanged):
   `frozen_model` (also reported for `registry` / `registry_learned`) (`{"path", "sha256" (first 16 hex), "schema_version"}`, `null`
   during a fallback) next to `monitor` (active), `requested_monitor` and `registry`. Read "What the v3 evaluation showed" in `docs/registry.md` first.
 
+Union monitor (OPT-IN, DECISIONS.md D13-D14): `SENTINEL_MONITOR=registry_learned_dropout_or_action` = frozen D9c OR D3, needs `SENTINEL_REGISTRY`, same fallbacks as the other registry modes.
+
+Full walkthrough of everything built, with workflows: `docs/COURSE.md`.
+
 Verify everything: `pip install -r requirements-dev.txt && scripts/verify.sh` (exit 0 = green). See `DECISIONS.md`.
