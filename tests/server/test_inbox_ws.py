@@ -162,6 +162,7 @@ def test_duplicate_session_id_over_the_wire(client):
 def test_garbage_does_not_crash_hub(client):
     with client.websocket_connect("/proxy/ws") as proxy:
         proxy.send_text("{not json")
+        assert proxy.receive_json() == {"event": "hello_reject", "reason": "bad_hello"}
         with pytest.raises(WebSocketDisconnect):
             proxy.receive_json()
     with client.websocket_connect("/proxy/ws") as proxy:
