@@ -225,3 +225,17 @@ falls back loudly to `action_sim` if the registry, either frozen file or the emb
 proposal and decision; at most one alert per proposal (registry member's wins). Live alerts equal the offline union on all 60 v3 traces
 (tests/e2e/test_registry_parity_union.py). Evidence and cost: D13 (missed the FA-on-post-denial-proposals bar: 11.1% vs 10%; 100% FA when a
 registry wrongly lists a relay). Opt-in, not the default, not recommended without reading D13.
+
+## D15: /health hardening and Kill Chain drawer sanitiser (closes the two D11 known limits)
+- `/health` has a PUBLIC view (default): same keys, registry / frozen-model paths reduced to the file name, last per-session fallback reduced to
+  "<mode> -> <used>: <ExceptionType>" (the message can carry paths and parsed content). The DETAIL view (full paths and message) needs the
+  token when SENTINEL_WS_TOKEN is set (`?token=` or `Authorization: Bearer`), or, with no token configured, SENTINEL_HEALTH_DETAIL=1 (set by the
+  Playwright config for local e2e). The opt-in never overrides a configured token. Code: server/health_view.py; tests/server/test_health_view.py.
+- Kill Chain detail drawer: single-value fields (title, tool) are collapsed to one line (120 chars); agent-text panels (reasoning, result, agent
+  response) strip bidi / zero-width / line-separator / control characters, are bounded to 20,000 chars and render one numbered line each (CSS
+  counter gutter), so a forged "Decision: APPROVE" line is visibly a numbered line of the agent's own text. Code: frontend/src/lib/safeText.ts,
+  NodeDetail.tsx; tests: safeText.test.ts, NodeDetail.test.tsx (vitest now includes .tsx).
+- Found on the way: the drawer still coloured drift against a hard-coded 2.5 (B18 had fixed only the chart). Now uses DRIFT_THRESHOLD.
+- Mutation check: 31 mutants (9 new: H1-H4 health, U1 union, F1-F4 frontend run through vitest, with a baseline check of the unmutated copy).
+  The first run was RED: F2 (drift colour reverted to 2.5) survived because no test pinned the colour. A test was added; F2 is now killed.
+- Still open: parameters panel shows pretty JSON (newlines escaped, safe); alert banners were already safe (D11).
