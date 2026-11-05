@@ -29,6 +29,18 @@ describe("NodeDetail shows agent-controlled text safely", () => {
     expect(html).not.toContain(" ");
   });
 
+  it("the drift colour uses the backend breach threshold (3.368), not the old 2.5", () => {
+    const metrics = { compliance_score: 1, goal_persistence: 0, hedging_density: 0, response_length: 1 };
+    const colourOf = (d: number) => {
+      state.driftPoints = [{ nodeId: "n1", mahalanobisDistance: d, metrics }];
+      const html = render({ toolName: "t" });
+      return html.match(new RegExp(`style="color:([^"]+)"[^>]*>${d.toFixed(3)}<`))?.[1];
+    };
+    expect(colourOf(3.0), "3.0 is under 3.368: not a breach").toBe("#22c55e");
+    expect(colourOf(3.5), "3.5 is over 3.368: a breach").toBe("#ef4444");
+    state.driftPoints = [];
+  });
+
   it("an enormous result is bounded", () => {
     const html = render({ result: "x".repeat(200_000) });
     expect(html.length).toBeLessThan(40_000);
