@@ -53,6 +53,11 @@ if [ -d frontend/node_modules ]; then
     run "browser replay parity: registry_learned_e (D9b frozen v3, merged authored1 registry)" bash -c "cd frontend && REPLAY_IDS=$IDS3 FAKE_LLM_TRACES=$TR3 SENTINEL_MONITOR=registry_learned_e REPLAY_REGISTRY=$REG3 SENTINEL_REGISTRY_MODEL_V3=$RFZ3 REPLAY_DETECTOR=D9b REPLAY_FROZEN_V3=$RFZ3 npx playwright test replay-traces"
     UIREG3="$TMPD/ui_registry_v3.json"
     run "browser registry UI v3 (D9b relay banner before the click; fallback without a registry)" bash -c "python scripts/make_replay_registry.py --v3 --ids v3a-001 --out $UIREG3 && cd frontend && FALLBACK_API_PORT=8082 UI_TRACE_ID=v3a-001 FAKE_LLM_TRACES=$TR3 SENTINEL_MONITOR=registry_learned_e REPLAY_REGISTRY=$UIREG3 SENTINEL_REGISTRY_MODEL_V3=$RFZ3 REPLAY_DETECTOR=D9b REPLAY_FROZEN_V3=$RFZ3 REPLAY_IDS=v3a-001 npx playwright test registry-ui-v3"
+    # union (DECISIONS.md D13-D14): SENTINEL_MONITOR=registry_learned_dropout_or_action = frozen D9c OR D3 on the same 12 v3 ids and the same
+    # merged registry: live alerts == offline union (REPLAY_DETECTOR=U9c), then the union in the real UI (banner before the click, hostile
+    # tool name, loud fallback without a registry).
+    run "browser replay parity: union (D9c OR D3, merged authored1 registry)" bash -c "cd frontend && REPLAY_IDS=$IDS3 FAKE_LLM_TRACES=$TR3 SENTINEL_MONITOR=registry_learned_dropout_or_action REPLAY_REGISTRY=$REG3 SENTINEL_REGISTRY_MODEL_V3=$RFZ3 REPLAY_DETECTOR=U9c REPLAY_FROZEN_V3=$RFZ3 npx playwright test replay-traces"
+    run "browser registry UI union (banner before the click; fallback without a registry)" bash -c "python scripts/make_replay_registry.py --v3 --ids v3a-001 --out $UIREG3 && cd frontend && FALLBACK_API_PORT=8082 UI_TRACE_ID=v3a-001 FAKE_LLM_TRACES=$TR3 SENTINEL_MONITOR=registry_learned_dropout_or_action REPLAY_REGISTRY=$UIREG3 SENTINEL_REGISTRY_MODEL_V3=$RFZ3 REPLAY_DETECTOR=U9c REPLAY_FROZEN_V3=$RFZ3 REPLAY_IDS=v3a-001 npx playwright test registry-ui-union"
   else
     echo "--- FAIL: no Chromium at \${CHROMIUM_PATH:-/opt/pw-browsers/chromium}; set CHROMIUM_PATH"; fail=1
   fi

@@ -24,9 +24,10 @@ os.environ.setdefault("HF_HUB_OFFLINE", "1")
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_RESULTS = REPO / "eval" / "results" / "results.json"
 DEFAULT_THRESHOLDS = {"D2": 0.5, "D3": 0.6}
-DETECTORS = ("D0", "D1", "D2", "D3", "D4", "D4_and", "D5", "D6", "D7", "D8", "D9", "D9b", "D9c")
+DETECTORS = ("D0", "D1", "D2", "D3", "D4", "D4_and", "D5", "D6", "D7", "D8", "D9", "D9b", "D9c", "U9c")
 REGISTRY_DETECTORS = ("D8", "D9")
-V3_DETECTORS = ("D9b", "D9c")      # frozen in eval/results_registry_v3/frozen_registry_models_v3.json (SPEC_V3); need --frozen-v3
+DEFAULT_FROZEN_D3 = "eval/results_v2/frozen_models.json"
+V3_DETECTORS = ("D9b", "D9c", "U9c")   # U9c = D9c OR D3 (the live union monitor, DECISIONS D13/D14)      # frozen in eval/results_registry_v3/frozen_registry_models_v3.json (SPEC_V3); need --frozen-v3
 DEFAULT_FROZEN_REGISTRY = REPO / "eval" / "results_registry" / "frozen_registry_models.json"
 
 
@@ -75,6 +76,13 @@ def build_detector(did: str, thresholds: dict | None = None, embedder_kind: str 
 
         if frozen_v3 is None:
             raise ValueError(f"{did} is only available from the frozen v3 file: pass frozen_v3 / --frozen-v3")
+        if did == "U9c":       # the union: frozen D9c (given registry) OR frozen D3 (eval/results_v2/frozen_models.json, as the live default)
+            from .detectors_union import UnionDetector
+            from .detectors_v2 import load_frozen
+
+            reg = load_frozen_registry_v3(frozen_v3, emb, registry, only=["D9c"])["D9c"]
+            d3 = load_frozen(DEFAULT_FROZEN_D3, emb, only=["D3"])["D3"]
+            return UnionDetector("U9c", "D9c OR D3", [reg, d3])
         return load_frozen_registry_v3(frozen_v3, emb, registry, only=[did])[did]
     if did in REGISTRY_DETECTORS:
         from .detectors_registry import load_frozen_registry
@@ -148,7 +156,7 @@ def main(argv=None) -> int:
         from .detectors_registry_v3 import load_frozen_registry_v3
 
         try:      # fail with a clean message (missing file, wrong schema_version, detector absent) before any embedding
-            load_frozen_registry_v3(a.frozen_v3, None, None, only=[a.detector])
+            load_frozen_registry_v3(a.frozen_v3, None, None, only=["D9c" if a.detector == "U9c" else a.detector])
         except (OSError, ValueError) as exc:
             ap.error(f"cannot use --frozen-v3 {a.frozen_v3}: {exc}")
     if a.registry is not None:
