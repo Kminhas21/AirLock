@@ -48,7 +48,8 @@ Access control for both sockets = the existing `check_ws_access` (Origin allow-l
 - `{"event":"inbox_resolved","session_id":S,"call_id":C,"decision":"approve"|"deny","reason":..}`
 - `{"event":"inbox_session","session_id":S,"state":"open"|"closed"}`
 ### UI -> backend
-- `{"event":"inbox_decision","call_id":C,"decision":"approve"|"deny"}`; unknown/already-resolved call_id => ignored (once-only ledger).
+- `{"event":"inbox_decision","session_id":S,"call_id":C,"decision":"approve"|"deny"}`; `session_id` is REQUIRED (review finding: a call_id alone is ambiguous across
+  sessions). Unknown/already-resolved (session_id, call_id) => ignored (once-only ledger). A frame without session_id is ignored.
 
 ## Components and tickets
 | Ticket | Owner area | Files |
@@ -61,3 +62,16 @@ Access control for both sockets = the existing `check_ws_access` (Origin allow-l
 
 ## Non-goals v1
 HTTP/SSE downstream, OpenTelemetry observe-only, multi-user, hosted deployment, reasoning-based drift for proxied sessions.
+
+## Review-driven amendments (security review of the first build)
+1. `/inbox/ws` and `/proxy/ws` REQUIRE `SENTINEL_WS_TOKEN` (non-empty). Unset => both sockets refuse every connection (fail closed; logged once with the fix).
+   Honest limit: a token stops a process that cannot read your environment/config; software on the same user account with full file access cannot be stopped by this.
+2. An auto-approved call is also HELD when the monitor is degraded: no detector (rules fallback / failed build), or the monitor's error counter
+   (`proposal_monitor.error_count()`) rose during the call. Auto-approve only applies when a working monitor looked at the call and stayed silent.
+3. The hub reserves a call_id synchronously (before any await) and keys everything by (session_id, call_id).
+4. The UI never lets a human approve content they did not see: arguments over the display limit show a loud TRUNCATED banner and Approve is disabled
+   (Deny stays enabled); tool names are shown up to 200 chars (the hub's limit).
+5. A failed/slow UI peer is closed (so the browser reconnects and gets a fresh snapshot), sends are concurrent with a per-peer timeout, and a dead
+   proxy peer is closed. `seen` call ids are bounded.
+6. Known and accepted for v1: no `proxy_cancel` frame (if the agent cancels, a stale card can sit until its timeout and a late approve is logged
+   although nothing ran; the proxy forwards nothing).
