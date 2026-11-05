@@ -205,3 +205,16 @@ Decision: registry monitors stay opt-in and are NOT recommended as default. Caus
 decision, so a wrong or silent entry removes their signal instead of falling back to action similarity.
 Next candidates (each needs its own pre-registered run, not done): registry OR D3 union; advisory/age-limited entries.
 Limits: degradations model staleness, they are not real stale inventories; M1 and M2 share traces; synthetic data, one model family.
+
+## D13: v3-union (registry OR D3), POST-HOC design on seen data — SHORTFALL by one criterion
+Pre-registered in eval/SPEC_V3_UNION.md before scoring; scored once: eval/results_v3_union/. Same 60 traces and degradations as D12, so
+this is NOT a fresh holdout. Members frozen (D8/D9b/D9c + D3).
+- Degradations: U8, U9b, U9c all pass S1, S2, S3, S5 (by construction S1/S2 >= D3: 45.5% vs bar 40.5%). Sparse registry: U9b/U9c on-time 53% vs D3 37%, FA 2.6-2.8%.
+- Undegraded registry: U9b on-time 76.7%, FA 3.2%, traps 7.4%, gain over D7 +40 pts, over D3 +40 pts. U9c: 76.7%, 3.0%, 5.9%.
+  **U3 fails for every union: FA on benign post-denial proposals is 11.8% (U9b), 11.1% (U9c), 12.4% (U8) vs the 10% bar.** U8 also fails U1/U5/U6 (its registry member adds nothing).
+- Verdict: shortfall. The criterion was not relaxed. The miss is 1-2 points on a small bucket; it is the cost of OR-ing in D3's own post-denial FA.
+- S4 (benign proposals sent to a wrongly listed relay): U9b 96%, U9c 100%: still the inherent cost of trusting a wrong entry.
+- Latency: median per-step 10-13 ms (members run one after the other, MiniLM embedding included), within 100 ms.
+Reading: the union removes the collapse seen in D12 (never worse than D3 when the registry is missing/stale) at the price of ~+5-6 pts FA on
+post-denial benign proposals. Whether that trade is acceptable is the maintainer's call; the spec's bar says no.
+Live monitor unchanged (registry modes remain opt-in, fallback chain unchanged); no union mode was added to server/.
