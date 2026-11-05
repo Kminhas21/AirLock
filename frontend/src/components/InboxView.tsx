@@ -5,5 +5,5 @@ import { Inbox } from "./Inbox";
 
 export function InboxView() {
   const { sendDecision } = useInbox();
-  return <Inbox onDecision={(id, d) => void sendDecision(id, d)} />;
+  return <Inbox onDecision={sendDecision} />;
 }

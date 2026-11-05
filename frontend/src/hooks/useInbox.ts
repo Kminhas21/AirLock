@@ -60,12 +60,12 @@ export function useInbox(url: string = INBOX_URL) {
   }, [connect]);
 
   /** Returns false when the socket is not open (nothing is sent; the backend then times the call out = deny). */
-  const sendDecision = useCallback((callId: string, decision: "approve" | "deny"): boolean => {
+  const sendDecision = useCallback((sessionId: string, callId: string, decision: "approve" | "deny"): boolean => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
       console.warn("[Inbox WS] Cannot send — not connected.");
       return false;
     }
-    wsRef.current.send(JSON.stringify({ event: "inbox_decision", call_id: callId, decision }));
+    wsRef.current.send(JSON.stringify({ event: "inbox_decision", session_id: sessionId, call_id: callId, decision }));
     return true;
   }, []);
 

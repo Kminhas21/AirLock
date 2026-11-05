@@ -26,3 +26,9 @@ export function panelLines(text: unknown, max = MAX_PANEL): string[] {
   const t = cut(stripUnsafe(text), max).replace(/\t/g, "  ");
   return t.split("\n");
 }
+
+/** Like panelLines, plus how many characters were cut off (0 = everything is shown). A human deciding on this text must know. */
+export function panelView(text: unknown, max = MAX_PANEL): { lines: string[]; hiddenChars: number } {
+  const len = stripUnsafe(text).length;
+  return { lines: panelLines(text, max), hiddenChars: len > max ? len - (max - 1) : 0 };
+}

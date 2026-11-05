@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_FIELD, MAX_PANEL, panelLines, singleLine, stripUnsafe } from "./safeText";
+import { MAX_FIELD, MAX_PANEL, panelLines, panelView, singleLine, stripUnsafe } from "./safeText";
 
 describe("safeText", () => {
   it("stripUnsafe removes bidi, zero-width, separators and controls but keeps newlines and tabs", () => {
@@ -17,6 +17,18 @@ describe("safeText", () => {
   it("panelLines keeps real lines (so the gutter numbers them) and bounds the total", () => {
     expect(panelLines("one\ntwo\nthree")).toEqual(["one", "two", "three"]);
     expect(panelLines("a".repeat(MAX_PANEL * 2)).join("\n").length).toBe(MAX_PANEL);
+  });
+  it("panelLines takes a custom limit", () => {
+    expect(panelLines("a".repeat(500), 100).join("").length).toBe(100);
+  });
+  it("panelView reports exactly how many characters are not shown", () => {
+    expect(panelView("abc").hiddenChars).toBe(0);
+    expect(panelView("a".repeat(MAX_PANEL)).hiddenChars).toBe(0);
+    const v = panelView("a".repeat(150), 100);
+    expect(v.hiddenChars).toBe(51); // 99 chars + "…" shown
+    expect(v.lines.join("").length).toBe(100);
+    expect(v.lines.join("").replace("…", "").length + v.hiddenChars).toBe(150);
+    expect(panelView("a".repeat(101), 100).hiddenChars).toBe(2);
   });
   it("panelLines of undefined or empty is one empty line, never a crash", () => {
     expect(panelLines(undefined)).toEqual([""]);

@@ -5,7 +5,9 @@
 // Display-time sanitising (singleLine / AgentText) happens in the components.
 
 export const MAX_RESOLVED = 200;
-export const MAX_PENDING = 500;
+export const MAX_PENDING = 2000;
+/** The Inbox renders at most this many pending cards; the rest are counted in a visible "N more pending not shown" line. */
+export const MAX_PENDING_RENDERED = 500;
 export const MAX_SESSIONS = 200;
 const DEFAULT_DEADLINE_S = 300;
 const MAX_DEADLINE_S = 3600;
@@ -114,6 +116,8 @@ function parsePending(v: unknown, now: number, sessionFallback?: string): Pendin
     deadline_at: now + deadline_s * 1000,
   };
 }
+
+export const callKey = (session_id: string, call_id: string): string => `${session_id}/${call_id}`;
 
 const sameCall = (p: { session_id: string; call_id: string }, session_id: string, call_id: string) =>
   p.session_id === session_id && p.call_id === call_id;
