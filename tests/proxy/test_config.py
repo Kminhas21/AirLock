@@ -132,3 +132,11 @@ def test_backend_url_and_token():
 def test_summarize():
     assert summarize("a\n\tb\x00c") == "a b c"
     assert len(summarize("x" * 1000)) == 300
+
+
+def test_token_replaces_existing_token_param():
+    assert with_token("ws://h/p?token=old", "new") == "ws://h/p?token=new"
+    assert with_token("ws://h/p?a=1&token=old&b=2", "n w") == "ws://h/p?a=1&b=2&token=n%20w"
+    assert with_token("ws://h/p?token=old", None) == "ws://h/p?token=old"
+    assert with_token("ws://h/p?token=old", "") == "ws://h/p?token=old"
+    assert with_token("ws://h/p?mytoken=x", "t") == "ws://h/p?mytoken=x&token=t"

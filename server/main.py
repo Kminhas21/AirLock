@@ -14,6 +14,7 @@ Endpoints:
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -186,7 +187,19 @@ async def websocket_endpoint(websocket: WebSocket):
             pass  # Already closed
 
 
+_warned_no_token = False
+
+
 async def _guarded_accept(websocket: WebSocket, name: str) -> bool:
+    """The inbox sockets can approve tool calls, so they REQUIRE SENTINEL_WS_TOKEN (fail closed when it is unset)."""
+    global _warned_no_token
+    if not os.environ.get("SENTINEL_WS_TOKEN"):
+        if not _warned_no_token:
+            _warned_no_token = True
+            logger.error("refusing /proxy/ws and /inbox/ws connections: SENTINEL_WS_TOKEN is not set "
+                         "(set SENTINEL_WS_TOKEN to enable the approval inbox)")
+        await websocket.close(code=1008)
+        return False
     access = check_ws_access(websocket.headers.get("origin"), websocket.query_params.get("token"))
     if not access.allowed:
         logger.warning("rejected %s connection: %s", name, access.reason)

@@ -8,6 +8,7 @@ exception text is never sent to a peer (it goes to the log only).
 from __future__ import annotations
 
 import asyncio
+import collections
 import json
 import logging
 import re
@@ -15,6 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import gate
+import proposal_monitor
 import safe_text
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,8 @@ SUMMARY_LIMIT = 300
 HELLO_TIMEOUT_S = 10.0
 UI_SEND_TIMEOUT_S = 5.0
 PROXY_SEND_TIMEOUT_S = 5.0
+MAX_SEEN = 10_000          # remembered call ids per session (older ones are forgotten)
+MAX_INFLIGHT = 200         # concurrent calls per session; more get deny/invalid
 
 
 def parse_frame(raw: Any) -> dict | None:
@@ -66,21 +70,29 @@ class _Peer:
         self.dead = False
 
     async def send(self, payload: dict) -> bool:
+        """Serialised, time-limited send (the timeout covers waiting for the lock too). A failed or timed-out send
+        CLOSES the socket: a UI reconnects and gets a fresh snapshot, a proxy fails closed."""
         if self.dead:
             return False
-        try:
+
+        async def locked() -> None:
             async with self._lock:
-                await asyncio.wait_for(self.peer.send_json(payload), self._timeout)
+                if self.dead:                      # re-check: it may have died while we waited for the lock
+                    raise ConnectionError("peer is dead")
+                await self.peer.send_json(payload)
+
+        try:
+            await asyncio.wait_for(locked(), self._timeout)
             return True
         except Exception:
-            self.dead = True
-            logger.warning("inbox: send to a peer failed; treating it as gone")
+            logger.warning("inbox: send to a peer failed or timed out; closing it")
+            await self.close()
             return False
 
     async def close(self, code: int = 1008) -> None:
         self.dead = True
         try:
-            await self.peer.close(code)
+            await asyncio.wait_for(self.peer.close(code), 2.0)
         except Exception:
             pass
 
@@ -115,9 +127,20 @@ class ProxySession:
     conn: _Peer
     monitor: Any = None
     seen: set = field(default_factory=set)
+    seen_order: Any = field(default_factory=collections.deque)
     pending: dict = field(default_factory=dict)
     tasks: set = field(default_factory=set)
     closed: bool = False
+
+    def reserve(self, call_id: str) -> bool:
+        """Synchronous duplicate check + registration (no await in between). False: already seen."""
+        if call_id in self.seen:
+            return False
+        self.seen.add(call_id)
+        self.seen_order.append(call_id)
+        while len(self.seen_order) > MAX_SEEN:
+            self.seen.discard(self.seen_order.popleft())
+        return True
 
 
 class InboxHub:
@@ -126,6 +149,7 @@ class InboxHub:
         self._monitor_factory = monitor_factory
         self.sessions: dict[str, ProxySession] = {}
         self._uis: list[_Peer] = []
+        self._bg: set = set()
 
     # ------------------------------------------------------------------ helpers
     def _new_monitor(self):
@@ -133,6 +157,12 @@ class InboxHub:
             return self._monitor_factory()
         import proposal_monitor
         return proposal_monitor.get_monitor_factory().new_session()
+
+    def _spawn(self, coro) -> asyncio.Task:
+        t = asyncio.create_task(coro)
+        self._bg.add(t)
+        t.add_done_callback(self._bg.discard)
+        return t
 
     def pending_count(self) -> int:
         return sum(len(s.pending) for s in self.sessions.values())
@@ -183,7 +213,7 @@ class InboxHub:
         if not await conn.send({"event": "hello_ack", "session_id": sid}):
             await self.proxy_closed(session)
             return None
-        await self._broadcast({"event": "inbox_session", "session_id": sid, "state": "open"})
+        self._spawn(self._broadcast({"event": "inbox_session", "session_id": sid, "state": "open"}))
         return session
 
     async def handle_proxy_frame(self, session: ProxySession, frame: Any) -> bool:
@@ -197,8 +227,7 @@ class InboxHub:
         if ev == "proxy_result":
             await self._forward_result(session, frame)
             return True
-        logger.warning("inbox: proxy %s sent unknown event %r; ignoring", session.session_id,
-                       ev if isinstance(ev, str) and len(ev) < 80 else type(ev).__name__)
+        logger.warning("inbox: proxy %s sent unknown event %s; ignoring", session.session_id, repr(ev)[:80])
         return True
 
     def _start_call(self, session: ProxySession, frame: dict) -> bool:
@@ -206,7 +235,16 @@ class InboxHub:
         if not _is_str(call_id, MAX_CALL_ID, min_len=1):
             logger.warning("inbox: proxy %s sent a proxy_call without a usable call_id; closing", session.session_id)
             return False
-        task = asyncio.create_task(self._run_call(session, call_id, frame))
+        # reserve (session_id, call_id) NOW, synchronously: two frames can never both pass the duplicate check
+        fresh = session.reserve(call_id)
+        if not fresh:
+            coro = self._reply(session, call_id, "deny", "duplicate")
+        elif len(session.tasks) >= MAX_INFLIGHT:
+            logger.warning("inbox: session %s exceeded %d in-flight calls", session.session_id, MAX_INFLIGHT)
+            coro = self._reply(session, call_id, "deny", "invalid")
+        else:
+            coro = self._run_call(session, call_id, frame)
+        task = asyncio.create_task(coro)
         session.tasks.add(task)
         task.add_done_callback(session.tasks.discard)
         return True
@@ -228,16 +266,12 @@ class InboxHub:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("inbox: unexpected error handling call %s; denying", call_id)
+            logger.exception("inbox: unexpected error handling call %r; denying", call_id)
             session.pending.pop(call_id, None)
             await self._reply(session, call_id, "deny", "invalid")
 
     async def _run_call_inner(self, session: ProxySession, call_id: str, frame: dict) -> None:
         sid = session.session_id
-        if call_id in session.seen or any(call_id in s.pending for s in self.sessions.values()):
-            await self._reply(session, call_id, "deny", "duplicate")
-            return
-        session.seen.add(call_id)
         server, tool, args, auto = frame.get("server"), frame.get("tool"), frame.get("args"), frame.get("auto")
         if not (_is_str(server, MAX_SHORT) and _is_str(tool, MAX_SHORT, min_len=1) and isinstance(args, dict)
                 and isinstance(auto, bool)):
@@ -245,30 +279,36 @@ class InboxHub:
             return
 
         alerts: list = []
-        monitor_ok = session.monitor is not None
-        if monitor_ok:
+        # "working": a monitor with a detector looked at the call, did not hit an error, and returned a list
+        mon = session.monitor
+        working = mon is not None and not getattr(mon, "is_rules", False)
+        if mon is not None:
+            errors_before = proposal_monitor.error_count()
             try:
-                alerts = await asyncio.to_thread(session.monitor.on_proposal, "", tool, args, call_id)
+                alerts = await asyncio.to_thread(mon.on_proposal, "", tool, args, call_id)
                 if not isinstance(alerts, list):
                     raise TypeError("monitor returned a non-list")
             except Exception:
-                logger.exception("inbox: monitor.on_proposal failed on %s; continuing without alerts", call_id)
-                alerts, monitor_ok = [], False
+                logger.exception("inbox: monitor.on_proposal failed on %r; continuing without alerts", call_id)
+                alerts, working = [], False
+            if proposal_monitor.error_count() > errors_before:      # real monitors swallow errors and return []
+                working = False
         if session.closed:
             await self._register(session, tool, args, "deny")
             return
 
-        if auto and monitor_ok and not alerts:
+        if auto and working and not alerts:
             await self._register(session, tool, args, "approve")
             await self._reply(session, call_id, "approve", "auto")
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
                                    "decision": "approve", "reason": "auto"})
             return
 
-        # held for a human (not auto, or auto with an alert, or auto with a monitor that could not run: fail closed)
+        # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
         p = _Pending(session, call_id, server, tool, args, auto, alerts)
         session.pending[call_id] = p
-        await self._broadcast({"event": "inbox_pending", **self._pending_payload(p, self._timeout)})
+        # the decision timer starts NOW; the broadcast runs beside it and cannot delay it
+        announce = self._spawn(self._broadcast({"event": "inbox_pending", **self._pending_payload(p, self._timeout)}))
         try:
             await asyncio.wait_for(p.event.wait(), self._timeout)
         except asyncio.TimeoutError:
@@ -277,6 +317,7 @@ class InboxHub:
         decision, reason = ("approve" if p.decision == "approve" else "deny"), p.reason or "invalid"
         await self._register(session, tool, args, decision)
         await self._reply(session, call_id, decision, reason)
+        await asyncio.gather(announce, return_exceptions=True)       # pending before resolved on every UI
         await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
                                "decision": decision, "reason": reason})
 
@@ -326,20 +367,22 @@ class InboxHub:
             self._uis.remove(ui)
 
     async def handle_ui_frame(self, frame: Any) -> None:
-        """Only inbox_decision does anything. Never raises, never approves anything but the exact string 'approve'."""
+        """Only inbox_decision does anything. Never raises, never approves anything but the exact string 'approve'.
+        session_id is REQUIRED: the decision resolves only that session's call."""
         if not isinstance(frame, dict) or frame.get("event") != "inbox_decision":
             logger.warning("inbox: ignoring a UI frame that is not an inbox_decision")
             return
-        call_id, decision = frame.get("call_id"), frame.get("decision")
-        if not isinstance(call_id, str) or not isinstance(decision, str) or decision not in ("approve", "deny"):
+        sid, call_id, decision = frame.get("session_id"), frame.get("call_id"), frame.get("decision")
+        if (not isinstance(sid, str) or not isinstance(call_id, str) or not isinstance(decision, str)
+                or decision not in ("approve", "deny")):
             logger.warning("inbox: ignoring an invalid inbox_decision")
             return
-        for s in list(self.sessions.values()):
-            p = s.pending.get(call_id)
-            if p is not None:
-                p.claim(decision, "human")
-                return
-        logger.info("inbox: decision for an unknown or already resolved call ignored")
+        s = self.sessions.get(sid)
+        p = s.pending.get(call_id) if s is not None else None
+        if p is None:
+            logger.info("inbox: decision for an unknown or already resolved call ignored")
+            return
+        p.claim(decision, "human")
 
 
 # ---------------------------------------------------------------------- socket loops (duck-typed websocket)

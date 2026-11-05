@@ -52,13 +52,18 @@ def valid_backend_url(value: Any) -> bool:
 
 
 def with_token(url: str, token: str | None) -> str:
-    """Append ?token= (url-quoted) when a token is set and the URL has none."""
+    """Set ?token= (url-quoted) from the env token, replacing any token already in the URL.
+
+    No token => URL returned unchanged.
+    """
     if not token:
         return url
     from urllib.parse import quote
 
-    sep = "&" if "?" in url else "?"
-    return f"{url}{sep}token={quote(token, safe='')}"
+    base, _, query = url.partition("?")
+    kept = [p for p in query.split("&") if p and p.split("=", 1)[0] != "token"]
+    kept.append(f"token={quote(token, safe='')}")
+    return base + "?" + "&".join(kept)
 
 
 def strip_query(url: str) -> str:

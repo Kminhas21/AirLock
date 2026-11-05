@@ -292,3 +292,63 @@ async def test_stdout_carries_only_mcp_frames(tmp_path, backend):
     out = await asyncio.wait_for(proc.stdout.read(), 20)
     await asyncio.wait_for(proc.wait(), 20)
     assert all(json.loads(l).get("jsonrpc") == "2.0" for l in out.splitlines() if l.strip())
+
+
+async def test_auto_approve_entry_matching_no_tool_warns(tmp_path, backend):
+    cfg, _ = make_config(tmp_path, backend.url, auto_approve=["fs:read_file", "fs:typo_tool", "fs:*"])
+    code_err = await _stderr_of_session(cfg)
+    assert "auto_approve entry 'fs:typo_tool' matches no tool; it will never match" in code_err
+    assert "'fs:read_file' matches no tool" not in code_err and "'fs:*' matches no tool" not in code_err
+
+
+async def _stderr_of_session(cfg):
+    from conftest import proxy_params
+    p = proxy_params(cfg)
+    proc = await asyncio.create_subprocess_exec(p.command, *p.args, cwd=p.cwd, env={**os.environ, **p.env},
+                                                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                                                stderr=asyncio.subprocess.PIPE)
+    proc.stdin.close()  # EOF: serve, then exit
+    _, err = await asyncio.wait_for(proc.communicate(), 30)
+    return err.decode()
+
+
+async def test_send_failure_closes_connection_denies_in_flight_and_reconnects(tmp_path):
+    from conftest import FakeBackend
+    from websockets.asyncio.server import serve
+    b = FakeBackend()
+    hang = asyncio.Event()
+
+    async def stall(ws, f):  # stop reading from this socket: backpressure builds up
+        await hang.wait()
+    b.on_call = stall
+    cfg, log = make_config(tmp_path, "ws://x/")
+    async with serve(b.handler, "127.0.0.1", 0, max_size=None, max_queue=1) as srv:
+        url = f"ws://127.0.0.1:{srv.sockets[0].getsockname()[1]}/proxy/ws"
+        cfg, log = make_config(tmp_path, url)
+        big = "x" * (8 * 1024 * 1024)
+        async with agent(cfg, {"SENTINEL_SEND_TIMEOUT_S": "1"}) as s:
+            results = await asyncio.wait_for(asyncio.gather(
+                *[s.call_tool("echo", {"blob": big, "i": i}) for i in range(4)]), 40)
+            assert all(r.is_error and "SENTINEL backend connection lost" in text(r) for r in results), [text(r)[:80] for r in results]
+            await b.wait_for("proxy_hello", n=2, timeout=20)  # it reconnected
+        hang.set()
+    assert downstream_calls(log) == []
+
+
+async def test_agent_cli_serve_keeps_one_session(tmp_path, backend):
+    from conftest import ROOT
+    cfg, log = make_config(tmp_path, backend.url)
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, str(ROOT / "tests/proxy/agent_cli.py"), "--serve", str(cfg), cwd=str(ROOT),
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+    outs = []
+    for i in range(2):
+        proc.stdin.write((json.dumps({"tool": "echo", "args": {"n": i}}) + "\n").encode())
+        await proc.stdin.drain()
+        outs.append(json.loads(await asyncio.wait_for(proc.stdout.readline(), 30)))
+    proc.stdin.close()
+    assert await asyncio.wait_for(proc.wait(), 30) == 0
+    assert [o["is_error"] for o in outs] == [False, False]
+    assert len(backend.of("proxy_hello")) == 1
+    assert [c["args"] for c in backend.of("proxy_call")] == [{"n": 0}, {"n": 1}]
+    assert len(downstream_calls(log)) == 2

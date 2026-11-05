@@ -66,6 +66,10 @@ class Proxy:
         self.names = build_name_map(
             {n: (self.cfg.servers[n].prefix, [t.name for t in d.tools]) for n, d in self.downstreams.items()}
         )
+        for entry in self.cfg.auto_approve:
+            srv, _, tool = entry.partition(":")
+            if tool != "*" and tool not in {t.name for t in self.downstreams[srv].tools}:
+                log(f"WARNING: auto_approve entry {entry!r} matches no tool; it will never match")
         for ex, (srv, orig) in self.names.items():
             tool = next(t for t in self.downstreams[srv].tools if t.name == orig)
             self._by_orig[(srv, orig)] = tool

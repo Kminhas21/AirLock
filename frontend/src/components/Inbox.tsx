@@ -7,15 +7,20 @@
 
 import { useEffect, useState } from "react";
 import { useInboxStore } from "../stores/inboxStore";
-import type { InboxAlert, InboxDecision, PendingCall, ResolvedCall } from "../lib/inboxRoute";
-import { singleLine, stripUnsafe } from "../lib/safeText";
+import { callKey, MAX_PENDING_RENDERED, type InboxAlert, type InboxDecision, type PendingCall, type ResolvedCall } from "../lib/inboxRoute";
+import { panelView, singleLine, stripUnsafe } from "../lib/safeText";
 import { AgentText } from "./AgentText";
 
 export interface InboxProps {
-  onDecision: (callId: string, decision: InboxDecision) => void;
+  /** Returns false when the decision could not be sent (socket not open). */
+  onDecision: (sessionId: string, callId: string, decision: InboxDecision) => boolean;
   /** Fixed clock for tests; the live view ticks once a second. */
   nowMs?: number;
 }
+
+/** Arguments are shown up to this many characters; beyond it Approve is disabled (a human must not approve unseen content). */
+export const MAX_ARGS_PANEL = 200_000;
+const MAX_TOOL_NAME = 200;
 
 function prettyArgs(args: unknown): string {
   try {
@@ -47,19 +52,23 @@ function PendingCard({
   call,
   now,
   canDecide,
+  notSent,
   onDecision,
 }: {
   call: PendingCall;
   now: number;
   canDecide: boolean;
-  onDecision: InboxProps["onDecision"];
+  notSent: boolean;
+  onDecision: (decision: InboxDecision) => void;
 }) {
+  const argsText = prettyArgs(call.args);
+  const hiddenChars = panelView(argsText, MAX_ARGS_PANEL).hiddenChars;
   const left = Math.max(0, Math.ceil((call.deadline_at - now) / 1000));
   return (
     <li className="inbox-card" data-testid="inbox-pending">
       <div className="inbox-card-head">
         <span className="inbox-tool" data-testid="inbox-tool">
-          {singleLine(call.tool)}
+          {singleLine(call.tool, MAX_TOOL_NAME)}
         </span>
         {call.auto && <span className="inbox-auto">auto</span>}
         <span className="inbox-countdown" data-testid="inbox-countdown">
@@ -70,7 +79,12 @@ function PendingCard({
         <span className="detail-label">Server</span> <span>{singleLine(call.server) || "-"}</span>
         <span className="detail-label">Session</span> <span>{singleLine(call.session_id)}</span>
       </div>
-      <AgentText text={prettyArgs(call.args)} />
+      {hiddenChars > 0 && (
+        <div className="inbox-truncated" data-testid="inbox-truncated" role="alert">
+          TRUNCATED: {hiddenChars} more characters not shown. Approve is disabled because you cannot see all of the arguments.
+        </div>
+      )}
+      <AgentText text={argsText} max={MAX_ARGS_PANEL} />
       {call.alerts.map((a, i) => (
         <AlertBox alert={a} key={i} />
       ))}
@@ -79,8 +93,8 @@ function PendingCard({
           className="btn-approve"
           data-testid="inbox-approve"
           data-call-id={call.call_id}
-          disabled={!canDecide}
-          onClick={() => onDecision(call.call_id, "approve")}
+          disabled={!canDecide || hiddenChars > 0}
+          onClick={() => onDecision("approve")}
         >
           Approve
         </button>
@@ -89,11 +103,16 @@ function PendingCard({
           data-testid="inbox-deny"
           data-call-id={call.call_id}
           disabled={!canDecide}
-          onClick={() => onDecision(call.call_id, "deny")}
+          onClick={() => onDecision("deny")}
         >
           Deny
         </button>
       </div>
+      {notSent && (
+        <div className="inbox-not-sent" data-testid="inbox-not-sent">
+          Not sent, reconnecting. Try again once the connection is back.
+        </div>
+      )}
     </li>
   );
 }
@@ -103,7 +122,7 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
   return (
     <li className="inbox-resolved-row" data-testid="inbox-resolved">
       <span className={approved ? "inbox-decision approve" : "inbox-decision deny"}>{approved ? "APPROVED" : "DENIED"}</span>
-      <span className="inbox-tool">{singleLine(item.tool) || "(unknown tool)"}</span>
+      <span className="inbox-tool">{singleLine(item.tool, MAX_TOOL_NAME) || "(unknown tool)"}</span>
       {item.reason && <span className="inbox-reason">{singleLine(item.reason)}</span>}
       {item.result && (
         <span className="inbox-result">
@@ -119,6 +138,9 @@ export function Inbox({ onDecision, nowMs }: InboxProps) {
   const pending = useInboxStore((s) => s.pending);
   const resolved = useInboxStore((s) => s.resolved);
   const connection = useInboxStore((s) => s.connection);
+  const snapshotReceived = useInboxStore((s) => s.snapshotReceived);
+  const notSent = useInboxStore((s) => s.notSent);
+  const markNotSent = useInboxStore((s) => s.markNotSent);
 
   const [tick, setTick] = useState(() => Date.now());
   useEffect(() => {
@@ -168,16 +190,25 @@ export function Inbox({ onDecision, nowMs }: InboxProps) {
           </p>
         ) : (
           <ul className="inbox-pending">
-            {pending.map((c) => (
-              <PendingCard
-                call={c}
-                now={now}
-                canDecide={connection === "connected"}
-                onDecision={onDecision}
-                key={`${c.session_id}/${c.call_id}`}
-              />
-            ))}
+            {pending.slice(0, MAX_PENDING_RENDERED).map((c) => {
+              const key = callKey(c.session_id, c.call_id);
+              return (
+                <PendingCard
+                  call={c}
+                  now={now}
+                  canDecide={connection === "connected" && snapshotReceived}
+                  notSent={key in notSent}
+                  onDecision={(d) => markNotSent(key, !onDecision(c.session_id, c.call_id, d))}
+                  key={key}
+                />
+              );
+            })}
           </ul>
+        )}
+        {pending.length > MAX_PENDING_RENDERED && (
+          <p className="inbox-more" data-testid="inbox-more-pending">
+            {pending.length - MAX_PENDING_RENDERED} more pending not shown
+          </p>
         )}
       </section>
 

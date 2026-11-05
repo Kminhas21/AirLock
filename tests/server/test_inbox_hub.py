@@ -4,7 +4,9 @@ import json
 
 import pytest
 
+import inbox_hub
 from inbox_hub import InboxHub, parse_frame
+from proposal_monitor import SessionMonitor
 
 
 class FakePeer:
@@ -12,8 +14,11 @@ class FakePeer:
         self.sent = []
         self.closed = False
         self.fail = False
+        self.hang = False
 
     async def send_json(self, payload):
+        if self.hang:
+            await asyncio.Event().wait()
         if self.fail:
             raise RuntimeError("boom")
         self.sent.append(json.loads(json.dumps(payload)))
@@ -81,13 +86,15 @@ class Rig:
             await self.hub.ui_connected(self.ui)
         self.session = await self.hub.proxy_hello(self.proxy, hello(sid))
         assert self.session is not None
+        await settle()
         return self
 
     async def send(self, frame):
         return await self.hub.handle_proxy_frame(self.session, frame)
 
-    async def decide(self, cid, decision):
-        await self.hub.handle_ui_frame({"event": "inbox_decision", "call_id": cid, "decision": decision})
+    async def decide(self, cid, decision, sid="s1"):
+        await self.hub.handle_ui_frame({"event": "inbox_decision", "session_id": sid, "call_id": cid,
+                                        "decision": decision})
 
     def decisions(self):
         return self.proxy.events("proxy_decision")
@@ -194,8 +201,9 @@ async def test_invalid_decision_ignored_never_approves(bad):
 
 async def test_decision_with_unknown_call_id_or_garbage_frames_ignored():
     r = await Rig().start()
-    for junk in ({"event": "inbox_decision", "call_id": "nope", "decision": "approve"}, {"event": "x"}, [], "s", 3, None,
-                 {"event": "inbox_decision", "call_id": ["c1"], "decision": "approve"}):
+    for junk in ({"event": "inbox_decision", "session_id": "s1", "call_id": "nope", "decision": "approve"}, {"event": "x"},
+                 [], "s", 3, None,
+                 {"event": "inbox_decision", "session_id": "s1", "call_id": ["c1"], "decision": "approve"}):
         await r.hub.handle_ui_frame(junk)
     assert r.decisions() == []
 
@@ -312,7 +320,35 @@ async def test_auto_call_with_alert_is_held_and_alert_rides_in_pending():
     assert r.decisions()[0] == {"event": "proxy_decision", "call_id": "c1", "decision": "deny", "reason": "human"}
 
 
-async def test_monitor_exception_does_not_break_the_call():
+class RaisingDetector:
+    threshold = 0.5
+
+    def on_step(self, agent_text, proposal):
+        raise RuntimeError("detector exploded")
+
+    def register_decision(self, proposal, decision):
+        pass
+
+
+class SilentDetector:
+    threshold = 0.5
+
+    def __init__(self):
+        self.seen = []
+
+    def on_step(self, agent_text, proposal):
+        self.seen.append(proposal)
+        return type("R", (), {"alert": False, "score": 0.0})()
+
+    def register_decision(self, proposal, decision):
+        pass
+
+
+def real_monitor(detector):
+    return SessionMonitor("action_sim", detector, None, lambda tool, args: f"{tool}")
+
+
+async def test_fake_monitor_exception_does_not_break_a_non_auto_call():
     r = await Rig(FakeMonitor(raises=True)).start()
     await r.send(call())
     await wait_for(lambda: r.ui.events("inbox_pending"))
@@ -322,7 +358,32 @@ async def test_monitor_exception_does_not_break_the_call():
     assert r.decisions()[0]["decision"] == "approve"
 
 
-async def test_monitor_exception_on_auto_call_fails_closed_to_human():
+async def test_auto_with_real_monitor_whose_detector_raises_is_held():
+    # the REAL SessionMonitor swallows the exception, counts it and returns []: the hub must notice the counter
+    r = await Rig(real_monitor(RaisingDetector())).start()
+    await r.send(call(auto=True))
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    assert r.decisions() == []
+    assert r.ui.events("inbox_pending")[0]["alerts"] == []
+
+
+async def test_auto_with_rules_monitor_is_held():
+    r = await Rig(SessionMonitor("rules")).start()
+    await r.send(call(auto=True))
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    assert r.decisions() == []
+
+
+async def test_auto_with_real_working_silent_monitor_is_approved():
+    det = SilentDetector()
+    r = await Rig(real_monitor(det)).start()
+    await r.send(call(auto=True, tool="read_file"))
+    await wait_for(lambda: r.decisions())
+    assert r.decisions()[0] == {"event": "proxy_decision", "call_id": "c1", "decision": "approve", "reason": "auto"}
+    assert det.seen == [{"tool": "read_file", "args": {"p": 1}}]
+
+
+async def test_monitor_exception_on_fake_auto_call_fails_closed_to_human():
     r = await Rig(FakeMonitor(raises=True)).start()
     await r.send(call(auto=True))
     await wait_for(lambda: r.ui.events("inbox_pending"))
@@ -420,15 +481,105 @@ def test_parse_frame_rejects_oversize_nonjson_nonobject():
     assert parse_frame("[" * 100000) is None      # recursion bomb
 
 
-async def test_calls_in_two_sessions_with_same_call_id_do_not_cross():
+async def test_same_call_id_in_two_sessions_concurrently_never_cross_resolves():
     r = await Rig().start()
-    proxy2, mon2 = FakePeer(), FakeMonitor()
-    hub = r.hub
-    hub._monitor_factory = lambda: mon2
-    s2 = await hub.proxy_hello(proxy2, hello("s2"))
-    await r.send(call("c1"))
-    await wait_for(lambda: r.ui.events("inbox_pending"))
-    await hub.handle_proxy_frame(s2, call("c1"))
+    proxy2 = FakePeer()
+    s2 = await r.hub.proxy_hello(proxy2, hello("s2"))
+    await asyncio.gather(r.hub.handle_proxy_frame(r.session, call("same")), r.hub.handle_proxy_frame(s2, call("same")))
+    await wait_for(lambda: len(r.ui.events("inbox_pending")) == 2)
+    assert r.decisions() == [] and proxy2.events("proxy_decision") == []
+    await r.decide("same", "approve", sid="s2")
     await wait_for(lambda: proxy2.events("proxy_decision"))
-    assert proxy2.events("proxy_decision")[0]["reason"] == "duplicate"
+    assert proxy2.events("proxy_decision")[0]["decision"] == "approve"
+    await settle()
+    assert r.decisions() == [] and r.hub.pending_count() == 1
+    await r.decide("same", "deny", sid="s1")
+    await wait_for(lambda: r.decisions())
+    assert r.decisions()[0]["decision"] == "deny"
+
+
+async def test_same_call_id_twice_in_one_batch_is_one_pending_and_one_duplicate():
+    r = await Rig().start()
+    await asyncio.gather(r.send(call("d")), r.send(call("d")))
+    await wait_for(lambda: r.decisions())
+    assert [d["reason"] for d in r.decisions()] == ["duplicate"]
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    assert len(r.ui.events("inbox_pending")) == 1
+
+
+async def test_decision_without_or_with_wrong_session_id_is_ignored():
+    r = await Rig(timeout=0.2).start()
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    await r.hub.handle_ui_frame({"event": "inbox_decision", "call_id": "c1", "decision": "approve"})
+    await r.decide("c1", "approve", sid="other")
+    await r.hub.handle_ui_frame({"event": "inbox_decision", "session_id": 5, "call_id": "c1", "decision": "approve"})
+    await settle()
     assert r.decisions() == []
+    await wait_for(lambda: r.decisions())
+    assert r.decisions()[0]["reason"] == "timeout"
+
+
+async def test_hanging_ui_does_not_delay_others_nor_the_timer_and_is_closed(monkeypatch):
+    monkeypatch.setattr(inbox_hub, "UI_SEND_TIMEOUT_S", 0.1)
+    r = Rig(timeout=0.5)
+    stuck = FakePeer()
+    stuck.hang = True
+    await r.hub.ui_connected(stuck)        # its snapshot send hangs and times out; the peer is closed
+    await r.hub.ui_connected(r.ui)
+    r.session = await r.hub.proxy_hello(r.proxy, hello())
+    assert r.session is not None           # hello was not blocked by the stuck UI
+    t0 = asyncio.get_running_loop().time()
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    assert asyncio.get_running_loop().time() - t0 < 0.4     # healthy UI is not held up by the stuck one
+    assert stuck.closed
+    await wait_for(lambda: r.decisions())                    # timer ran on its own: deny/timeout
+    assert r.decisions()[0]["reason"] == "timeout"
+
+
+async def test_decision_timer_starts_before_a_slow_broadcast_finishes(monkeypatch):
+    monkeypatch.setattr(inbox_hub, "UI_SEND_TIMEOUT_S", 2.0)
+    r = Rig(timeout=0.1)
+    r.session = None
+    await r.hub.ui_connected(r.ui)
+    r.session = await r.hub.proxy_hello(r.proxy, hello())
+    r.ui.hang = True                         # the pending broadcast will hang for the whole 2 s timeout
+    await r.send(call())
+    await wait_for(lambda: r.decisions(), tries=100)   # < 0.5 s: the proxy got its timeout deny without the UI
+    assert r.decisions()[0]["reason"] == "timeout"
+
+
+async def test_hanging_proxy_is_closed():
+    r = await Rig().start()
+    r.proxy.hang = True
+    inbox_hub.PROXY_SEND_TIMEOUT_S  # (session conn already built with the default; patch its timeout directly)
+    r.session.conn._timeout = 0.1
+    await r.send(call(auto=True))
+    await wait_for(lambda: r.proxy.closed)
+
+
+async def test_dead_peer_recheck_after_lock():
+    peer = FakePeer()
+    p = inbox_hub._Peer(peer, 1.0)
+    await p.close()
+    assert await p.send({"a": 1}) is False and peer.sent == []
+
+
+async def test_seen_is_bounded(monkeypatch):
+    monkeypatch.setattr(inbox_hub, "MAX_SEEN", 5)
+    r = await Rig().start()
+    for i in range(12):
+        assert r.session.reserve(f"x{i}")
+    assert len(r.session.seen) == 5 and "x11" in r.session.seen and "x0" not in r.session.seen
+
+
+async def test_inflight_cap_denies_extra_calls(monkeypatch):
+    monkeypatch.setattr(inbox_hub, "MAX_INFLIGHT", 3)
+    r = await Rig().start()
+    for i in range(3):
+        await r.send(call(f"p{i}"))
+    await wait_for(lambda: len(r.ui.events("inbox_pending")) == 3)
+    await r.send(call("extra"))
+    await wait_for(lambda: r.decisions())
+    assert r.decisions() == [{"event": "proxy_decision", "call_id": "extra", "decision": "deny", "reason": "invalid"}]

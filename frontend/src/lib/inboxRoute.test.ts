@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { initialInboxState, MAX_RESOLVED, reduceInbox, type InboxState } from "./inboxRoute";
+import { initialInboxState, MAX_PENDING, MAX_RESOLVED, reduceInbox, type InboxState } from "./inboxRoute";
 
 const NOW = 1_000_000;
 const pendingEv = (over: Record<string, unknown> = {}) => ({
@@ -126,6 +126,14 @@ describe("reduceInbox", () => {
     expect(s.resolved).toHaveLength(MAX_RESOLVED);
     expect(s.resolved[0].call_id).toBe(`c${MAX_RESOLVED + 24}`);
     expect(s.resolved.some((r) => r.call_id === "c0")).toBe(false);
+  });
+
+  it("state keeps up to 2000 pending calls (rendering is capped separately)", () => {
+    expect(MAX_PENDING).toBe(2000);
+    const events = Array.from({ length: MAX_PENDING + 5 }, (_, i) => pendingEv({ call_id: `c${i}` }));
+    const s = run(events);
+    expect(s.pending).toHaveLength(MAX_PENDING);
+    expect(s.pending[0].call_id).toBe(`c${MAX_PENDING + 4}`);
   });
 
   it("is pure: does not mutate its input", () => {

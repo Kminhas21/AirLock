@@ -31,6 +31,31 @@ describe("inboxStore", () => {
     expect(useInboxStore.getState()).toBe(before);
   });
 
+  it("snapshotReceived: false until a snapshot, reset by every connection change", () => {
+    const st = () => useInboxStore.getState();
+    st().setConnection("connected");
+    expect(st().snapshotReceived).toBe(false);
+    st().handleEvent(pending);
+    expect(st().snapshotReceived).toBe(false);
+    st().handleEvent({ event: "inbox_snapshot", sessions: "bad" });
+    expect(st().snapshotReceived).toBe(false);
+    st().handleEvent({ event: "inbox_snapshot", sessions: [] });
+    expect(st().snapshotReceived).toBe(true);
+    st().setConnection("disconnected");
+    expect(st().snapshotReceived).toBe(false);
+  });
+
+  it("notSent is set per call, and cleared by the next snapshot", () => {
+    const st = () => useInboxStore.getState();
+    st().markNotSent("s/c", true);
+    expect(st().notSent).toEqual({ "s/c": true });
+    st().markNotSent("s/c", false);
+    expect(st().notSent).toEqual({});
+    st().markNotSent("s/c", true);
+    st().handleEvent({ event: "inbox_snapshot", sessions: [] });
+    expect(st().notSent).toEqual({});
+  });
+
   it("setConnection and reset", () => {
     useInboxStore.getState().setConnection("connected");
     expect(useInboxStore.getState().connection).toBe("connected");

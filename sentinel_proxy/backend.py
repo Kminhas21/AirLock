@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -31,6 +32,10 @@ class BackendLink:
         self._url = url
         self._hello = hello
         self._call_timeout = call_timeout_s
+        try:
+            self._send_timeout = float(os.environ.get("SENTINEL_SEND_TIMEOUT_S", "10"))
+        except ValueError:
+            self._send_timeout = 10.0
         self._ws: Any = None
         self._connected = False
         self._ever_connected = False
@@ -121,25 +126,36 @@ class BackendLink:
         fut: asyncio.Future[Decision] = asyncio.get_running_loop().create_future()
         self._pending[cid] = fut
         try:
-            await ws.send(json.dumps(call))
+            if not await self._send(ws, json.dumps(call)):
+                return Decision(False, LOST)
             return await asyncio.wait_for(fut, self._call_timeout)
         except asyncio.TimeoutError:
             return Decision(False, "timeout")
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            return Decision(False, LOST)
         finally:
             self._pending.pop(cid, None)
+
+    async def _send(self, ws: Any, data: str) -> bool:
+        """Send with a bound. On failure/timeout kill the socket, deny everything in flight, reconnect."""
+        try:
+            await asyncio.wait_for(ws.send(data), self._send_timeout)
+            return True
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log(f"send to backend failed ({type(e).__name__}); closing connection")
+            if self._ws is ws:
+                self._drop()  # denies in-flight calls immediately
+            try:
+                ws.transport.abort()  # do not wait for a graceful close on a half-dead socket
+            except Exception:
+                pass
+            return False
 
     async def send_result(self, call_id: str, status: str, summary: str) -> None:
         ws = self._ws
         if ws is None:
             return
-        try:
-            await ws.send(json.dumps({"event": "proxy_result", "call_id": call_id, "status": status, "summary": summary}))
-        except Exception as e:
-            log(f"could not send proxy_result: {type(e).__name__}")
+        await self._send(ws, json.dumps({"event": "proxy_result", "call_id": call_id, "status": status, "summary": summary}))
 
 
 def _parse(msg: Any) -> dict[str, Any] | None:
