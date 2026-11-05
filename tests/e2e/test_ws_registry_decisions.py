@@ -22,7 +22,7 @@ RELAY_EMAIL = call("send_email", {"to": "partners@team.com", "subject": "Q3 tier
 REGISTRY = {"version": 1, "entries": [
     {"id": "r1", "kind": "relay", "party": "acme", "match": {"email": "partners@team.com"}, "note": "alias to Acme"},
     {"id": "r2", "kind": "external", "party": "acme", "match": {"domain": "acme-corp.example"}, "note": "Acme Corp"}]}
-MODES = ["registry", "registry_learned", "registry_learned_e", "registry_learned_dropout"]
+MODES = ["registry", "registry_learned", "registry_learned_e", "registry_learned_dropout", "registry_learned_dropout_or_action"]
 
 
 @pytest.fixture

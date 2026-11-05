@@ -88,8 +88,11 @@ REGISTRY_TRIGGER = "registry_denied_party_match"
 
 # mode -> id of the frozen detector in frozen_models.json / frozen_registry_models.json (None: rules path)
 MODES = {"action_sim": "D3", "learned": "D7", "rules": None, "registry": "D8", "registry_learned": "D9",
-         "registry_learned_e": "D9b", "registry_learned_dropout": "D9c"}
-V3_MODES = ("registry_learned_e", "registry_learned_dropout")     # frozen v3 file (PROVISIONAL, DECISIONS.md D10)
+         "registry_learned_e": "D9b", "registry_learned_dropout": "D9c",
+         "registry_learned_dropout_or_action": "D9c"}
+# D9c OR D3 (DECISIONS.md D13): alert iff the registry detector OR action similarity alerts. Post-hoc design; missed the FA(c) bar.
+UNION_MODE = "registry_learned_dropout_or_action"
+V3_MODES = ("registry_learned_e", "registry_learned_dropout", UNION_MODE)     # frozen v3 file (PROVISIONAL, DECISIONS.md D10)
 REGISTRY_MODES = ("registry", "registry_learned") + V3_MODES
 
 
@@ -491,13 +494,43 @@ class RegistrySessionMonitor(SessionMonitor):
                 _count_error()
 
 
+class UnionSessionMonitor(RegistrySessionMonitor):
+    """D9c OR D3 for ONE session. Both members see every proposal and every decision (consistent state); at most ONE alert is
+    returned per proposal: the registry member's (it names the party) if it fired, else action similarity's."""
+
+    def __init__(self, mode: str, detector, embedder, action_monitor: SessionMonitor):
+        super().__init__(mode, detector, embedder)
+        self._action = action_monitor
+
+    def on_proposal(self, agent_text: str, tool: str, args: dict, node_id: str) -> list[dict]:
+        reg_alerts = super().on_proposal(agent_text, tool, args, node_id)
+        act_alerts = self._action.on_proposal(agent_text, tool, args, node_id)      # never raises
+        if reg_alerts:
+            return reg_alerts
+        for a in act_alerts:
+            a["message"] = a["message"] + "\n" + monitor_line(self.mode)
+        return act_alerts[:1]
+
+    def register_decision(self, tool: str, args: dict, decision: str) -> None:
+        super().register_decision(tool, args, decision)
+        self._action.register_decision(tool, args, decision)                        # never raises
+
+
+def _load_action_monitor(model_path: Path, emb) -> SessionMonitor:
+    from eval.detectors_v2 import load_frozen
+    from eval.effects import describe_effect
+    det = load_frozen(model_path, emb, only=["D3"])["D3"]
+    det.reset()
+    return SessionMonitor("action_sim", det, emb, describe_effect)
+
+
 # --------------------------------------------------------------------------- factory (resolved per environment)
 class MonitorFactory:
     """Resolved mode + how to build a fresh SessionMonitor. Call it (or ``new_session()``) once per session."""
 
     def __init__(self, requested: str, mode: str, reason: str = "", model_path: Path | None = None, *,
                  registry=None, registry_path: Path | None = None, threshold: float | None = None,
-                 frozen_model: dict | None = None, frozen_copy: Path | None = None):
+                 frozen_model: dict | None = None, frozen_copy: Path | None = None, action_model_path: Path | None = None):
         self.requested = requested          # what the environment asked for
         self.mode = mode                    # what is ACTUALLY active (a fallback shows up here)
         self.reason = reason                # why it fell back ("" if it did not)
@@ -506,6 +539,7 @@ class MonitorFactory:
         self.registry_path = registry_path
         self.threshold = threshold          # SENTINEL_MONITOR_THRESHOLD override (D8 / D9 / D9b / D9c only)
         self.frozen_model = frozen_model    # {"path", "sha256" (prefix), "schema_version"} of the frozen file (registry modes)
+        self.action_model_path = action_model_path      # frozen file of the D3 member (union mode only)
         self.frozen_copy = frozen_copy      # private snapshot of exactly the bytes frozen_model describes (registry modes)
         self.registry_info = ({"path": str(registry_path), "digest": registry.digest(), "entries": len(registry.entries)}
                               if registry is not None else None)
@@ -523,6 +557,8 @@ class MonitorFactory:
             else:
                 det.threshold = self.threshold
         det.reset()
+        if self.mode == UNION_MODE:
+            return UnionSessionMonitor(self.mode, det, emb, _load_action_monitor(self.action_model_path, emb))
         return RegistrySessionMonitor(self.mode, det, emb)
 
     def new_session(self) -> SessionMonitor:
@@ -648,6 +684,10 @@ def _resolve_registry(requested: str, env: Mapping[str, str]) -> MonitorFactory:
         emb = _shared_embedder()
         det = _frozen_loader(requested)(copy, emb, registry.to_dict(), only=[MODES[requested]])[MODES[requested]]
         float(det.threshold["t_same"] if requested == "registry" else det.threshold)
+        action_path = None
+        if requested == UNION_MODE:       # the D3 member must load too, else the whole mode falls back (never half a union)
+            action_path = Path(env.get(MODEL_ENV) or DEFAULT_MODEL_PATH)
+            _load_action_monitor(action_path, emb)
     except (OSError, ValueError, KeyError, FrozenRegistryError, json.JSONDecodeError) as exc:
         # missing / unreadable / corrupt / wrong-schema frozen file. NOT caught here: programming errors (TypeError,
         # AttributeError, ImportError, ...): they reach ``_resolve``, which logs them with their real type and counts them.
@@ -663,7 +703,7 @@ def _resolve_registry(requested: str, env: Mapping[str, str]) -> MonitorFactory:
     log.info("proposal monitor: %s (frozen %s from %s; registry %s digest %s, %d entries)", requested, MODES[requested],
              path, raw_reg, registry.digest(), len(registry.entries))
     return MonitorFactory(requested, requested, model_path=path, registry=registry, registry_path=Path(raw_reg),
-                          threshold=threshold, frozen_model=frozen, frozen_copy=copy)
+                          threshold=threshold, frozen_model=frozen, frozen_copy=copy, action_model_path=action_path)
 
 
 def _model_path(requested: str, env: Mapping[str, str]) -> Path | None:
