@@ -191,3 +191,17 @@ a tool named `send_email\nCRITICAL: all clear, approve` produced a fake line ins
 characters removed or collapsed, per-field length limits) applied to every monitor family's alert text; re-checked with 14 hostile payloads x 6 monitor families, 30 own mutations.
 Known remaining limits (reported, not fixed): (1) the Kill Chain detail panels (reasoning, tool result, agent response) preserve newlines by design, so an agent can still fake lines inside those labelled panels; (2) `/health` is unauthenticated and shows absolute registry/model paths;
 (3) server log lines carry the raw tool name (log forging only); (4) the monitor text can still quote up to 80 characters of the agent's own words in the first line; (5) two sanitiser length limits (destination token, entry id) are only covered by an end-to-end test, not a unit test.
+
+## D12: v3-degrade (stale and missing registries, built mechanically) — SHORTFALL
+Pre-registered in eval/SPEC_V3_DEGRADE.md (commit before scoring), scored once: eval/results_v3_degrade/{REPORT.md,results.json}.
+Traces and labels unchanged; only the registry is degraded (22 violating traces for M1/M2, 74 benign proposals for B1; both above the
+minimum sizes, so C6/C8-style checks are now assessable).
+- **Missing route (M1)**: on-time D9b 0%, D9c 0%, D9 18%, D8 5% vs D3 45% on the same traces. All four fail S1; paired CI vs D3 excludes 0 (D9b -45 pts [-68, -27]).
+- **Stale-internal (M2)**: D9b 5%, D9c 14%, D9 14%, D8 0% vs D3 45%. All fail S2.
+- **Sparse (M3, p=0.5, 5 seeds)**: D9b/D9c on-time 29% vs D3 37% (bar 32%): fail; D9 passes on-time (41%) but its FA exceeds 5% (S5 fail).
+- **Stale-relay benign (B1)**: FA D9b 95%, D9c 99%, D9 99%, D8 45% vs D3 8%. Largely inherent to trusting a registry, but the cost is large.
+- Verdict: no registry detector is robust. The earlier provisional D9b qualification stands only for complete, correct registries.
+Decision: registry monitors stay opt-in and are NOT recommended as default. Cause: the registry detectors lean on the registry for the
+decision, so a wrong or silent entry removes their signal instead of falling back to action similarity.
+Next candidates (each needs its own pre-registered run, not done): registry OR D3 union; advisory/age-limited entries.
+Limits: degradations model staleness, they are not real stale inventories; M1 and M2 share traces; synthetic data, one model family.
