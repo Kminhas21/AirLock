@@ -325,10 +325,10 @@ async def test_send_failure_closes_connection_denies_in_flight_and_reconnects(tm
     async with serve(b.handler, "127.0.0.1", 0, max_size=None, max_queue=1) as srv:
         url = f"ws://127.0.0.1:{srv.sockets[0].getsockname()[1]}/proxy/ws"
         cfg, log = make_config(tmp_path, url)
-        big = "x" * (8 * 1024 * 1024)
+        big = "x" * (1024 * 1024)
         async with agent(cfg, {"SENTINEL_SEND_TIMEOUT_S": "1"}) as s:
             results = await asyncio.wait_for(asyncio.gather(
-                *[s.call_tool("echo", {"blob": big, "i": i}) for i in range(4)]), 40)
+                *[s.call_tool("echo", {"blob": big, "i": i}) for i in range(24)]), 40)
             assert all(r.is_error and "SENTINEL backend connection lost" in text(r) for r in results), [text(r)[:80] for r in results]
             await b.wait_for("proxy_hello", n=2, timeout=20)  # it reconnected
         hang.set()
