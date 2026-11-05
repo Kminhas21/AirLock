@@ -65,7 +65,7 @@ export default defineConfig({
       command: `npx vite --port ${UI_PORT} --strictPort`,
       url: `http://localhost:${UI_PORT}`,
       reuseExistingServer: false,
-      env: { VITE_SENTINEL_WS_URL: `ws://127.0.0.1:${API_PORT}/ws` },
+      env: { VITE_SENTINEL_WS_URL: `ws://127.0.0.1:${API_PORT}/ws`, VITE_SENTINEL_INBOX_WS_URL: `ws://127.0.0.1:${API_PORT}/inbox/ws` },
     },
   ],
 });
