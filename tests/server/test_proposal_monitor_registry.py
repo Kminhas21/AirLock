@@ -112,7 +112,7 @@ def test_health_keeps_existing_keys_and_reports_requested_monitor_for_non_regist
     _minilm_or_skip()
     info = live_drift.monitor_info()
     assert info == {"monitor": "action_sim", "requested_monitor": "action_sim", "registry": None,
-                    "embedder": "minilm", "monitor_errors": 0}
+                    "embedder": "minilm", "monitor_errors": 0, "session_fallbacks": 0, "last_session_fallback": None}
 
 
 def test_default_is_unchanged_even_if_a_registry_is_configured(monkeypatch, tmp_path):

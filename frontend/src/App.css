@@ -419,6 +419,7 @@
 .alert-message {
   font-size: 13px;
   color: #e5e7eb;
+  white-space: pre-line; /* v3 registry alerts end with their own "Monitor: ..." line */
 }
 
 .alert-meta {

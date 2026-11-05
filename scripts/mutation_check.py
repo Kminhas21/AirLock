@@ -34,11 +34,18 @@ MUTANTS = [
     ("B11 magic threshold restored", "seismograph/drift_detector.py", "CHI2_99_DF3 = 3.368", "CHI2_99_DF3 = 2.5", 1),
     # destination-registry monitors (DECISIONS.md D9)
     ("R1 denied-party match ignored (denials never reach the registry detector)", "server/proposal_monitor.py",
-     '            self._detector.register_decision({"tool": tool, "args": args}, decision)\n            if decision == "deny":\n                self._denied_props',
-     '            if decision == "deny":\n                self._denied_props', 1),
+     '            self._detector.register_decision({"tool": tool, "args": args}, decision)\n        except Exception:\n            log.exception("registry monitor: the DETECTOR failed',
+     '            pass\n        except Exception:\n            log.exception("registry monitor: the DETECTOR failed', 1),
     ("R2 registry mode without a usable registry keeps running D8/D9 (fallback to action_sim removed)", "server/proposal_monitor.py",
      '    if registry is None:\n        return _fallback_registry(requested, why, env)',
      '    if registry is None:\n        from server.registry import default_registry\n        registry = default_registry()', 1),
+    # frozen v3 monitors (DECISIONS.md D10): killed by tests/server/test_proposal_monitor_registry_v3.py
+    ("R3 registry/frozen fallback lands on rules instead of action_sim", "server/proposal_monitor.py",
+     '    base = _resolve_basic("action_sim", env)\n    return MonitorFactory(requested, base.mode, reason, base.model_path)',
+     '    base = _resolve_basic("rules", env)\n    return MonitorFactory(requested, base.mode, reason, base.model_path)', 1),
+    ("R4 denied-party match ignored when choosing the earlier denied proposal for the alert text", "server/proposal_monitor.py",
+     'pool = [d for d in self._denied_props if party in d[2].reaches] or list(self._denied_props)',
+     'pool = list(self._denied_props)', 1),
 ]
 
 

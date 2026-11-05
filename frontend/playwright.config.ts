@@ -32,6 +32,8 @@ function backend(port: number, registry: string | undefined) {
       // (always set, "" = not set, so a SENTINEL_REGISTRY in the caller's shell cannot leak into the fallback backend)
       SENTINEL_REGISTRY: registry ?? "",
       ...(process.env.SENTINEL_REGISTRY_MODEL ? { SENTINEL_REGISTRY_MODEL: process.env.SENTINEL_REGISTRY_MODEL } : {}),
+      // registry_learned_e / registry_learned_dropout: the frozen v3 file (default: eval/results_registry_v3/...)
+      ...(process.env.SENTINEL_REGISTRY_MODEL_V3 ? { SENTINEL_REGISTRY_MODEL_V3: process.env.SENTINEL_REGISTRY_MODEL_V3 } : {}),
     },
   };
 }

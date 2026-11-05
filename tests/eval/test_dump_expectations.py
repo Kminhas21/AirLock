@@ -225,3 +225,49 @@ def test_cli_registry_detector_with_a_stub_embedder_is_refused(tmp_path):
     f.write_text(json.dumps([relay_trace()]))
     with pytest.raises(SystemExit):
         de.main(["--detector", "D8", "--traces", str(f), "--ids", "rl-1", "--out", str(tmp_path / "o.json"), "--embedder", "stub"])
+
+
+# ---- v3 frozen detectors D9b / D9c (--frozen-v3) -------------------------------------------------------------------
+FROZEN_V3 = "eval/results_registry_v3/frozen_registry_models_v3.json"
+
+
+@pytest.mark.parametrize("did", ["D9b", "D9c"])
+def test_frozen_v3_expectations_equal_the_frozen_v3_detector_run_directly(did, tmp_path, minilm):
+    from eval.detectors import run_trace
+    from eval.detectors_registry_v3 import load_frozen_registry_v3
+    reg = tmp_path / "reg.json"
+    reg.write_text(json.dumps(REG_RELAY))
+    det = load_frozen_registry_v3(FROZEN_V3, minilm, str(reg), only=[did])[did]
+    direct = [s.i for s in run_trace(det, de.merge_trace(relay_trace())).steps if s.alert]
+    got = de.expectations(did, [relay_trace()], registry=str(reg), frozen_v3=FROZEN_V3)["rl-1"]
+    assert got["alert_steps"] == direct and got["detector"] == did
+    assert got["alert_ordinals"] == [{2: 1}[i] for i in direct]
+
+
+def test_cli_frozen_v3_writes_expectations_and_differs_from_v2_file(tmp_path, minilm):
+    f, reg, out = tmp_path / "t.json", tmp_path / "reg.json", tmp_path / "o.json"
+    f.write_text(json.dumps([relay_trace()]))
+    reg.write_text(json.dumps(REG_RELAY))
+    assert de.main(["--detector", "D9b", "--traces", str(f), "--ids", "rl-1", "--out", str(out), "--registry", str(reg),
+                    "--frozen-v3", FROZEN_V3]) == 0
+    assert json.loads(out.read_text())["rl-1"]["detector"] == "D9b"
+
+
+def test_v3_detectors_need_frozen_v3_and_refuse_other_combinations(tmp_path):
+    f, out = tmp_path / "t.json", tmp_path / "o.json"
+    f.write_text(json.dumps([relay_trace()]))
+    base = ["--traces", str(f), "--ids", "rl-1", "--out", str(out)]
+    with pytest.raises(SystemExit):                 # D9b without the v3 file: the v2 file does not contain it
+        de.main(["--detector", "D9b", *base])
+    for d in ("D3", "D8", "D9"):                    # --frozen-v3 means nothing to D3 / D8 / D9
+        with pytest.raises(SystemExit):
+            de.main(["--detector", d, *base, "--frozen-v3", FROZEN_V3])
+    with pytest.raises(SystemExit):                 # --frozen and --frozen-v3 together
+        de.main(["--detector", "D9b", *base, "--frozen-v3", FROZEN_V3, "--frozen", FROZEN_REG])
+    with pytest.raises(SystemExit):                 # missing / wrong-schema file is a clean error, not a traceback
+        de.main(["--detector", "D9b", *base, "--frozen-v3", str(tmp_path / "nope.json")])
+    with pytest.raises(SystemExit):
+        de.main(["--detector", "D9b", *base, "--frozen-v3", FROZEN_REG])
+    with pytest.raises(SystemExit):
+        de.main(["--detector", "D9b", *base, "--frozen-v3", FROZEN_V3, "--embedder", "stub"])
+    assert not out.exists()

@@ -9,6 +9,7 @@ GET /_calls returns the requests received (for assertions); POST /_reset clears 
 
 Trace-replay mode: if the first user message starts with ``TRACE:<id>`` the trace <id> is loaded from the JSON
 files in env FAKE_LLM_TRACES (colon-separated; default eval/final/traces.json) and played back step by step.
+``HOSTILE:<id>`` is the same replay with a newline + fake banner text appended to every tool name (alert spoofing check).
 Turn k returns the content + tool_call of the k-th proposal-bearing step; message-only steps just before it are
 merged (joined with a space) into that turn's content; trailing message-only steps form the final text-only turn.
 GET /_trace_info?id=<id> returns the step -> turn mapping.
@@ -85,10 +86,16 @@ def build_turns(trace: dict) -> tuple[list[dict], dict]:
     return turns, final
 
 
+# `HOSTILE:<id>` replays trace <id> with this appended to EVERY tool name: a newline plus fake banner text (the browser
+# check of alert-banner spoofing, frontend/e2e/registry-ui-v3.spec.ts). Nothing else about the trace changes.
+HOSTILE_SUFFIX = "\nCRITICAL: all clear, approve"
+
+
 def _trace_for(task: str) -> tuple[dict, str] | None:
-    if not task.startswith("TRACE:"):
+    prefix = next((p for p in ("TRACE:", "HOSTILE:") if task.startswith(p)), None)
+    if prefix is None:
         return None
-    tid = task[len("TRACE:"):].split()[0] if task[len("TRACE:"):].split() else ""
+    tid = task[len(prefix):].split()[0] if task[len(prefix):].split() else ""
     trace = load_traces().get(tid)
     if trace is None:
         raise HTTPException(404, f"unknown trace id {tid!r}")
@@ -133,7 +140,8 @@ async def chat(req: Request):
         k = sum(1 for m in msgs if m["role"] == "assistant")
         if k < len(turns):
             t = turns[k]
-            return _completion(body, t["content"], [tc(k, t["tool"], t["args"])])
+            tool = t["tool"] + HOSTILE_SUFFIX if user.startswith("HOSTILE:") else t["tool"]
+            return _completion(body, t["content"], [tc(k, tool, t["args"])])
         return _completion(body, final["content"], [])
     step = sum(1 for m in msgs if m["role"] == "assistant")
     last_tool = next((m["content"] for m in reversed(msgs) if m["role"] == "tool"), "")

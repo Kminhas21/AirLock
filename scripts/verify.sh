@@ -41,6 +41,18 @@ if [ -d frontend/node_modules ]; then
     # to action_sim on a second backend that has no SENTINEL_REGISTRY.
     UIREG="$TMPD/ui_registry.json"
     run "browser registry UI (relay banner before the click; fallback without a registry)" bash -c "python scripts/make_replay_registry.py --ids v2a-001 --out $UIREG && cd frontend && FALLBACK_API_PORT=8082 UI_TRACE_ID=v2a-001 FAKE_LLM_TRACES=$TR SENTINEL_MONITOR=registry_learned REPLAY_REGISTRY=$UIREG SENTINEL_REGISTRY_MODEL=$RFZ REPLAY_DETECTOR=D9 REPLAY_FROZEN=$RFZ REPLAY_IDS=v2a-001 npx playwright test registry-ui"
+    # v3 (DECISIONS.md D10, PROVISIONAL): the opt-in frozen D9b (SENTINEL_MONITOR=registry_learned_e) replaying 12 v3 ids
+    # (relay_known / mixed_v3_adv / benign_ext_v3 / mixed_v3_benign) with ONE merged registry of their AUTHORED1 registries
+    # (scripts/make_replay_registry.py --v3, fails on merge conflicts): live alerts == offline frozen D9b with the same registry,
+    # before the human decision. Then the v3 monitor in the real UI and its loud fallback to action_sim without a registry.
+    IDS3="v3a-001,v3a-007,v3a-009,v3a-013,v3e-001,v3e-002,v3e-008,v3d-001,v3d-007,v3d-008,v3e-011,v3e-014"
+    TR3="$R/eval/final_v3/traces.json"
+    REG3="$R/tests/browser/replay_registry_v3.json"
+    RFZ3="$R/eval/results_registry_v3/frozen_registry_models_v3.json"
+    run "v3 replay registry is current and conflict-free" bash -c "python scripts/make_replay_registry.py --v3 --ids $IDS3 --out $TMPD/replay_registry_v3.json && cmp $TMPD/replay_registry_v3.json $REG3"
+    run "browser replay parity: registry_learned_e (D9b frozen v3, merged authored1 registry)" bash -c "cd frontend && REPLAY_IDS=$IDS3 FAKE_LLM_TRACES=$TR3 SENTINEL_MONITOR=registry_learned_e REPLAY_REGISTRY=$REG3 SENTINEL_REGISTRY_MODEL_V3=$RFZ3 REPLAY_DETECTOR=D9b REPLAY_FROZEN_V3=$RFZ3 npx playwright test replay-traces"
+    UIREG3="$TMPD/ui_registry_v3.json"
+    run "browser registry UI v3 (D9b relay banner before the click; fallback without a registry)" bash -c "python scripts/make_replay_registry.py --v3 --ids v3a-001 --out $UIREG3 && cd frontend && FALLBACK_API_PORT=8082 UI_TRACE_ID=v3a-001 FAKE_LLM_TRACES=$TR3 SENTINEL_MONITOR=registry_learned_e REPLAY_REGISTRY=$UIREG3 SENTINEL_REGISTRY_MODEL_V3=$RFZ3 REPLAY_DETECTOR=D9b REPLAY_FROZEN_V3=$RFZ3 REPLAY_IDS=v3a-001 npx playwright test registry-ui-v3"
   else
     echo "--- FAIL: no Chromium at \${CHROMIUM_PATH:-/opt/pw-browsers/chromium}; set CHROMIUM_PATH"; fail=1
   fi

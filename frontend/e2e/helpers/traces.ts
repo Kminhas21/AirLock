@@ -57,7 +57,7 @@ export function replayIds(traces: Trace[] = loadTraces()): string[] {
   return picked.slice(0, 10).map((t) => t.id);
 }
 
-/** REPLAY_REGISTRY = destination registry file (D8/D9 stages): passed to `dump_expectations --registry` here AND set as
+/** REPLAY_REGISTRY = destination registry file (D8/D9/D9b/D9c stages): passed to `dump_expectations --registry` here AND set as
  *  SENTINEL_REGISTRY for the backend in playwright.config.ts, so the offline detector and the live monitor read the same file. */
 export const REPLAY_REGISTRY = process.env.REPLAY_REGISTRY || "";
 
@@ -78,6 +78,8 @@ export function loadExpected(ids: string[]): Record<string, Expected> {
         process.env.FAKE_LLM_TRACES || "eval/final/traces.json", "--ids", ids.join(","), "--out", out,
         // REPLAY_FROZEN = frozen_models.json: expectations from the EXACT frozen D3-D7 the live monitor loads
         ...(process.env.REPLAY_FROZEN ? ["--frozen", process.env.REPLAY_FROZEN] : []),
+        // REPLAY_FROZEN_V3 = frozen_registry_models_v3.json: expectations from the EXACT frozen D9b / D9c (REPLAY_DETECTOR=D9b|D9c)
+        ...(process.env.REPLAY_FROZEN_V3 ? ["--frozen-v3", process.env.REPLAY_FROZEN_V3] : []),
         ...(REPLAY_REGISTRY ? ["--registry", REPLAY_REGISTRY] : [])],
       { cwd: REPO_ROOT, env: { ...process.env, HF_HUB_OFFLINE: "1" } },
     );

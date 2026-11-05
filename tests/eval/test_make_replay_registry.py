@@ -46,3 +46,18 @@ def test_the_committed_replay_registry_is_current_conflict_free_and_covers_the_v
     assert Registry.load(committed).validate() == [] and len(committed["entries"]) >= 3
     verify = (REPO / "scripts" / "verify.sh").read_text()
     assert mrr.DEFAULT_IDS in verify, "the ids merged into the registry must be the ids verify.sh replays"
+
+
+def test_the_committed_v3_replay_registry_is_current_conflict_free_and_covers_the_verify_ids(tmp_path):
+    out = tmp_path / "fresh.json"
+    assert mrr.main(["--ids", mrr.DEFAULT_IDS_V3, "--source", str(mrr.V3_SOURCE), "--out", str(out)]) == 0
+    committed = json.loads((REPO / "tests" / "browser" / "replay_registry_v3.json").read_text())
+    assert committed == json.loads(out.read_text()), "re-run scripts/make_replay_registry.py with the v3 ids/source"
+    from server.registry import Registry
+    assert Registry.load(committed).validate() == [] and len(committed["entries"]) >= 5
+    ids = mrr.DEFAULT_IDS_V3.split(",")
+    assert len(ids) == 12 and len(set(ids)) == 12
+    traces = {t["id"]: t["category"] for t in json.loads((REPO / "eval" / "final_v3" / "traces.json").read_text())}
+    assert {traces[i] for i in ids} == {"relay_known", "mixed_v3_adv", "benign_ext_v3", "mixed_v3_benign"}
+    verify = (REPO / "scripts" / "verify.sh").read_text()
+    assert mrr.DEFAULT_IDS_V3 in verify, "the ids merged into the v3 registry must be the ids verify.sh replays"

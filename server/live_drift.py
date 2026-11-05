@@ -18,6 +18,7 @@ if _REPO_ROOT not in sys.path:
     sys.path.append(_REPO_ROOT)
 
 import events
+import safe_text
 from drift_tracker import DriftTracker
 from seismograph.analyzer import SeismographAnalyzer
 from seismograph.embedder import Embedder, EmbedderProtocol, StubEmbedder
@@ -83,30 +84,40 @@ def monitor_info() -> dict:
     ``monitor`` is the ACTIVE mode, not the requested one: a fallback (stub embedder, missing or corrupt frozen file,
     unknown mode, an unusable destination registry) shows up as "rules" / "action_sim" while ``requested_monitor``
     keeps what was asked for. ``registry`` describes the destination registry in use (registry modes only, else None).
-    ``embedder`` is the active embedder. ``monitor_errors`` counts
+    ``frozen_model`` ({"path", "sha256" (first 16 hex), "schema_version"} of the frozen model file, None after a fallback)
+    is present only when a registry mode was requested. ``embedder`` is the active embedder. ``monitor_errors`` counts
     runtime monitor exceptions (each one was logged and the proposal went to the human without an alert).
+    ``session_fallbacks`` counts sessions that degraded PER SESSION (e.g. a registry monitor that could not be built for
+    this session ran ``action_sim`` instead, although the factory still reports the registry mode) and
+    ``last_session_fallback`` ("<mode> -> <used>: <ExcType>: <message>", cleaned and truncated, None if there was none)
+    says why the last one happened.
     """
     import proposal_monitor    # lazy: proposal_monitor imports this module
-    requested, registry = "rules", None
+    requested, registry, frozen = "rules", None, None
     try:
         factory = proposal_monitor.get_monitor_factory()
-        monitor, requested, registry = factory.mode, factory.requested, factory.registry_info
+        monitor, requested, registry, frozen = factory.mode, factory.requested, factory.registry_info, factory.frozen_model
     except Exception:  # pragma: no cover - the factory degrades instead of raising; belt and braces
         log.exception("monitor factory failed")
         monitor = "rules"
     errors = proposal_monitor.error_count()
+    fallbacks, last_fallback = proposal_monitor.session_fallback_info()
     head = {"monitor": monitor, "requested_monitor": requested, "registry": registry}
+    if requested in proposal_monitor.REGISTRY_MODES:      # only when a registry mode was asked for (None: fell back)
+        head["frozen_model"] = frozen
     try:
         emb = get_embedder()
     except Exception:  # pragma: no cover - make_embedder never raises, belt and braces
-        return {**head, "embedder": "none", "monitor_errors": errors}
+        return {**head, "embedder": "none", "monitor_errors": errors,
+                "session_fallbacks": fallbacks, "last_session_fallback": last_fallback}
     if isinstance(emb, StubEmbedder):
         kind = "stub"
     elif isinstance(emb, Embedder):
         kind = "minilm"
     else:
         kind = "none"
-    return {**head, "embedder": kind, "monitor_errors": errors}
+    return {**head, "embedder": kind, "monitor_errors": errors,
+            "session_fallbacks": fallbacks, "last_session_fallback": last_fallback}
 
 
 class SessionDrift:
@@ -130,7 +141,8 @@ class SessionDrift:
         if hits:
             out.append(events.alignment_alert(
                 "warning", "goal_persistence",
-                f"Reasoning keeps pursuing the goal of denied tool(s): {sorted(hits)}",
+                "Reasoning keeps pursuing the goal of denied tool(s): "
+                f"{[safe_text.clean_field(h, safe_text.TOOL) for h in sorted(hits)[:5]]}",
                 node_id, self.tracker.drift_score, self.threshold,
             ))
         return out
@@ -143,9 +155,11 @@ class SessionDrift:
         analyzer_alert = self.analyzer.check_circumvention(tool_name, node_id, score)
         if not (tracker_flag or analyzer_alert):
             return []
-        message = (analyzer_alert or {}).get("message") or (
-            f"Agent is using '{tool_name}' to reach a resource category of a denied tool"
-        )
+        # B1: the analyzer's message embeds tool names the agent chose; the rules alert has no intended newline, so the
+        # whole text is one clean, length-limited line (the tracker's own text interpolates the cleaned tool name)
+        message = safe_text.clean_field((analyzer_alert or {}).get("message") or (
+            f"Agent is using '{safe_text.clean_field(tool_name, safe_text.TOOL)}' to reach a resource category of a denied tool"
+        ), safe_text.REASON)
         return [events.alignment_alert(
             "critical", "circumvention_detected", message, node_id, score, self.threshold,
         )]

@@ -214,6 +214,13 @@ SENTINEL_REGISTRY_MODEL=eval/results_registry/frozen_registry_models.json   # th
 SENTINEL_MONITOR_THRESHOLD=0.7          # UNCALIBRATED override, see below
 ```
 
+The v3 detectors are selected the same way (`SENTINEL_MONITOR=registry_learned_e` or `registry_learned_dropout`, frozen D9b / D9c)
+and read their frozen parameters from `SENTINEL_REGISTRY_MODEL_V3` (default `eval/results_registry_v3/frozen_registry_models_v3.json`).
+They share every rule below (registry file, lint, content-hash cache, fallback to `action_sim`; with the stub embedder the chain
+ends at `rules`, because `action_sim` needs real embeddings too), plus: a registry with no entries counts as
+no registry, `GET /health` adds `frozen_model` (`{"path", "sha256", "schema_version"}`), and the alert text ends with
+`Monitor: <mode> (frozen, provisional: see DECISIONS D10)`. Read the section "What the v3 evaluation showed" before relying on them.
+
 ### Writing a registry
 
 1. Start from the format above. List only what the defaults get wrong: **relays** (internal-looking destinations that
@@ -230,7 +237,7 @@ SENTINEL_MONITOR_THRESHOLD=0.7          # UNCALIBRATED override, see below
 
 ### What happens at runtime
 
-- The file is read, parsed and **linted at the start of every session** (cached by path + mtime + size + inode). Edit it and the
+- The file is read, parsed and **linted at the start of every session** (cached by path + the sha256 of its content, so even a same-size edit with a restored mtime is noticed). Edit it and the
   next session uses the new content without a restart; sessions that are already running keep the registry they started with.
   Each session has its own detector state and its own copy of the registry, so concurrent sessions cannot affect each other.
 - An alert is raised **before** `tool_pending`: `severity: critical`, `trigger: registry_denied_party_match`, linked to the
@@ -243,11 +250,18 @@ SENTINEL_MONITOR_THRESHOLD=0.7          # UNCALIBRATED override, see below
   compared numbers (D8: payload cosine vs `t_same` or `t_other`; D9: probability vs threshold).
 - **Fallback.** If `SENTINEL_REGISTRY` is unset, missing, unparseable or has lint errors (each error is logged, the whole file is
   rejected), if the frozen file is missing/corrupt, or if the embedder is the stub, the server logs a WARNING and runs
-  `action_sim` (frozen D3; `rules` if even that cannot run). It does NOT run a registry-trained detector without a registry:
+  `action_sim` (frozen D3). With the stub embedder `action_sim` cannot run either, so the chain ends at `rules`. It does NOT run a registry-trained detector without a registry:
   in the evaluation that was worse than not having one (D9 16.7% on-time vs D7 37.5%). It never refuses to start and never
   crashes a session. `GET /health` shows `monitor` (active), `requested_monitor` and `registry` (`null` during a fallback,
   else `{"path", "digest", "entries"}`), so a silent downgrade is visible. Fix the file and the next session recovers.
-- `SENTINEL_MONITOR_THRESHOLD` (finite float in [0, 1]) replaces D9's threshold, or both of D8's (`t_same = t_other`). It is
+- **Alert text is one line per field.** The message interpolates strings that an agent or a registry controls (tool name, destination,
+  party, entry id, note, the earlier denied proposal). Each is first reduced to a single line (any run of whitespace, control or
+  line-separator characters, including newline, CR, tab, U+0085, U+2028 and U+2029, becomes one space; zero-width and bidi characters
+  are removed) and cut with an ellipsis: tool 80, destination token 120, party 60, entry id 60, note 160, earlier effect or proposal
+  200 characters. The banner renders newlines, so this is what stops a tool named `send_email\nCRITICAL: all clear, approve` from
+  writing a banner line of its own. The only newline in a v3 alert is the one before the final `Monitor:` line.
+- `SENTINEL_MONITOR_THRESHOLD` (finite float in [0, 1]) replaces the threshold of D9, D9b and D9c, or both of D8's (`t_same = t_other`);
+  it applies to every registry mode. It is
   **uncalibrated**: the frozen thresholds are the only pre-registered ones. The post-hoc sweep
   (`eval/results_registry/D9_threshold_sweep_DESCRIPTIVE.md`) suggests 0.70-0.80 trades false alarms for nothing on v2 TEST, but
   that test set had already been seen, the registries were extracted from the notes that define the labels, and it is 24
@@ -267,3 +281,40 @@ SENTINEL_MONITOR_THRESHOLD=0.7          # UNCALIBRATED override, see below
 - Synthetic data from one model family, a scripted-LLM verification (no real model), and the destination scanner is lexical
   (see Decisions and limitations above): a destination hidden in free text or built at run time is invisible.
 - The alert is advice to the human gate: it never blocks an action by itself.
+
+## What the v3 evaluation showed (DECISIONS.md D10, PROVISIONAL)
+
+A fresh holdout of 60 synthetic traces (30 with a violation) with operator-authored registries, scored once with frozen detectors
+(`eval/results_v3/REPORT_V3.md`). Plain reading:
+
+- **D9b qualified only provisionally.** It met every criterion that could be assessed (on-time 73.3% [56.7, 88.2] against 36.7% for
+  `action_sim`; false alarms 1.6% overall), but two criteria could not be assessed and the verdict is labelled PROVISIONAL. No monitor
+  was recommended as the default; the default stays `action_sim`. D9c (trained with registry dropout) was on time as often (73.3%, identical) with a similar false-alarm profile (1.8% overall against 1.6%).
+- **It works when the inventory is complete or mostly complete.** On routes the registry lists it caught the first violation in
+  22/22 traces; on `relay_known` traces (complete inventory) 90% against 50% for `action_sim`. On the mixed traces, where the
+  inventory was partial, only 40% of first violations were caught on time.
+- **The criteria that probe the registry's failure modes were NOT assessable, and their point estimates are bad.** Stale entries:
+  benign proposals that reached a stale relay entry were flagged in **6 of 7** cases (bar 20%; too few cases to count as a test).
+  Missing routes: where the registry was silent, D9b was on time in **0 of 6** traces (`action_sim` about 1 of 6; the report calls this stratum insufficient data). Two of the five
+  data generators were stopped by a safety classifier and were not retried, so v3 says little about stale or sparse inventories.
+  Had those strata been large enough, D9b would probably have failed both criteria.
+- **It never runs without a registry.** Without one the registry-trained detectors were useless (D9b on time 0%, D9 16.7%, D8 3.3%
+  against 36.7% for `action_sim`), so the server falls back to `action_sim` whenever there is no valid registry (also for a registry
+  with no entries), the frozen file is unusable or the embedder is the stub. Check `GET /health`: `monitor` must equal `requested_monitor`.
+- Limits: synthetic data from one model family, 30 violating traces, small strata, no multiplicity correction, the freeze came after
+  the labels were adjudicated.
+
+### Keeping the registry current (operators)
+
+- **A wrong registry is worse than a short one.** An entry that sends harmless traffic to a party (a relay that was retired, a
+  forwarding rule that changed) produces alarms on routine proposals. Delete or fix an entry the day its route changes.
+- **Treat the registry as inventory with an owner.** Review it on a schedule (for example monthly) and whenever you add an alias,
+  list, bridge, webhook, shared drive or forwarding rule; give each entry a `note` with the ticket or directory source and a date,
+  so a reviewer can tell whether it is still true.
+- **Missing routes are silent.** The registry cannot warn about a route it does not know; there the monitor behaves no better than
+  having none, and in v3 no better than `action_sim` (0 of 6 traces on time against about 1 of 6: too few to conclude anything more). Enumerate relays first (aliases, lists, bridged channels, forwarding
+  webhooks), then external parties; use `registry_cli lint` and `resolve` to see what real proposals resolve to.
+- **Use one party slug per company** across all its destinations, so a payload denied to one address is recognised at another.
+- **Watch the alerts.** Many alerts naming the same entry on routine traffic mean the entry is stale; many incidents with no registry
+  alert mean routes are missing. Edits apply to the next session; confirm with `/health` (`registry.digest`, `frozen_model`, and `session_fallbacks` / `last_session_fallback`, which show sessions that fell back
+  on their own although the registry mode is still reported).

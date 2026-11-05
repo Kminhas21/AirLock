@@ -181,3 +181,13 @@ and cannot test stale/sparse inventories well; (2) the freeze commit came after 
 - On the mixed traces (partial inventories) D9b is on time on only 40% of first violations (rules D1: 60%; D3/D7: 10%); relay_known (complete inventory): D9b 90%, D3 50%.
 - Oracle registry (perfect): D9b 86.7%; the two operator-authors agreed (identical v3 scores).
 Limits: synthetic one-model-family data; 30 violating traces; strata small (stale 2, missing 6); no multiplicity correction; labels deterministic given truth notes (kappa 1.0).
+
+## D11. Live v3 monitors (opt-in) and the banner-spoofing fix (2026-11-05) — docs/v3/reviews/T08-*.md
+Added `SENTINEL_MONITOR=registry_learned_e` (frozen D9b) and `registry_learned_dropout` (D9c); default stays action_sim. They NEVER run without a valid registry
+(v3: 0% on-time without one): any failure (registry unset/invalid/empty, frozen file missing/corrupt/wrong schema, stub embedder) falls back loudly; `/health` shows requested vs active,
+registry digest, frozen model hash, `session_fallbacks`. Offline == live on all 60 v3 traces for both modes (120/120).
+**Security finding fixed (code-quality review, blocking):** alert text interpolated agent- and registry-controlled strings (tool name, destinations, party, notes); with the banner's `white-space: pre-line`
+a tool named `send_email\nCRITICAL: all clear, approve` produced a fake line inside a genuine CRITICAL banner (social engineering of the human approver). Fixed with one sanitiser (server/safe_text.py: whitespace/control/format/bidi
+characters removed or collapsed, per-field length limits) applied to every monitor family's alert text; re-checked with 14 hostile payloads x 6 monitor families, 30 own mutations.
+Known remaining limits (reported, not fixed): (1) the Kill Chain detail panels (reasoning, tool result, agent response) preserve newlines by design, so an agent can still fake lines inside those labelled panels; (2) `/health` is unauthenticated and shows absolute registry/model paths;
+(3) server log lines carry the raw tool name (log forging only); (4) the monitor text can still quote up to 80 characters of the agent's own words in the first line; (5) two sanitiser length limits (destination token, entry id) are only covered by an end-to-end test, not a unit test.
