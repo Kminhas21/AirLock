@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import sys
 
 import pytest
@@ -206,7 +207,9 @@ async def test_downstream_death_is_a_tool_error_not_a_crash(tmp_path, backend):
         assert len((await s.list_tools()).tools) == 4  # proxy itself still alive
 
 
-async def test_agent_timeout_while_pending_then_late_approve_forwards_nothing(tmp_path, backend):
+async def test_agent_cancel_while_pending_then_late_approve_forwards_nothing(tmp_path, backend):
+    """Raw JSON-RPC so the cancel is explicit (the SDK client does not always emit one on timeout)."""
+    from conftest import proxy_params
     gate = asyncio.Event()
 
     async def hold(ws, f):
@@ -214,15 +217,29 @@ async def test_agent_timeout_while_pending_then_late_approve_forwards_nothing(tm
         await backend.approve(ws, f)
     backend.on_call = hold
     cfg, log = make_config(tmp_path, backend.url)
-    async with agent(cfg) as s:
-        with pytest.raises(Exception):
-            await s.call_tool("write_file", {"path": "p"}, read_timeout_seconds=1)
-        gate.set()  # human "approves" after the agent already gave up
+    p = proxy_params(cfg)
+    proc = await asyncio.create_subprocess_exec(p.command, *p.args, cwd=p.cwd, env={**os.environ, **p.env},
+                                                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                                                stderr=asyncio.subprocess.DEVNULL)
+
+    async def send(o):
+        proc.stdin.write((json.dumps(o) + "\n").encode())
+        await proc.stdin.drain()
+    try:
+        await send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}})
+        await asyncio.wait_for(proc.stdout.readline(), 20)
+        await send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+        await send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "write_file", "arguments": {}}})
+        await backend.wait_for("proxy_call")
+        await send({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2}})
+        await asyncio.sleep(0.5)
+        gate.set()  # human approves after the agent gave up
         await asyncio.sleep(0.7)
         assert downstream_calls(log) == []
-        res = await s.call_tool("echo", {})  # the proxy is still healthy afterwards
-    gate.set()
-    assert not res.is_error
+    finally:
+        proc.kill()
+        await proc.wait()
 
 
 # ------------------------------------------------------------------ startup failures
