@@ -6,7 +6,15 @@ import pytest
 
 import inbox_hub
 from inbox_hub import InboxHub, parse_frame
+import proposal_monitor
 from proposal_monitor import SessionMonitor
+
+
+@pytest.fixture(autouse=True)
+def _clean_error_counter():
+    proposal_monitor._reset_errors()
+    yield
+    proposal_monitor._reset_errors()
 
 
 class FakePeer:

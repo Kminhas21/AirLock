@@ -195,7 +195,8 @@ def test_garbage_does_not_crash_hub(client):
         assert proxy.receive_json()["reason"] == "duplicate"  # still alive
         proxy.send_text("x" * 1_100_000)                       # oversize: closes the proxy
         with pytest.raises(WebSocketDisconnect):
-            proxy.receive_json()
+            while True:                                        # the held auto call is denied/disconnected first
+                assert proxy.receive_json()["decision"] == "deny"
     with client.websocket_connect(U) as ui:
         assert ui.receive_json()["event"] == "inbox_snapshot"
         ui.send_text("{bad")
