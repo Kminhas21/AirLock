@@ -318,3 +318,8 @@ A fresh holdout of 60 synthetic traces (30 with a violation) with operator-autho
 - **Watch the alerts.** Many alerts naming the same entry on routine traffic mean the entry is stale; many incidents with no registry
   alert mean routes are missing. Edits apply to the next session; confirm with `/health` (`registry.digest`, `frozen_model`, and `session_fallbacks` / `last_session_fallback`, which show sessions that fell back
   on their own although the registry mode is still reported).
+
+## Union mode (opt-in)
+`SENTINEL_MONITOR=registry_learned_dropout_or_action` alerts when the frozen registry detector (D9c) or action similarity (D3) alerts. It does
+not collapse when a registry entry is missing or stale (never worse than D3 in the evaluation), at the price of about 11% false alarms on benign
+proposals after a denial (bar was 10%) and near-total false alarms for traffic to an entry that wrongly says "relay". See DECISIONS D13, D14.

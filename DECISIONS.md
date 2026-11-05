@@ -218,3 +218,10 @@ this is NOT a fresh holdout. Members frozen (D8/D9b/D9c + D3).
 Reading: the union removes the collapse seen in D12 (never worse than D3 when the registry is missing/stale) at the price of ~+5-6 pts FA on
 post-denial benign proposals. Whether that trade is acceptable is the maintainer's call; the spec's bar says no.
 Live monitor unchanged (registry modes remain opt-in, fallback chain unchanged); no union mode was added to server/.
+
+## D14: union monitor mode (opt-in)
+`SENTINEL_MONITOR=registry_learned_dropout_or_action` = frozen D9c OR D3 (action similarity). Needs SENTINEL_REGISTRY like the other registry modes;
+falls back loudly to `action_sim` if the registry, either frozen file or the embedder is unusable (never half a union). Both members see every
+proposal and decision; at most one alert per proposal (registry member's wins). Live alerts equal the offline union on all 60 v3 traces
+(tests/e2e/test_registry_parity_union.py). Evidence and cost: D13 (missed the FA-on-post-denial-proposals bar: 11.1% vs 10%; 100% FA when a
+registry wrongly lists a relay). Opt-in, not the default, not recommended without reading D13.
