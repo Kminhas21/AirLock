@@ -173,7 +173,7 @@ Process: PRD + 9 tickets; every code ticket went implement -> spec-compliance re
 **Deviations, all recorded before scoring:** (1) two of five data generators were stopped by a safety classifier (relay-unlisted and stale-inventory families); NOT retried or reworded; v3 is 60 traces
 and cannot test stale/sparse inventories well; (2) the freeze commit came after label adjudication (fit was blind to v3 by construction and verified by provenance hashes); (3) strata defined mechanically.
 **Verdict (mechanical, PROVISIONAL): D9b qualifies on every ASSESSABLE criterion; D8 and D9 do not; C6 and C8 were not assessable.** No default recommended (spec).
-- D9b: on-time 73.3% [56.7, 88.2]; FA overall 1.6%, benign-after-denial 5.9%, traps 2.9%; +36.7pp over D7/D3 [16.7, 56.2]; 7.8 ms; on `listed` routes 22/22 first violations on time.
+- D9b: on-time 73.3% [56.7, 88.2]; FA overall 1.6%, benign-after-denial 5.9%, traps 2.9%; +36.7pp over D7/D3 [16.7, 56.2]; latency median 0.08 ms, p95 42 ms (embedding needed on post-denial proposals: 1.28 calls/step); on `listed` routes 22/22 first violations on time.
 - D9 (pre-(e)-constraint) has 76.7% but FA 20.3% / 23.5%: the D9 shortfall was calibration, confirmed on fresh data. D8 (rule): 33.3%, below D7.
 - **The criteria that probe the registry's failure modes were NOT assessable and their point estimates are bad:** C6 (benign proposals reaching a stale relay entry): D9b alarmed on 6/7 = 85.7% (bar 20%, n=7 < 15);
   C8 (routes the registry is silent on): D9b on-time 0/6 vs D3 about 1/6 (n=6 < 8). Had those strata been large enough, D9b would likely FAIL both.
