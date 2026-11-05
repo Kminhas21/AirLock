@@ -43,9 +43,23 @@ MUTANTS = [
     ("R3 registry/frozen fallback lands on rules instead of action_sim", "server/proposal_monitor.py",
      '    base = _resolve_basic("action_sim", env)\n    return MonitorFactory(requested, base.mode, reason, base.model_path)',
      '    base = _resolve_basic("rules", env)\n    return MonitorFactory(requested, base.mode, reason, base.model_path)', 1),
+    # /health hardening and union mode (DECISIONS.md D14 + this round)
+    ("H1 /health public view still shows full paths", "server/health_view.py", 'out[key]["path"] = _name(out[key]["path"])', 'pass', 1),
+    ("H2 /health detail shown to everyone", "server/health_view.py", 'return env.get("SENTINEL_HEALTH_DETAIL", "").strip() == "1"', 'return True', 1),
+    ("H3 /health token never checked", "server/health_view.py", 'return hmac.compare_digest(supplied.encode(), expected.encode())', 'return True', 1),
+    ("H4 /health leaks the fallback message", "server/health_view.py", 'out["last_session_fallback"] = _fallback_head(out["last_session_fallback"])', 'pass', 1),
+    ("U1 union ignores the action-similarity member", "server/proposal_monitor.py", 'return act_alerts[:1]', 'return []', 1),
     ("R4 denied-party match ignored when choosing the earlier denied proposal for the alert text", "server/proposal_monitor.py",
      'pool = [d for d in self._denied_props if party in d[2].reaches] or list(self._denied_props)',
      'pool = list(self._denied_props)', 1),
+]
+
+# Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.
+FRONTEND_MUTANTS = [
+    ("F1 drawer shows the raw (multi-line) tool name", "frontend/src/components/NodeDetail.tsx", "singleLine(data.toolName)", "String(data.toolName)", 1),
+    ("F2 drawer colours drift against the old 2.5", "frontend/src/components/NodeDetail.tsx", "driftPoint.mahalanobisDistance > DRIFT_THRESHOLD", "driftPoint.mahalanobisDistance > 2.5", 1),
+    ("F3 sanitiser removes nothing", "frontend/src/lib/safeText.ts", '.replace(UNSAFE, "")', '.replace(UNSAFE, "$&")', 1),
+    ("F4 result panel is raw text again", "frontend/src/components/NodeDetail.tsx", "<AgentText text={data.result} />", "<pre className=\"detail-code\">{String(data.result)}</pre>", 1),
 ]
 
 
@@ -76,12 +90,33 @@ def main() -> int:
             print(f"{'KILLED  ' if rc != 0 else 'SURVIVED'}  {name}")
             if rc == 0:
                 survivors.append(name)
+    for name, rel, old, new, count in FRONTEND_MUTANTS:
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = Path(tmp) / "repo"
+            shutil.copytree(ROOT / "frontend", tree / "frontend",
+                            ignore=shutil.ignore_patterns("node_modules", "dist", "e2e", ".results"))
+            (tree / "frontend" / "node_modules").symlink_to(ROOT / "frontend" / "node_modules", target_is_directory=True)
+            f = tree / rel
+            text = f.read_text()
+            if text.count(old) != count:
+                stale.append(f"{name}: expected {count} occurrence(s) of target in {rel}, found {text.count(old)}")
+                continue
+            clean = subprocess.run(["npx", "vitest", "run"], cwd=tree / "frontend", capture_output=True, text=True, timeout=300)
+            if clean.returncode != 0:      # a scratch copy that fails BEFORE the mutation would make every mutant look killed
+                stale.append(f"{name}: the unmutated frontend copy does not pass vitest")
+                continue
+            f.write_text(text.replace(old, new))
+            base = subprocess.run(["npx", "vitest", "run"], cwd=tree / "frontend", capture_output=True, text=True, timeout=300)
+            rc = base.returncode
+            print(f"{'KILLED  ' if rc != 0 else 'SURVIVED'}  {name}")
+            if rc == 0:
+                survivors.append(name)
     for s in stale:
         print("STALE   ", s)
     if survivors or stale:
         print(f"\nmutation check FAILED: {len(survivors)} survivor(s), {len(stale)} stale")
         return 1
-    print(f"\nmutation check OK: all {len(MUTANTS)} re-introduced bugs were caught by the suite")
+    print(f"\nmutation check OK: all {len(MUTANTS) + len(FRONTEND_MUTANTS)} re-introduced bugs were caught by the suite")
     return 0
 
 

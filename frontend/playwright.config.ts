@@ -24,6 +24,8 @@ function backend(port: number, registry: string | undefined) {
       // replay-traces asserts /health reports the embedder in EXPECT_EMBEDDER (default minilm).
       SENTINEL_EMBEDDER: process.env.SENTINEL_EMBEDDER ?? "minilm",
       HF_HUB_OFFLINE: "1",
+      // the e2e specs assert the full registry / frozen-model paths from /health (local development opt-in, server/health_view.py)
+      SENTINEL_HEALTH_DETAIL: "1",
       // Pinned explicitly: the server default is action_sim, but live.spec.ts and the default replay expectations
       // (REPLAY_DETECTOR=D1) are about the RULES monitor. The action_sim / learned / registry runs are separate gate stages.
       SENTINEL_MONITOR: process.env.SENTINEL_MONITOR ?? "rules",

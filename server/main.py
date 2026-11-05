@@ -15,11 +15,12 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 import events
 from auth import check_ws_access
+import health_view
 from providers import get_client, list_models, DEFAULT_MODEL
 from agent_loop import run_agent_loop
 from live_drift import monitor_info
@@ -53,10 +54,14 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health():
-    """Health check; also says which proposal monitor and embedder are ACTIVE (a stub fallback is visible here)."""
+async def health(request: Request):
+    """Health check; also says which proposal monitor and embedder are ACTIVE (a stub fallback is visible here).
+    File paths and fallback messages are shown only to a caller allowed to see them (server/health_view.py)."""
     # monitor_info() may load the embedding model on first use, so keep it off the event loop
-    return {"status": "ok", **await asyncio.to_thread(monitor_info)}
+    info = await asyncio.to_thread(monitor_info)
+    if not health_view.detail_allowed(request.query_params.get("token"), request.headers.get("authorization")):
+        info = health_view.public_view(info)
+    return {"status": "ok", **info}
 
 
 @app.get("/models")

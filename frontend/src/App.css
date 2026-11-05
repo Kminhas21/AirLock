@@ -612,3 +612,8 @@
   .main-panels { grid-template-columns: 1fr; grid-auto-rows: minmax(420px, auto); }
   .panel { min-width: 0; }
 }
+
+/* Agent-controlled text panels: a numbered gutter makes every line visibly part of the agent's text */
+.agent-text { counter-reset: agentline; }
+.agent-line { display: block; counter-increment: agentline; padding-left: 3ch; position: relative; white-space: pre-wrap; }
+.agent-line::before { content: counter(agentline); position: absolute; left: 0; width: 2.5ch; text-align: right; color: #4b5563; user-select: none; }
