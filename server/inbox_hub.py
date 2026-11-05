@@ -373,7 +373,12 @@ async def serve_proxy(hub: InboxHub, ws: Any) -> None:
         logger.info("inbox: proxy socket ended")
     finally:
         if session is not None:
-            await hub.proxy_closed(session)
+            # cleanup must finish even if this handler is being cancelled (server shutdown, test client teardown)
+            cleanup = asyncio.ensure_future(hub.proxy_closed(session))
+            try:
+                await asyncio.shield(cleanup)
+            except BaseException:
+                logger.info("inbox: proxy cleanup continues in the background")
         try:
             await ws.close()
         except Exception:
