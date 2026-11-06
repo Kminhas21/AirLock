@@ -388,10 +388,12 @@ async def test_agent_cancel_sends_exactly_one_proxy_cancel_and_late_approve_drop
     gate = asyncio.Event()
     held = []
 
-    async def hold(ws, f):
-        held.append((ws, f))
+    async def later(ws, f):
         await gate.wait()
         await backend.approve(ws, f)
+
+    async def hold(ws, f):  # must not block the backend's read loop (it has to see proxy_cancel)
+        held.append(asyncio.create_task(later(ws, f)))
     backend.on_call = hold
     cfg, log = make_config(tmp_path, backend.url)
     proc, send = await _raw_agent(cfg)
