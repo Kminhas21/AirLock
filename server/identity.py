@@ -579,7 +579,7 @@ class _KeySource:
 
 def _looks_like_jwt(s: str) -> bool:
     parts = s.split(".")
-    return len(parts) == 3 and all(p for p in parts) and s.isascii()
+    return len(parts) == 3 and bool(parts[0]) and bool(parts[1]) and s.isascii()          # the signature may be empty (alg=none form)
 
 
 # ---------------------------------------------------------------------------

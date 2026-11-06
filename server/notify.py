@@ -49,7 +49,7 @@ for _n in ("httpx", "httpcore"):
 MAX_URL = 2000
 MAX_READ = 4096
 ARGS_CAP = 300
-_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}$ (letters, digits, . _ -)")
+_NAME_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}\Z")
 _ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
 _LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
 _KEYS = {"type", "url", "format", "secret_env", "include_args", "allow_private", "allow_http_loopback"}
