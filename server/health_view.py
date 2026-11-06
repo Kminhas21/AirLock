@@ -49,3 +49,13 @@ def public_view(info: dict) -> dict:
     if "last_session_fallback" in out:
         out["last_session_fallback"] = _fallback_head(out["last_session_fallback"])
     return out
+
+
+def policy_view(path: str, policy: object, detail: bool) -> dict:
+    """/health `policy` entry (only present when SENTINEL_POLICY is set). ``policy`` is a loaded Policy or None (unusable).
+    Public: {digest, rules, usable}; detail adds the path."""
+    out = {"digest": policy.digest() if policy is not None else None,
+           "rules": len(policy.rules) if policy is not None else 0, "usable": policy is not None}
+    if detail:
+        out = {"path": path, **out}
+    return out

@@ -11,15 +11,44 @@ import asyncio
 import collections
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import gate
+import policy as policy_mod
 import proposal_monitor
 import safe_text
 
 logger = logging.getLogger(__name__)
+
+_logged_policy_problems: set = set()
+
+
+def _resolve_policy():
+    """-> (policy_mode, Policy | None, registry | None). SENTINEL_POLICY unset => (False, None, None): legacy behaviour.
+    Set but unusable => (True, None, ...): a BROKEN policy, every call is `ask`. Never raises."""
+    path = (os.environ.get("SENTINEL_POLICY") or "").strip()
+    if not path:
+        return False, None, None
+    pol, reason = policy_mod.load_policy_file(path)
+    if pol is None:
+        if reason not in _logged_policy_problems:
+            _logged_policy_problems.add(reason)
+            logger.error("SENTINEL_POLICY is set but unusable (%s): EVERY proxied call will be held for the human", reason)
+        return True, None, None
+    registry = None
+    reg_path = (os.environ.get("SENTINEL_REGISTRY") or "").strip()
+    if reg_path:
+        try:
+            import proposal_monitor as _pm
+            registry, why = _pm.load_registry(reg_path)
+            if registry is None:
+                logger.warning("policy: the destination registry is unusable (%s); evaluating without it", why)
+        except Exception:
+            logger.exception("policy: could not load the destination registry; evaluating without it")
+    return True, pol, registry
 
 MAX_FRAME_BYTES = 1_000_000
 SESSION_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
@@ -109,6 +138,9 @@ class _Pending:
     event: asyncio.Event = field(default_factory=asyncio.Event)
     decision: str | None = None
     reason: str | None = None
+    rule_id: str | None = None
+    policy_digest: str | None = None
+    policy_mode: bool = False
     cancelled: bool = False       # resolved by the proxy's proxy_cancel (not a human decision)
 
     def claim(self, decision: str, reason: str) -> bool:
@@ -132,6 +164,9 @@ class ProxySession:
     pending: dict = field(default_factory=dict)
     tasks: set = field(default_factory=set)
     closed: bool = False
+    policy_mode: bool = False
+    policy: Any = None
+    policy_registry: Any = None
     starting: set = field(default_factory=set)         # reserved, still inside the monitor (not yet pending)
     cancelled_early: set = field(default_factory=set)  # proxy_cancel arrived while in `starting`
 
@@ -172,8 +207,15 @@ class InboxHub:
 
     @staticmethod
     def _pending_payload(p: _Pending, deadline_s: float) -> dict:
-        return {"session_id": p.session.session_id, "call_id": p.call_id, "server": p.server, "tool": p.tool,
-                "args": p.args, "auto": p.auto, "alerts": p.alerts, "deadline_s": deadline_s}
+        d = {"session_id": p.session.session_id, "call_id": p.call_id, "server": p.server, "tool": p.tool,
+             "args": p.args, "auto": p.auto, "alerts": p.alerts, "deadline_s": deadline_s}
+        if p.policy_mode:
+            d["rule_id"], d["policy_digest"] = p.rule_id, p.policy_digest
+        return d
+
+    @staticmethod
+    def _policy_fields(p: _Pending) -> dict:
+        return {"rule_id": p.rule_id, "policy_digest": p.policy_digest} if p.policy_mode else {}
 
     async def _broadcast(self, payload: dict) -> None:
         uis = list(self._uis)
@@ -208,6 +250,11 @@ class InboxHub:
             return await reject("duplicate_session_id")
         session = ProxySession(sid, list(servers), list(auto_approve), conn)
         self.sessions[sid] = session          # claimed before any await: a racing second hello sees it
+        try:
+            session.policy_mode, session.policy, session.policy_registry = await asyncio.to_thread(_resolve_policy)
+        except Exception:
+            logger.exception("inbox: policy resolution failed; treating the policy as broken")
+            session.policy_mode, session.policy, session.policy_registry = True, None, None
         try:
             session.monitor = await asyncio.to_thread(self._new_monitor)
         except Exception:
@@ -326,6 +373,40 @@ class InboxHub:
             await self._register(session, tool, args, "deny")
             return
 
+        rule_id: str | None = None
+        digest: str | None = None
+        if session.policy_mode:
+            # the proxy's `auto` flag is IGNORED in policy mode; a broken policy asks for everything
+            auto = False
+            digest = session.policy.digest() if session.policy is not None else None
+            verdict = "ask"
+            if session.policy is not None:
+                try:
+                    dec = await asyncio.to_thread(session.policy.evaluate, server, tool, args,
+                                                  registry=session.policy_registry, alerts_present=bool(alerts))
+                    verdict, rule_id = dec.verdict, dec.rule_id
+                    if verdict not in ("allow", "deny", "ask"):
+                        verdict, rule_id = "ask", None
+                except Exception:
+                    logger.exception("inbox: policy evaluation failed; asking the human")
+                    verdict, rule_id = "ask", None
+            if call_id in session.cancelled_early:
+                return
+            extra = {"rule_id": rule_id, "policy_digest": digest}
+            if verdict == "deny":
+                await self._register(session, tool, args, "deny")
+                await self._reply(session, call_id, "deny", "policy")
+                await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
+                                       "decision": "deny", "reason": "policy", **extra})
+                return
+            if verdict == "allow" and working and not alerts:
+                await self._register(session, tool, args, "approve")
+                await self._reply(session, call_id, "approve", "policy")
+                await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
+                                       "decision": "approve", "reason": "policy", **extra})
+                return
+            # ask, or allow downgraded (alert / degraded monitor): fall through to the hold
+
         if auto and working and not alerts:
             await self._register(session, tool, args, "approve")
             await self._reply(session, call_id, "approve", "auto")
@@ -334,7 +415,8 @@ class InboxHub:
             return
 
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
-        p = _Pending(session, call_id, server, tool, args, auto, alerts)
+        p = _Pending(session, call_id, server, tool, args, auto, alerts, rule_id=rule_id, policy_digest=digest,
+                     policy_mode=session.policy_mode)
         session.pending[call_id] = p
         session.starting.discard(call_id)
         # the decision timer starts NOW; the broadcast runs beside it and cannot delay it
@@ -347,14 +429,14 @@ class InboxHub:
         if p.cancelled:                  # proxy_cancel: no proxy_decision, no monitor registration
             await asyncio.gather(announce, return_exceptions=True)
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                                   "decision": "deny", "reason": p.reason})
+                                   "decision": "deny", "reason": p.reason, **self._policy_fields(p)})
             return
         decision, reason = ("approve" if p.decision == "approve" else "deny"), p.reason or "invalid"
         await self._register(session, tool, args, decision)
         await self._reply(session, call_id, decision, reason)
         await asyncio.gather(announce, return_exceptions=True)       # pending before resolved on every UI
         await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                               "decision": decision, "reason": reason})
+                               "decision": decision, "reason": reason, **self._policy_fields(p)})
 
     async def _forward_result(self, session: ProxySession, frame: dict) -> None:
         call_id, status = frame.get("call_id"), frame.get("status")

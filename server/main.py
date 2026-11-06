@@ -64,8 +64,14 @@ async def health(request: Request):
     File paths and fallback messages are shown only to a caller allowed to see them (server/health_view.py)."""
     # monitor_info() may load the embedding model on first use, so keep it off the event loop
     info = await asyncio.to_thread(monitor_info)
-    if not health_view.detail_allowed(request.query_params.get("token"), request.headers.get("authorization")):
+    detail = health_view.detail_allowed(request.query_params.get("token"), request.headers.get("authorization"))
+    if not detail:
         info = health_view.public_view(info)
+    policy_path = (os.environ.get("SENTINEL_POLICY") or "").strip()
+    if policy_path:
+        import policy as policy_mod
+        pol, _why = await asyncio.to_thread(policy_mod.load_policy_file, policy_path)
+        info = {**info, "policy": health_view.policy_view(policy_path, pol, detail)}
     return {"status": "ok", **info}
 
 
