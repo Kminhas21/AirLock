@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "default": "ask",
+  "rules": [
+    {
+      "id": "deny-write-outside-project",
+      "verdict": "deny",
+      "note": "file writes and deletes must stay inside /project",
+      "when": {
+        "tool": [
+          "write_file",
+          "delete_file"
+        ],
+        "args": [
+          {
+            "path": "path",
+            "op": "not_under",
+            "value": "/project"
+          }
+        ]
+      }
+    },
+    {
+      "id": "deny-webhook-external",
+      "verdict": "deny",
+      "note": "never post to a webhook that reaches an outside party",
+      "when": {
+        "tool": "post_to_webhook",
+        "destination": "external"
+      }
+    },
+    {
+      "id": "deny-paste-sites",
+      "verdict": "deny",
+      "note": "anything that reaches a paste service",
+      "when": {
+        "party": [
+          "pastebin",
+          "paste-ee"
+        ]
+      }
+    },
+    {
+      "id": "ask-external-destination",
+      "verdict": "ask",
+      "note": "a human looks at anything that leaves the organisation (unknown destinations count as external)",
+      "when": {
+        "destination": "external"
+      }
+    },
+    {
+      "id": "ask-write-outbox",
+      "verdict": "ask",
+      "note": "/project/outbox is mirrored to partners: a human decides what is staged there",
+      "when": {
+        "tool": "write_file",
+        "args": [
+          {
+            "path": "path",
+            "op": "under",
+            "value": "/project/outbox"
+          }
+        ]
+      }
+    },
+    {
+      "id": "allow-read-project",
+      "verdict": "allow",
+      "note": "reads under /project are routine",
+      "when": {
+        "tool": [
+          "read_file",
+          "list_directory",
+          "search_files"
+        ],
+        "args": [
+          {
+            "path": "path",
+            "op": "under",
+            "value": "/project"
+          }
+        ]
+      }
+    },
+    {
+      "id": "allow-write-project",
+      "verdict": "allow",
+      "note": "writes of reasonably small files under /project",
+      "when": {
+        "tool": "write_file",
+        "args": [
+          {
+            "path": "path",
+            "op": "under",
+            "value": "/project"
+          },
+          {
+            "path": "content",
+            "op": "max_len",
+            "value": 20000
+          }
+        ]
+      }
+    },
+    {
+      "id": "ask-on-alert",
+      "verdict": "ask",
+      "note": "any call the monitor flagged goes to a human (an allow would be escalated anyway)",
+      "when": {
+        "alert": true
+      }
+    }
+  ]
+}
