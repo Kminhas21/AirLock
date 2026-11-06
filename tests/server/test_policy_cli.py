@@ -256,7 +256,7 @@ class TestReplay:
         assert C.main(["test", pfile, "--traces", t, "--json"]) == 0
         out = json.loads(capsys.readouterr().out)
         assert out["proposals"] == 4 and sum(out["verdicts"].values()) == 4
-        assert out["by_label"]["unlabeled"]["deny"] == 1
+        assert out["by_label"]["unlabeled"]["deny"] == 4      # unevaluable tool names are caught by the deny rule
 
     def test_empty_traces(self, pfile, tmp_path, capsys):
         assert C.main(["test", pfile, "--traces", write(tmp_path, "e.json", [])]) == 0

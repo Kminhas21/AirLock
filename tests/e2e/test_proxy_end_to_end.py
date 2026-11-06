@@ -24,10 +24,10 @@ _spec.loader.exec_module(H)
 
 
 
-def start_backend(timeout_s="300", embedder="stub", monitor="rules"):
+def start_backend(timeout_s="300", embedder="stub", monitor="rules", extra=None):
     port = H.free_port()
     env = {**os.environ, "SENTINEL_EMBEDDER": embedder, "SENTINEL_MONITOR": monitor, "SENTINEL_GATE_TIMEOUT_S": timeout_s,
-           "OMP_NUM_THREADS": "1", "HF_HUB_OFFLINE": "1", "SENTINEL_WS_TOKEN": TOKEN}
+           "OMP_NUM_THREADS": "1", "HF_HUB_OFFLINE": "1", "SENTINEL_WS_TOKEN": TOKEN, **(extra or {})}
     p = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--port", str(port), "--log-level", "warning"],
                          cwd=ROOT / "server", env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(300):
@@ -293,3 +293,54 @@ async def test_agent_cancel_clears_the_card_and_a_late_approve_changes_nothing(t
             await decide(ui, p2, "approve")
             assert not (await asyncio.wait_for(t2, 20)).is_error
             assert [c["tool"] for c in downstream_calls(log)] == ["echo"]
+
+
+# ----------------------------------------------------------------------------------------------- policy engine (DECISIONS D18)
+POLICY = str(ROOT / "tests/e2e/data/policy_e2e.json")
+
+
+async def test_policy_allow_deny_and_ask_end_to_end(tmp_path, backend_proc):
+    """Real backend with SENTINEL_POLICY, real MiniLM + action_sim (a WORKING monitor, so an allow can stand), real proxy, real downstream."""
+    _, port = backend_proc(embedder="minilm", monitor="action_sim", extra={"SENTINEL_POLICY": POLICY})
+    # the proxy's own auto_approve says echo is auto: with a policy configured the hub must IGNORE that flag
+    path, log = cfg(tmp_path, port, auto_approve=["fs:echo"])
+    async with websockets.connect(ui_url(port)) as ui:
+        async with H.agent(path, {"SENTINEL_WS_TOKEN": TOKEN}) as agent:
+            # allow: no card, no click, forwarded; the UI is told which rule did it
+            r = await asyncio.wait_for(call(agent, "read_file", {"path": "/project/a.txt"}), 60)
+            assert not r.is_error and [c["tool"] for c in downstream_calls(log)] == ["read_file"]
+            res = await next_event(ui, "inbox_resolved")
+            assert (res["decision"], res["reason"], res["rule_id"]) == ("approve", "policy", "allow-read-project")
+            assert isinstance(res["policy_digest"], str) and len(res["policy_digest"]) == 16
+            # deny: refused immediately, never forwarded, rule recorded
+            d = await asyncio.wait_for(call(agent, "write_file", {"path": "/etc/passwd"}), 30)
+            assert d.is_error and text(d) == "Denied by SENTINEL: policy"
+            res = await next_event(ui, "inbox_resolved")
+            assert (res["decision"], res["reason"], res["rule_id"]) == ("deny", "policy", "deny-write-outside")
+            assert [c["tool"] for c in downstream_calls(log)] == ["read_file"]
+            # default verdict (ask): held, no rule id, a human approves
+            t = asyncio.create_task(call(agent, "write_file", {"path": "/project/new.txt"}))
+            p = await next_event(ui, "inbox_pending")
+            assert p["rule_id"] is None and p["policy_digest"]
+            await decide(ui, p, "approve")
+            assert not (await asyncio.wait_for(t, 20)).is_error
+            # explicit ask rule beats the proxy's auto flag
+            t = asyncio.create_task(call(agent, "echo", {"x": 1}))
+            p = await next_event(ui, "inbox_pending")
+            assert p["rule_id"] == "ask-echo"
+            await decide(ui, p, "deny")
+            assert (await asyncio.wait_for(t, 20)).is_error
+            assert [c["tool"] for c in downstream_calls(log)] == ["read_file", "write_file"]
+
+
+async def test_a_broken_policy_holds_everything_even_auto_flagged_calls(tmp_path, backend_proc):
+    _, port = backend_proc(embedder="minilm", monitor="action_sim", extra={"SENTINEL_POLICY": str(tmp_path / "missing.json")})
+    path, log = cfg(tmp_path, port, auto_approve=["fs:read_file"])
+    async with websockets.connect(ui_url(port)) as ui:
+        async with H.agent(path, {"SENTINEL_WS_TOKEN": TOKEN}) as agent:
+            t = asyncio.create_task(call(agent, "read_file", {"path": "/project/a.txt"}))
+            p = await next_event(ui, "inbox_pending", 60)
+            assert p["rule_id"] is None
+            assert downstream_calls(log) == []
+            await decide(ui, p, "deny")
+            assert (await asyncio.wait_for(t, 20)).is_error
