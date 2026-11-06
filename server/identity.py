@@ -277,8 +277,9 @@ def _check_tenant(tid: str, t: Any, errs: list):
             errs.append(f"{lw}.after_s: levels must be strictly increasing")
         else:
             last = after
-        if not isinstance(notify, list) or not notify or len(notify) > MAX_NOTIFY or not all(isinstance(x, str) for x in notify):
-            errs.append(f"{lw}.notify: must be a non-empty list of channel names (<= {MAX_NOTIFY})")
+        # an EMPTY list is valid: the level only marks the call as escalated (badge in the Inbox) and notifies nobody
+        if not isinstance(notify, list) or len(notify) > MAX_NOTIFY or not all(isinstance(x, str) for x in notify):
+            errs.append(f"{lw}.notify: must be a list of channel names (<= {MAX_NOTIFY}; may be empty to only mark the call escalated)")
         else:
             for ch in notify:
                 if ch not in raw_ch:

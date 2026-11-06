@@ -49,3 +49,17 @@ describe("credential store", () => {
     expect(authFrame("abc")).toEqual({ event: "auth", token: "abc" });
   });
 });
+
+
+import { shouldOpenSocket } from "./credential";
+
+describe("shouldOpenSocket", () => {
+  it("opens in legacy mode whatever the credential state", () => {
+    expect(shouldOpenSocket(true, false)).toBe(true);
+    expect(shouldOpenSocket(true, true)).toBe(true);
+  });
+  it("opens in identity mode only with a credential: otherwise the sign-in panel is shown and no socket is opened", () => {
+    expect(shouldOpenSocket(false, true)).toBe(true);
+    expect(shouldOpenSocket(false, false)).toBe(false);
+  });
+});

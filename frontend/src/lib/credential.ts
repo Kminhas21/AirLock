@@ -70,3 +70,10 @@ export function browserSessionStorage(): StorageLike | null {
 export function authFrame(credential: string): { event: "auth"; token: string } {
   return { event: "auth", token: credential };
 }
+
+
+/** Should the Inbox open a socket now? In legacy mode (build-time token) always. In identity mode only with a stored credential: without one the hub would just
+ *  wait out its first-frame window, so the Sign in panel is shown immediately instead and no socket is opened. */
+export function shouldOpenSocket(legacyMode: boolean, hasCredential: boolean): boolean {
+  return legacyMode || hasCredential;
+}

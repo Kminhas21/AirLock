@@ -13,7 +13,7 @@ import { buildInboxUrl } from "../lib/inboxUrl";
 import { createBackoff } from "../lib/backoff";
 import { planReconnect } from "../lib/reconnect";
 import { decisionFrame, ruleRequestFrame, type Scope, type Verdict } from "../lib/inboxView";
-import { authFrame, browserSessionStorage, createCredentialStore } from "../lib/credential";
+import { authFrame, browserSessionStorage, createCredentialStore, shouldOpenSocket } from "../lib/credential";
 
 const LEGACY_TOKEN = import.meta.env.VITE_SENTINEL_WS_TOKEN;
 /** Legacy build-time token mode: no sign-in UI, no auth frame. */
@@ -39,6 +39,13 @@ export function useInbox(url: string = INBOX_URL) {
   const connect = useCallback(() => {
     const state = wsRef.current?.readyState;
     if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
+    if (!shouldOpenSocket(LEGACY_MODE, credentials.get() !== null)) {
+      // identity mode, nobody signed in: show the Sign in panel right away (the hub would only wait out its first-frame window)
+      authRequiredRef.current = true;
+      useInboxStore.getState().setAuthRequired(null);
+      setConnection("disconnected");
+      return;
+    }
 
     const ws = new WebSocket(url);
     wsRef.current = ws;

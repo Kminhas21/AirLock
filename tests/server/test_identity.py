@@ -238,6 +238,12 @@ class TestSchema:
         d["tenants"]["acme"]["channels"] = {"c": {"type": "webhook", "url": "http://127.0.0.1/x", "allow_http_loopback": "yes"}}
         assert "allow_http_loopback" in joined(d)
 
+    def test_an_escalation_level_may_only_mark_the_call_and_notify_nobody(self):
+        d = base_data()
+        d["tenants"]["acme"]["escalation"] = {"levels": [{"after_s": 30, "notify": []}]}
+        t = IdentityStore(d).tenant("acme")
+        assert [(l.after_s, l.notify) for l in t.levels] == [(30.0, ())]
+
     def test_channel_name_and_count(self):
         d = base_data()
         d["tenants"]["acme"]["channels"] = {"bad name": {"type": "webhook", "url": "https://h.example/x"}}
@@ -249,7 +255,7 @@ class TestSchema:
     @pytest.mark.parametrize("levels,needle", [
         ([{"after_s": 60, "notify": ["nope"]}], "unknown channel"), ([{"after_s": 0, "notify": ["c"]}], "after_s"),
         ([{"after_s": -5, "notify": ["c"]}], "after_s"), ([{"after_s": "60", "notify": ["c"]}], "after_s"),
-        ([{"after_s": 60, "notify": []}], "notify"), ([{"after_s": 60, "notify": "c"}], "notify"), ([{"after_s": 60}], "notify"),
+        ([{"after_s": 60, "notify": "c"}], "notify"), ([{"after_s": 60}], "notify"),
         ([{"after_s": 60, "notify": ["c"]}, {"after_s": 60, "notify": ["c"]}], "increasing"),
         ([{"after_s": 60, "notify": ["c"]}, {"after_s": 30, "notify": ["c"]}], "increasing"),
         ([{"after_s": 60, "notify": ["c"], "x": 1}], "unknown key"), (["x"], "must be an object"), ({"after_s": 1}, "levels"),

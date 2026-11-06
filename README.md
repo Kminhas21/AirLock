@@ -66,6 +66,8 @@ Operator UI (why flagged, session so far, deny with a reason, standing rules; DE
 
 Enforcement boundary (sandboxed downstream servers, just-in-time secrets; Linux; DECISIONS.md D21): `docs/boundary.md`.
 
+Identity, tenancy and escalation (operators, agents, roles, tenants, webhooks; DECISIONS.md D22): `docs/identity.md`.
+
 Full walkthrough of everything built, with workflows: `docs/COURSE.md`.
 
 Verify everything: `pip install -r requirements-dev.txt && scripts/verify.sh` (exit 0 = green). See `DECISIONS.md`.

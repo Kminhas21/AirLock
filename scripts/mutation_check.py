@@ -86,6 +86,12 @@ MUTANTS = [
     ("B3 proxy: secret values are no longer scrubbed", "sentinel_proxy/config.py", '        text = text.replace(v, "[REDACTED]")', "        text = text", 1),
     ("B4 hub: a call that receives credentials may be auto-approved by the legacy flag", "server/inbox_hub.py", "elif auto and working and not alerts and not secrets_used:", "elif auto and working and not alerts:", 1),
     ("B5 hub: the live session-open event hides the sandbox boundary", "server/inbox_hub.py", '"servers": session.servers, "boundary": session.boundary}))', '"servers": session.servers}))', 1),
+    # identity, tenancy, escalation (DECISIONS.md D22)
+    ("I1 identity: JWT audience is no longer verified", "server/identity.py", '"verify_iss": True, "verify_aud": True})', '"verify_iss": True, "verify_aud": False})', 1),
+    ("I2 identity: token digests compared with == (timing)", "server/identity.py", "hmac.compare_digest(rec.digest, digest)", "(rec.digest == digest)", 1),
+    ("I3 identity: a viewer may decide", "server/identity.py", 'need = {"view": 1, "decide": 2, "rules": 3}[action]', 'need = {"view": 1, "decide": 1, "rules": 3}[action]', 1),
+    ("I4 hub: broadcasts reach the UIs of every tenant", "server/inbox_hub.py", "uis = [u for u in self._uis if u.principal is not None and tenant is not None and u.principal.tenant == tenant]", "uis = list(self._uis)", 1),
+    ("I5 notify: redirects are followed", "server/notify.py", "follow_redirects=False", "follow_redirects=True", 1),
     ("X6 proxy forwards a denied call", "sentinel_proxy/proxy.py", "if not decision.approved:", "if False:", 1),
     ("R4 denied-party match ignored when choosing the earlier denied proposal for the alert text", "server/proposal_monitor.py",
      'pool = [d for d in self._denied_props if party in d[2].reaches] or list(self._denied_props)',

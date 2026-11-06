@@ -30,6 +30,8 @@ function backend(port: number, registry: string | undefined) {
       ...(process.env.INBOX_TOKEN ? { SENTINEL_WS_TOKEN: process.env.INBOX_TOKEN } : {}),
       // policy stage: the hub reads SENTINEL_POLICY at every proxy session start
       ...(process.env.SENTINEL_POLICY ? { SENTINEL_POLICY: process.env.SENTINEL_POLICY } : {}),
+      // identity stage: operators/agents/tenants from an identity file (no legacy token)
+      ...(process.env.SENTINEL_IDENTITY_FILE ? { SENTINEL_IDENTITY_FILE: process.env.SENTINEL_IDENTITY_FILE } : {}),
       ...(process.env.SENTINEL_POLICY_WRITABLE ? { SENTINEL_POLICY_WRITABLE: process.env.SENTINEL_POLICY_WRITABLE } : {}),
       // Pinned explicitly: the server default is action_sim, but live.spec.ts and the default replay expectations
       // (REPLAY_DETECTOR=D1) are about the RULES monitor. The action_sim / learned / registry runs are separate gate stages.
