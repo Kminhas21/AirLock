@@ -199,6 +199,26 @@ def build_name_map(tools_by_server: dict[str, tuple[str, list[str]]]) -> dict[st
     return out
 
 
+def clean_note(value: object, limit: int = 200) -> str:
+    """Operator note -> single safe line (<= limit chars, ellipsis if cut). Non-str / empty => ""."""
+    import unicodedata
+
+    if not isinstance(value, str):
+        return ""
+    out = []
+    for ch in value:
+        if ch.isspace():
+            out.append(" ")  # includes \n, \t, U+2028/2029, NBSP...
+        elif unicodedata.category(ch) in ("Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"):
+            continue  # control, format (bidi, ZWJ...), surrogate, private, unassigned
+        else:
+            out.append(ch)
+    text = " ".join("".join(out).split())
+    if len(text) > limit:
+        text = text[: limit - 1].rstrip() + "\u2026"
+    return text
+
+
 _CTRL = re.compile(r"[\x00-\x1f\x7f]+")
 
 

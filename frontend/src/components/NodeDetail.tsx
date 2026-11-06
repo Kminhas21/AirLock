@@ -4,7 +4,7 @@
 // Shows: node ID, type, tool name, full reasoning context, tool parameters
 // (pretty-printed JSON), risk level, decision status, and result text.
 
-import { DRIFT_THRESHOLD } from "../lib/drift";
+import { pointThreshold } from "../lib/drift";
 import { singleLine } from "../lib/safeText";
 import { AgentText } from "./AgentText";
 import { useSessionStore } from "../stores/sessionStore";
@@ -137,7 +137,7 @@ export function NodeDetail() {
                 <span
                   style={{
                     color:
-                      driftPoint.mahalanobisDistance > DRIFT_THRESHOLD
+                      driftPoint.mahalanobisDistance > pointThreshold(driftPoint.threshold)
                         ? "#ef4444"
                         : "#22c55e",
                   }}

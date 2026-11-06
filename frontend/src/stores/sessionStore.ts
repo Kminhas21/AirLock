@@ -42,6 +42,8 @@ export interface DriftPoint {
   z: number;
   mahalanobisDistance: number;
   baselineBreached: boolean;
+  /** Breach threshold reported with this point (absent => lib/drift DRIFT_THRESHOLD). */
+  threshold?: number;
   metrics: {
     compliance_score: number;
     goal_persistence: number;
@@ -216,6 +218,7 @@ export const useSessionStore = create<SessionState>((set) => ({
           z: e.coordinates.z,
           mahalanobisDistance: e.mahalanobis_distance,
           baselineBreached: e.baseline_breached,
+          threshold: typeof e.threshold === "number" ? e.threshold : undefined,
           metrics: e.metrics,
         },
       ],

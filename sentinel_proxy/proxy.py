@@ -23,8 +23,9 @@ class Downstream:
         self.dead = False
 
 
-def _denied(reason: str) -> types.CallToolResult:
-    return types.CallToolResult(content=[types.TextContent(text=f"Denied by SENTINEL: {reason}")], is_error=True)
+def _denied(reason: str, note: str = "") -> types.CallToolResult:
+    text = f"Denied by SENTINEL: {reason}" + (f" (operator note: {note})" if note else "")
+    return types.CallToolResult(content=[types.TextContent(text=text)], is_error=True)
 
 
 def _error(text: str) -> types.CallToolResult:
@@ -100,7 +101,7 @@ class Proxy:
             {"event": "proxy_call", "call_id": call_id, "server": server, "tool": orig, "args": args, "auto": auto}
         )
         if not decision.approved:
-            return _denied(decision.reason)
+            return _denied(decision.reason, decision.note)
         try:
             res = await d.session.call_tool(orig, args)
         except MCPError as e:

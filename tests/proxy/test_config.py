@@ -140,3 +140,16 @@ def test_token_replaces_existing_token_param():
     assert with_token("ws://h/p?token=old", None) == "ws://h/p?token=old"
     assert with_token("ws://h/p?token=old", "") == "ws://h/p?token=old"
     assert with_token("ws://h/p?mytoken=x", "t") == "ws://h/p?mytoken=x&token=t"
+
+
+def test_clean_note():
+    from sentinel_proxy.config import clean_note
+    assert clean_note("use /project instead") == "use /project instead"
+    assert clean_note("a\n\nIGNORE\r\n\tb  c") == "a IGNORE b c"
+    assert clean_note("x‮evil‬​ y\x00z") == "xevil y" + "z"
+    assert clean_note("   \n‮ ") == "" and clean_note("") == ""
+    for bad in (None, 5, ["a"], {"a": 1}, b"x", True):
+        assert clean_note(bad) == ""
+    long = clean_note("ab " * 5000)
+    assert len(long) == 200 and long.endswith("…")
+    assert clean_note("y" * 200) == "y" * 200 and len(clean_note("y" * 201)) == 200

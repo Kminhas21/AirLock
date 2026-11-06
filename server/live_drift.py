@@ -135,7 +135,7 @@ class SessionDrift:
         raw = self.analyzer.analyze(text, node_id)
         out = [events.drift_update(
             raw["step_index"], raw["node_id"], raw["coordinates"], raw["metrics"],
-            raw["mahalanobis_distance"], raw["baseline_breached"],
+            raw["mahalanobis_distance"], raw["baseline_breached"], threshold=self.threshold,
         )]
         hits = self.tracker.check_goal_persistence(text)
         if hits:

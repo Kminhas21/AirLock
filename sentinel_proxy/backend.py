@@ -10,7 +10,7 @@ from typing import Any
 
 from websockets.asyncio.client import connect
 
-from sentinel_proxy.config import strip_query
+from sentinel_proxy.config import clean_note, strip_query
 
 _KNOWN_REASONS = {"human", "auto", "policy", "log_unavailable", "timeout", "invalid", "disconnected", "duplicate"}
 UNREACHABLE = "SENTINEL backend unreachable"
@@ -25,6 +25,7 @@ def log(msg: str) -> None:
 class Decision:
     approved: bool
     reason: str
+    note: str = ""  # sanitised operator note; only ever set on a human deny
 
 
 class BackendLink:
@@ -107,7 +108,10 @@ class BackendLink:
         reason = frame.get("reason")
         reason = reason if reason in _KNOWN_REASONS else "invalid"
         # Only the exact string "approve" approves.
-        fut.set_result(Decision(frame.get("decision") == "approve", reason))
+        approved = frame.get("decision") == "approve"
+        # The note is honoured for human DENIALS only; never logged.
+        note = clean_note(frame.get("note")) if (not approved and reason == "human") else ""
+        fut.set_result(Decision(approved, reason, note))
 
     async def wait_started(self, timeout: float) -> None:
         """Wait up to `timeout` for the first hello_ack (or a fatal reject)."""

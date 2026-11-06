@@ -61,12 +61,18 @@ def drift_update(
     mahalanobis_distance: float,
     baseline_breached: bool,
     *,
+    threshold: float | None = None,
     now: datetime | None = None,
 ) -> dict:
-    return {"event": "drift_update", "step_index": step_index, "node_id": node_id,
-            "coordinates": coordinates, "metrics": metrics,
-            "mahalanobis_distance": mahalanobis_distance,
-            "baseline_breached": baseline_breached, "timestamp": _ts(now)}
+    """``threshold``: the detector's ACTIVE breach threshold, carried in the event so the UI can never disagree with the backend (B18).
+    Omitted (key absent) when unknown, e.g. recorded replays; the UI then falls back to its constant."""
+    out = {"event": "drift_update", "step_index": step_index, "node_id": node_id,
+           "coordinates": coordinates, "metrics": metrics,
+           "mahalanobis_distance": mahalanobis_distance,
+           "baseline_breached": baseline_breached, "timestamp": _ts(now)}
+    if threshold is not None:
+        out["threshold"] = float(threshold)
+    return out
 
 
 def alignment_alert(

@@ -55,6 +55,8 @@ export interface DriftUpdateEvent {
   };
   mahalanobis_distance: number;
   baseline_breached: boolean;
+  /** The detector's active breach threshold; absent in recorded replays (the UI then uses DRIFT_THRESHOLD). */
+  threshold?: number;
   timestamp: string;
 }
 

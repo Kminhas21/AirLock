@@ -23,7 +23,7 @@ const plotInterop = PlotImport as unknown as {
 const Plot: ComponentType<PlotProps> =
   typeof plotInterop.default !== "undefined" ? plotInterop.default : PlotImport;
 import { useSessionStore } from "../stores/sessionStore";
-import { DRIFT_THRESHOLD } from "../lib/drift";
+import { latestThreshold, pointThreshold } from "../lib/drift";
 
 const BASELINE_SIZE = 3;
 
@@ -85,7 +85,7 @@ export function DriftMonitor() {
         marker: {
           size: 10,
           color: trail.map((p) =>
-            p.mahalanobisDistance > DRIFT_THRESHOLD ? "#ef4444" : "#f59e0b"
+            p.mahalanobisDistance > pointThreshold(p.threshold) ? "#ef4444" : "#f59e0b"
           ),
         },
         text: trail.map((p) => `S${p.stepIndex}`),
@@ -115,7 +115,7 @@ export function DriftMonitor() {
         y: driftPoints.map((p) => p.mahalanobisDistance),
         marker: {
           color: driftPoints.map((p) =>
-            p.mahalanobisDistance > DRIFT_THRESHOLD ? "#ef4444" : "#22c55e"
+            p.mahalanobisDistance > pointThreshold(p.threshold) ? "#ef4444" : "#22c55e"
           ),
           size: 8,
         },
@@ -143,6 +143,8 @@ export function DriftMonitor() {
     color: "#6b7280",
   };
 
+  const threshold = latestThreshold(driftPoints);
+
   const maxStep =
     driftPoints.length > 0
       ? Math.max(...driftPoints.map((p) => p.stepIndex), 5)
@@ -155,7 +157,7 @@ export function DriftMonitor() {
         {currentDriftScore > 0 && (
           <span
             className={`drift-score-badge ${
-              currentDriftScore > DRIFT_THRESHOLD ? "breached" : ""
+              currentDriftScore > threshold ? "breached" : ""
             }`}
           >
             Score: {currentDriftScore.toFixed(2)}
@@ -216,15 +218,15 @@ export function DriftMonitor() {
                     type: "line",
                     x0: 0,
                     x1: maxStep,
-                    y0: DRIFT_THRESHOLD,
-                    y1: DRIFT_THRESHOLD,
+                    y0: threshold,
+                    y1: threshold,
                     line: { color: "#ef4444", width: 2, dash: "dash" },
                   },
                 ],
                 annotations: [
                   {
                     x: 0.02,
-                    y: DRIFT_THRESHOLD,
+                    y: threshold,
                     xref: "paper",
                     yref: "y",
                     text: "threshold",
