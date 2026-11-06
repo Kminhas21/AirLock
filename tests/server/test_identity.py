@@ -30,6 +30,7 @@ class IdentityStore(ID.IdentityStore):
     def authenticate_ex(self, kind, credential, remote=None):
         return super().authenticate_ex(kind, credential, remote=remote if remote is not None else f"auto-{next(_remotes)}")
 
+pytestmark = pytest.mark.filterwarnings("ignore::jwt.warnings.InsecureKeyLengthWarning")
 NOW = 1_700_000_000
 ISS, AUD = "https://sso.example.com", "sentinel"
 ALICE, BOB_TOKEN, BOT, CAROL = "alice-token-0123456789", "bob-token-0123456789", "bot-token-0123456789", "carol-token-0123456789"
@@ -843,7 +844,7 @@ class TestJwtKeys:
         assert s.authenticate("operator", mint(RSA1, kid="good")) is not None
         for kid, key in (("priv", RSA2), ("weak", RSA_SMALL), ("enc", RSA2), ("dup", RSA1), ("dup", RSA2)):
             assert s.authenticate("operator", mint(key, kid=kid)) is None, kid
-        sym_tok = jwt.encode(claims(), "secret", algorithm="HS256", headers={"kid": "sym"})
+        sym_tok = jwt.encode(claims(), "s" * 40, algorithm="HS256", headers={"kid": "sym"})
         assert s.authenticate_ex("operator", sym_tok) == (None, "unsupported")
 
     def test_jwks_key_alg_pins_the_algorithm(self, tmp_path):
@@ -928,7 +929,7 @@ class TestThrottle:
         s, _ = self.make()
         for _ in range(4):
             s.authenticate("operator", "bad", remote="r")
-            assert s.authenticate("operator", ALICE, remote="r") is not None or True
+            s.authenticate("operator", ALICE, remote="r")                      # successes in between
         s.authenticate("operator", "bad", remote="r")
         assert s.authenticate_ex("operator", ALICE, remote="r")[1] == "throttled"
 
