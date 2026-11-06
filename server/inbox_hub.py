@@ -862,6 +862,22 @@ class InboxHub:
         await self._broadcast({"event": "inbox_session", "session_id": session.session_id, "state": "closed"},
                               session.tenant)
 
+    async def audit_auth_failure(self, kind: str, reason: str, remote: Any) -> None:
+        """Log a failed authentication (no credential material), at most once per (remote, 60 s)."""
+        try:
+            key = str(remote)
+            now = self._clock()
+            last = self._auth_audit.get(key)
+            if last is not None and now - last < AUTH_AUDIT_WINDOW_S:
+                return
+            if len(self._auth_audit) > 2048:
+                self._auth_audit.clear()
+            self._auth_audit[key] = now
+            await self._append("auth_failed", None, None, {"kind": kind, "reason": reason,
+                                                           "remote_hash": hashlib.sha256(key.encode()).hexdigest()[:12]})
+        except Exception:
+            logger.exception("inbox: could not audit a failed authentication")
+
     # ------------------------------------------------------------------ escalation
     def _start_escalation(self, p: _Pending):
         if not p.session.identity_mode:
@@ -943,45 +959,64 @@ class InboxHub:
                                {"channel": ch.name, "level": level, "ok": ok, "status": status})
 
     # ------------------------------------------------------------------ UI side
-    def snapshot(self, recent: list | None = None, capabilities: dict | None = None) -> dict:
+    def snapshot(self, recent: list | None = None, capabilities: dict | None = None, principal: Any = None) -> dict:
+        """Identity mode: ONLY the principal's tenant (no principal => nothing: fail closed)."""
         sessions = []
         for s in self.sessions.values():
-            pend = []
-            for p in s.pending.values():
-                d = self._pending_payload(p, self._timeout)
-                pend.append(d)
+            if self.identity_mode and (principal is None or s.tenant != principal.tenant):
+                continue
+            pend = [self._pending_payload(p) for p in s.pending.values()]
             sessions.append({"session_id": s.session_id, "servers": s.servers, "boundary": s.boundary, "pending": pend})
         caps = capabilities if capabilities is not None else {"policy_writable": False, "event_log": self.store is not None}
-        return {"event": "inbox_snapshot", "sessions": sessions, "recent": list(recent or []), "capabilities": caps}
+        out = {"event": "inbox_snapshot", "sessions": sessions, "recent": list(recent or []), "capabilities": caps}
+        if principal is not None:
+            out["principal"] = {"id": principal.id, "tenant": principal.tenant, "role": principal.role}
+        return out
 
-    def _capabilities(self) -> dict:
-        """policy_writable: SENTINEL_POLICY_WRITABLE=1 AND a usable SENTINEL_POLICY file. Runs in a thread (reads the file)."""
+    def _policy_path_for(self, principal: Any) -> str:
+        """A tenant's own policy file wins over SENTINEL_POLICY (identity mode)."""
+        cfg = self._tenant_cfg(principal.tenant) if principal is not None else None
+        return (getattr(cfg, "policy_file", None) or os.environ.get("SENTINEL_POLICY") or "").strip()
+
+    def _capabilities(self, principal: Any = None) -> dict:
+        """policy_writable: SENTINEL_POLICY_WRITABLE=1 AND a usable policy file (identity mode: also role admin, and the
+        TENANT's file). Runs in a thread (reads the file)."""
         writable = False
-        if (os.environ.get("SENTINEL_POLICY_WRITABLE") or "").strip() == "1":
-            path = (os.environ.get("SENTINEL_POLICY") or "").strip()
+        if (os.environ.get("SENTINEL_POLICY_WRITABLE") or "").strip() == "1" and \
+                (principal is None or principal.role == "admin"):
+            path = self._policy_path_for(principal)
             if path:
                 try:
                     writable = policy_mod.load_policy_file(path)[0] is not None
                 except Exception:
                     writable = False
-        return {"policy_writable": writable, "event_log": self.store is not None}
+        caps = {"policy_writable": writable, "event_log": self.store is not None}
+        if principal is not None:
+            caps["can_decide"] = principal.role in ("approver", "admin")
+        return caps
 
-    async def ui_connected(self, peer: Any) -> _Peer:
+    async def ui_connected(self, peer: Any, principal: Any = None) -> _Peer:
         """Register a UI and send its snapshot. The UI's send lock is held from registration until the snapshot is out, so any broadcast that
         happens meanwhile (e.g. a proxy closing) queues BEHIND the snapshot: the snapshot is always the first frame a UI receives. The snapshot is
         built after the history read, so it already contains every state change made before it; a later duplicate broadcast is harmless (items are keyed)."""
         ui = _Peer(peer, UI_SEND_TIMEOUT_S)
+        ui.principal = principal
         async with ui._lock:
             self._uis.append(ui)
             recent: list = []
             if self.store is not None:
                 try:
-                    recent = await asyncio.to_thread(self.store.recent_resolved, 50)
+                    if self.identity_mode:
+                        recent = await asyncio.to_thread(self.store.recent_resolved, 50,
+                                                         principal.tenant if principal is not None else "\0")
+                    else:
+                        recent = await asyncio.to_thread(self.store.recent_resolved, 50)
                 except Exception:
                     logger.exception("inbox: could not read the recent history from the event log")
-            caps = await asyncio.to_thread(self._capabilities)
+            caps = await asyncio.to_thread(self._capabilities, principal) if self.identity_mode \
+                else await asyncio.to_thread(self._capabilities)
             try:
-                await asyncio.wait_for(ui.peer.send_json(self.snapshot(recent, caps)), UI_SEND_TIMEOUT_S)
+                await asyncio.wait_for(ui.peer.send_json(self.snapshot(recent, caps, principal)), UI_SEND_TIMEOUT_S)
             except Exception:
                 logger.warning("inbox: could not send the snapshot to a UI; closing it")
                 ui.dead = True
@@ -996,12 +1031,12 @@ class InboxHub:
             self._uis.remove(ui)
 
     # ------------------------------------------------------------------ standing rules (OP4)
-    def _find_call(self, sid: Any, call_id: Any):
+    def _find_call(self, sid: Any, call_id: Any, tenant: str | None = None):
         """(server, tool, args) of a call this hub saw in THAT session (pending or the in-memory ring), else None."""
         if not isinstance(sid, str) or not isinstance(call_id, str):
             return None
         s = self.sessions.get(sid)
-        if s is None:
+        if s is None or (tenant is not None and s.tenant != tenant):      # another tenant's call is simply unknown
             return None
         p = s.pending.get(call_id)
         if p is not None:
@@ -1011,46 +1046,53 @@ class InboxHub:
                 return item["server"], item["tool"], item["args"]
         return None
 
-    def _writable_policy(self):
+    def _writable_policy(self, principal: Any = None):
         """-> (path, digest_before) when standing rules may be written, else None. Reads the file: run in a thread."""
         if (os.environ.get("SENTINEL_POLICY_WRITABLE") or "").strip() != "1":
             return None
-        path = (os.environ.get("SENTINEL_POLICY") or "").strip()
+        path = self._policy_path_for(principal)
         if not path:
             return None
         pol = policy_mod.load_policy_file(path)[0]
         return (path, pol.digest()) if pol is not None else None
 
-    async def _rule_result(self, ok: bool, reason: str, rule_id: str | None = None, digest: str | None = None) -> None:
+    async def _rule_result(self, ok: bool, reason: str, rule_id: str | None = None, digest: str | None = None,
+                           tenant: str | None = None) -> None:
         await self._broadcast({"event": "inbox_rule_result", "ok": ok, "rule_id": rule_id, "reason": reason,
-                               "policy_digest": digest, "applies": "new_sessions"})
+                               "policy_digest": digest, "applies": "new_sessions"}, tenant)
 
-    async def _rule_request(self, frame: dict) -> None:
+    async def _rule_request(self, frame: dict, ui: Any = None) -> None:
+        principal = getattr(ui, "principal", None)
+        tenant = principal.tenant if principal is not None else None
         now = time.monotonic()
         while self._rule_times and now - self._rule_times[0] > RULE_RATE_WINDOW_S:
             self._rule_times.popleft()
         if len(self._rule_times) >= RULE_RATE_LIMIT:
-            await self._rule_result(False, "rate_limited")
+            await self._rule_result(False, "rate_limited", tenant=tenant)
             return
         self._rule_times.append(now)
         try:
-            await self._rule_request_inner(frame)
+            await self._rule_request_inner(frame, principal, ui)
         except Exception:
             logger.exception("inbox: unexpected error while adding a standing rule")
-            await self._rule_result(False, "write_failed")
+            await self._rule_result(False, "write_failed", tenant=tenant)
 
-    async def _rule_request_inner(self, frame: dict) -> None:
+    async def _rule_request_inner(self, frame: dict, principal: Any = None, ui: Any = None) -> None:
+        tenant = principal.tenant if principal is not None else None
+        rr = lambda ok, reason, rid=None, dg=None: self._rule_result(ok, reason, rid, dg, tenant)       # noqa: E731
         async with self._rule_lock:            # one rule write at a time: digest_before is the digest of what we then change
-            target = await asyncio.to_thread(self._writable_policy)
+            target = await asyncio.to_thread(self._writable_policy, principal)
             if target is None:
-                return await self._rule_result(False, "not_writable")
+                return await rr(False, "not_writable")
             if frame.get("confirm") is not True:
-                return await self._rule_result(False, "not_confirmed")
+                return await rr(False, "not_confirmed")
             sid, call_id = frame.get("session_id"), frame.get("call_id")
-            found = self._find_call(sid, call_id)
+            found = self._find_call(sid, call_id, tenant)
             if found is None:
-                return await self._rule_result(False, "unknown_call")
+                return await rr(False, "unknown_call")
             server, tool, args = found
+            if principal is not None and not identity_mod.can(principal, "rules", server=server, tenant=tenant):
+                return await self._forbidden(ui, "rules", "server")
             path, digest_before = target
             note = f"added from the Inbox (session {sid}, call {safe_text.clean_field(call_id, 64)})"[:200]
             try:
@@ -1058,44 +1100,64 @@ class InboxHub:
                                                server, tool, args, note=note)
             except ValueError as exc:
                 reason = str(exc) if str(exc) in ("cannot_build", "scope_not_allowed") else "cannot_build"
-                return await self._rule_result(False, reason)
+                return await rr(False, reason)
             # write-ahead: the event is on disk BEFORE the policy file changes; no log, no change
             if self.store is not None:
                 res = await self._append("policy_rule_added", sid, call_id,
                                          {"rule": rule, "digest_before": digest_before, "session_id": sid, "call_id": call_id})
                 if res != "ok":
-                    return await self._rule_result(False, "log_unavailable")
+                    return await rr(False, "log_unavailable")
             try:
                 out = await asyncio.to_thread(policy_writer.append_rule, path, rule)
             except policy_writer.PolicyWriteError as exc:
                 reason = exc.reason if exc.reason in ("invalid_policy", "write_failed") else "write_failed"
                 logger.error("inbox: standing rule not written (%s)", reason)
-                return await self._rule_result(False, reason)
+                return await rr(False, reason)
             logger.info("inbox: standing rule %s added (policy digest %s -> %s); applies to NEW sessions",
                         out.get("rule_id"), out.get("digest_before"), out.get("digest_after"))
-            await self._rule_result(True, "ok", out.get("rule_id"), out.get("digest_after"))
+            await rr(True, "ok", out.get("rule_id"), out.get("digest_after"))
 
-    async def handle_ui_frame(self, frame: Any) -> None:
-        """Only inbox_decision does anything. Never raises, never approves anything but the exact string 'approve'.
-        session_id is REQUIRED: the decision resolves only that session's call."""
+    async def _forbidden(self, ui: Any, action: str, reason: str) -> None:
+        """Answer THAT connection only; nothing changes."""
+        if ui is not None:
+            await ui.send({"event": "inbox_forbidden", "action": action, "reason": reason})
+
+    async def handle_ui_frame(self, frame: Any, ui: Any = None) -> None:
+        """Only inbox_decision / inbox_rule_request do anything. Never raises, never approves anything but the exact string
+        'approve'. session_id is REQUIRED: the decision resolves only that session's call. Identity mode: `ui` carries the
+        principal (role, tenant, server allowlist); another tenant's call is ignored exactly like an unknown one."""
+        principal = getattr(ui, "principal", None)
+        if self.identity_mode and principal is None:
+            logger.warning("inbox: ignoring a UI frame from an unauthenticated connection")
+            return
         if isinstance(frame, dict) and frame.get("event") == "inbox_rule_request":
-            await self._rule_request(frame)
+            if principal is not None and principal.role != "admin":
+                return await self._forbidden(ui, "rules", "role")
+            await self._rule_request(frame, ui)
             return
         if not isinstance(frame, dict) or frame.get("event") != "inbox_decision":
             logger.warning("inbox: ignoring a UI frame that is not an inbox_decision")
             return
+        if principal is not None and principal.role not in ("approver", "admin"):
+            return await self._forbidden(ui, "decide", "role")
         sid, call_id, decision = frame.get("session_id"), frame.get("call_id"), frame.get("decision")
         if (not isinstance(sid, str) or not isinstance(call_id, str) or not isinstance(decision, str)
                 or decision not in ("approve", "deny")):
             logger.warning("inbox: ignoring an invalid inbox_decision")
             return
         s = self.sessions.get(sid)
+        if s is not None and principal is not None and s.tenant != principal.tenant:
+            s = None                                  # another tenant's call: silently unknown
         p = s.pending.get(call_id) if s is not None else None
         if p is None:
             logger.info("inbox: decision for an unknown or already resolved call ignored")
             return
-        if p.claim(decision, "human") and decision == "deny":
-            p.note = clean_note(frame.get("note"))
+        if principal is not None and not identity_mod.can(principal, "decide", server=p.server, tenant=s.tenant):
+            return await self._forbidden(ui, "decide", "server")
+        if p.claim(decision, "human"):
+            p.operator = principal.id if principal is not None else None
+            if decision == "deny":
+                p.note = clean_note(frame.get("note"))
 
 
 # ---------------------------------------------------------------------- socket loops (duck-typed websocket)
@@ -1107,15 +1169,59 @@ async def _recv(ws: Any) -> Any:
     return msg.get("text") if msg.get("text") is not None else msg.get("bytes")
 
 
+async def _authenticate(hub: InboxHub, ws: Any, kind: str):
+    """Identity mode only. Credential: `Authorization: Bearer ...` header, else a first frame {"event":"auth","token":...} within
+    5 s. -> (Principal | None, reason). `?token=` is never looked at. Never raises."""
+    try:
+        if hub.identity is None:                       # SENTINEL_IDENTITY_FILE was set but unusable: refuse everyone
+            return None, "unauthorized"
+        cred = None
+        header = ws.headers.get("authorization") if getattr(ws, "headers", None) is not None else None
+        if isinstance(header, str) and header[:7].lower() == "bearer ":
+            cred = header[7:].strip()
+        else:
+            try:
+                raw = await asyncio.wait_for(_recv(ws), AUTH_FRAME_TIMEOUT_S)
+            except Exception:
+                return None, "timeout"
+            frame = parse_frame(raw)
+            if isinstance(frame, dict) and frame.get("event") == "auth" and isinstance(frame.get("token"), str):
+                cred = frame["token"]
+        client = getattr(ws, "client", None)
+        remote = getattr(client, "host", None)
+        principal, reason = await asyncio.to_thread(hub.identity.authenticate_ex, kind, cred, remote)
+        if principal is None:
+            await hub.audit_auth_failure(kind, reason, remote)
+            return None, "throttled" if reason == "throttled" else "unauthorized"
+        return principal, "ok"
+    except Exception:
+        logger.exception("inbox: authentication failed unexpectedly")
+        return None, "unauthorized"
+
+
 async def serve_proxy(hub: InboxHub, ws: Any) -> None:
     """Drive an ACCEPTED proxy websocket until it closes. Never raises."""
     session = None
     try:
+        principal = None
+        if hub.identity_mode:
+            principal, why = await _authenticate(hub, ws, "agent")
+            if principal is None:
+                if why != "timeout":
+                    try:
+                        await ws.send_json({"event": "hello_reject", "reason": "unauthorized"})
+                    except Exception:
+                        pass
+                try:
+                    await ws.close(1008)
+                except Exception:
+                    pass
+                return
         try:
             raw = await asyncio.wait_for(_recv(ws), HELLO_TIMEOUT_S)
         except Exception:
             return
-        session = await hub.proxy_hello(ws, parse_frame(raw))
+        session = await hub.proxy_hello(ws, parse_frame(raw), principal)
         if session is None:
             return
         while True:
@@ -1145,13 +1251,29 @@ async def serve_ui(hub: InboxHub, ws: Any) -> None:
     """Drive an ACCEPTED UI websocket until it closes. Never raises; a UI going away never affects pending calls."""
     ui = None
     try:
-        ui = await hub.ui_connected(ws)
+        principal = None
+        if hub.identity_mode:
+            principal, why = await _authenticate(hub, ws, "operator")
+            if principal is None:
+                if why != "timeout":
+                    try:
+                        await ws.send_json({"event": "auth_error", "reason": why})
+                    except Exception:
+                        pass
+                try:
+                    await ws.close(1008)
+                except Exception:
+                    pass
+                return
+            await ws.send_json({"event": "auth_ok", "principal": {"id": principal.id, "tenant": principal.tenant,
+                                                                  "role": principal.role}})
+        ui = await hub.ui_connected(ws, principal)
         while True:
             frame = parse_frame(await _recv(ws))
             if frame is None:
                 logger.warning("inbox: UI sent an unparseable or oversize frame; ignoring")
                 continue
-            await hub.handle_ui_frame(frame)
+            await hub.handle_ui_frame(frame, ui)
     except Exception:
         logger.info("inbox: UI socket ended")
     finally:
