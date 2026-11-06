@@ -11,7 +11,7 @@ import { callKey, MAX_PENDING_RENDERED, type InboxDecision, type PendingCall, ty
 import { panelView, singleLine } from "../lib/safeText";
 import { ruleToast, type Scope, type Verdict } from "../lib/inboxView";
 import { AgentText } from "./AgentText";
-import { SessionSoFar, StandingRules, WhyFlagged } from "./InboxPanels";
+import { BoundaryChips, SessionSoFar, StandingRules, WhyFlagged } from "./InboxPanels";
 
 export interface InboxProps {
   /** Returns false when the decision could not be sent (socket not open). */
@@ -79,6 +79,11 @@ function PendingCard({
       {hiddenChars > 0 && (
         <div className="inbox-truncated" data-testid="inbox-truncated" role="alert">
           TRUNCATED: {hiddenChars} more characters not shown. Approve is disabled because you cannot see all of the arguments.
+        </div>
+      )}
+      {call.secrets_used.length > 0 && (
+        <div className="inbox-secrets" role="alert" data-testid="inbox-secrets-warning">
+          This call will receive credentials: {call.secrets_used.join(", ")} (exist only during this call)
         </div>
       )}
       <AgentText text={argsText} max={MAX_ARGS_PANEL} />
@@ -240,6 +245,7 @@ export function Inbox({ onDecision, onRuleRequest, nowMs }: InboxProps) {
                   {s.state === "open" ? "open" : "closed"}
                 </span>
                 <span className="inbox-servers">{s.servers.map((x) => singleLine(x, 40)).join(", ") || "no servers"}</span>
+                <BoundaryChips session={s} />
               </li>
             ))}
           </ul>

@@ -51,7 +51,7 @@ MAX_FILE_BYTES = 1_000_000      # engine: policy file size
 _ID_RE = re.compile(r"[A-Za-z0-9._-]{1,60}")
 _TOP_KEYS = {"version", "default", "rules"}
 _RULE_KEYS = {"id", "verdict", "note", "when"}
-_WHEN_KEYS = {"server", "tool", "args", "destination", "party", "alert"}
+_WHEN_KEYS = {"server", "tool", "args", "destination", "party", "alert", "secrets"}
 _ARG_KEYS = {"path", "op", "value"}
 _BAD_NAME_CATS = {"Cc", "Cf", "Cs", "Zl", "Zp"}          # control, format (bidi, ZW), surrogate, line/para separators
 
@@ -99,6 +99,7 @@ class Rule:
     party: tuple | None
     alert: bool | None
     specificity: int
+    secrets: bool | None = None   # the call receives just-in-time credentials (proxy `secrets_used` non-empty)
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +230,9 @@ def _show(v) -> str:
 
 
 def _check_when(w, where: str, errs: list):
-    """-> (server, tool, args, destination, party, alert, specificity) or None."""
+    """-> (server, tool, args, destination, party, alert, specificity, secrets) or None."""
     if w is None:
-        return None, None, (), None, None, None, 0
+        return None, None, (), None, None, None, 0, None
     if not isinstance(w, dict):
         errs.append(f"{where}: must be an object")
         return None
@@ -280,9 +281,16 @@ def _check_when(w, where: str, errs: list):
         else:
             alert = w["alert"]
         spec += 1
+    secrets = None
+    if "secrets" in w:
+        if not isinstance(w["secrets"], bool):
+            errs.append(f"{where}.secrets: must be true or false")
+        else:
+            secrets = w["secrets"]
+        spec += 1
     if len(errs) > n0:
         return None
-    return server, tool, args, dest, party, alert, spec
+    return server, tool, args, dest, party, alert, spec, secrets
 
 
 def _build(data: Any) -> tuple[list, str, list]:
@@ -337,8 +345,9 @@ def _build(data: Any) -> tuple[list, str, list]:
         w = _check_when(r.get("when"), f"{where}.when", errs)
         if len(errs) > n0 or w is None:
             continue
-        server, tool, args, dest, party, alert, spec = w
-        rules.append(Rule(rid, verdict, note, copy.deepcopy(r.get("when") or {}), server, tool, args, dest, party, alert, spec))
+        server, tool, args, dest, party, alert, spec, secrets = w
+        rules.append(Rule(rid, verdict, note, copy.deepcopy(r.get("when") or {}), server, tool, args, dest, party, alert, spec,
+                          secrets))
     return rules, default, errs
 
 
@@ -501,10 +510,11 @@ def _name_matches(name_ok: bool, name: Any, patterns: tuple, verdict: str) -> bo
 
 
 class _Ctx:
-    __slots__ = ("server", "tool", "args", "registry", "alerts", "server_ok", "tool_ok", "_res", "_res_err")
+    __slots__ = ("server", "tool", "args", "registry", "alerts", "secrets", "server_ok", "tool_ok", "_res", "_res_err")
 
-    def __init__(self, server, tool, args, registry, alerts):
+    def __init__(self, server, tool, args, registry, alerts, secrets=False):
         self.server, self.tool, self.args, self.registry, self.alerts = server, tool, args, registry, alerts
+        self.secrets = secrets
         self.server_ok = _clean_name(server)
         self.tool_ok = _clean_name(tool)
         self._res = None
@@ -576,6 +586,8 @@ def _rule_matches(rule: Rule, ctx: _Ctx) -> bool:
         return False
     if rule.alert is not None and rule.alert != ctx.alerts:
         return False
+    if rule.secrets is not None and rule.secrets != ctx.secrets:
+        return False
     for c in rule.args:
         if not _arg_holds(c, ctx.args):
             return False
@@ -599,7 +611,7 @@ def _canon_when(rule: Rule) -> str:
     args = sorted(json.dumps([".".join(c.path), c.op, list(c.value) if isinstance(c.value, tuple) else c.value],
                              sort_keys=True, default=str) for c in rule.args)
     return json.dumps({"s": lst(rule.server), "t": lst(rule.tool), "a": args, "d": rule.destination,
-                       "p": lst(rule.party), "al": rule.alert}, sort_keys=True)
+                       "p": lst(rule.party), "al": rule.alert, "se": rule.secrets}, sort_keys=True)
 
 
 class Policy:
@@ -629,6 +641,11 @@ class Policy:
                 if neg:
                     warns.append(f"rule {r.id}: allow rule uses negative operator(s) {', '.join(neg)}, which are TRUE when "
                                  f"the argument is missing or has the wrong type (it would allow on unknowns)")
+        for r in self.rules:
+            if r.verdict == "allow" and r.secrets is True and r.server is None and r.tool is None and not r.args \
+                    and r.destination in (None, "any") and r.party is None and r.alert is None:
+                warns.append(f"rule {r.id}: allow rule with secrets: true and no other narrowing condition would allow "
+                             f"EVERY call that receives credentials")
         by_when: dict[str, list[Rule]] = {}
         for r in self.rules:
             by_when.setdefault(_canon_when(r), []).append(r)
@@ -644,14 +661,14 @@ class Policy:
         return warns
 
     # ---- evaluation -----------------------------------------------------------
-    def evaluate(self, server, tool, args, *, registry=None, alerts_present=False) -> Decision:
+    def evaluate(self, server, tool, args, *, registry=None, alerts_present=False, secrets_used=False) -> Decision:
         try:
-            return self._evaluate(server, tool, args, registry, bool(alerts_present))
+            return self._evaluate(server, tool, args, registry, bool(alerts_present), bool(secrets_used))
         except Exception:                                  # never raise out of the engine; fail closed
             return Decision("ask", None, (), "engine_error", False)
 
-    def _evaluate(self, server, tool, args, registry, alerts) -> Decision:
-        ctx = _Ctx(server, tool, args, registry, alerts)
+    def _evaluate(self, server, tool, args, registry, alerts, secrets=False) -> Decision:
+        ctx = _Ctx(server, tool, args, registry, alerts, secrets)
         matched: list[Rule] = []
         errors: list[str] = []
         for r in self.rules:
@@ -684,6 +701,9 @@ class Policy:
             verdict, rid, reason = self.default, None, "default"
         if alerts and verdict == "allow":
             return Decision("ask", rid, ids, "alert", True)
+        if secrets and verdict == "allow" and (allow is None or allow.secrets is None):
+            # credentials are being granted: only a rule that says `secrets: true` may allow that
+            return Decision("ask", rid, ids, "secrets", True)
         return Decision(verdict, rid, ids, reason, False)
 
 

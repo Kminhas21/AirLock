@@ -25,9 +25,28 @@ export interface InboxAlert {
   threshold: number | null;
 }
 
+export const BOUNDARY_LAYERS = ["env", "rlimit", "no_new_privs", "netns", "landlock_net", "landlock_fs"] as const;
+export type BoundaryLayer = (typeof BOUNDARY_LAYERS)[number];
+export type BoundaryNetwork = "none" | "loopback" | "host";
+export const MAX_BOUNDARY_SERVERS = 50;
+export const MAX_SECRET_NAMES = 20;
+
+export interface ServerBoundary {
+  server: string;
+  lifecycle: "session" | "per_call";
+  layers: BoundaryLayer[];
+  missing: BoundaryLayer[];
+  /** null when the report had no valid value: the UI then makes no network claim. */
+  network: BoundaryNetwork | null;
+  /** Env-var NAMES the server may receive (never values). */
+  secrets: string[];
+}
+
 export interface InboxSession {
   session_id: string;
   servers: string[];
+  /** Enforcement boundary reported by the proxy; null = no (valid) boundary info, which the UI shows as "unsandboxed". */
+  boundary: ServerBoundary[] | null;
   state: "open" | "closed";
 }
 
@@ -81,6 +100,8 @@ export const MAX_HISTORY = 10;
 export const MAX_EARLIER_DENIED = 5;
 
 export interface PendingCall {
+  /** Credential names (env vars) this call will receive; shown as a warning before approving. */
+  secrets_used: string[];
   session_summary: SessionSummary | null;
   /** Newest first, at most MAX_HISTORY. */
   session_history: HistoryItem[];
@@ -237,6 +258,43 @@ function parseHistory(v: unknown, max: number, denialsOnly = false): HistoryItem
   return out;
 }
 
+const SECRET_NAME = /^[A-Z_][A-Z0-9_]{0,63}$/;
+
+/** Env-var names only (closed pattern); anything else is dropped, at most MAX_SECRET_NAMES, duplicates removed. */
+function parseSecretNames(v: unknown): string[] {
+  if (!Array.isArray(v)) return [];
+  const out: string[] = [];
+  for (const n of v.slice(0, MAX_SECRET_NAMES * 4)) {
+    if (typeof n === "string" && SECRET_NAME.test(n) && !out.includes(n)) out.push(n);
+    if (out.length >= MAX_SECRET_NAMES) break;
+  }
+  return out;
+}
+
+function parseLayers(v: unknown): BoundaryLayer[] {
+  if (!Array.isArray(v)) return [];
+  return BOUNDARY_LAYERS.filter((l) => v.includes(l));
+}
+
+/** Array of per-server entries (not an object keyed by server name, so a server called "__proto__" is harmless). */
+function parseBoundary(v: unknown): ServerBoundary[] | null {
+  if (!isRec(v)) return null;
+  const out: ServerBoundary[] = [];
+  for (const key of Object.keys(v).slice(0, MAX_BOUNDARY_SERVERS)) {
+    const b = v[key];
+    if (!isRec(b)) continue;
+    out.push({
+      server: singleLine(key, 120),
+      lifecycle: b.lifecycle === "per_call" ? "per_call" : "session",
+      layers: parseLayers(b.layers),
+      missing: parseLayers(b.missing),
+      network: b.network === "none" || b.network === "loopback" || b.network === "host" ? b.network : null,
+      secrets: parseSecretNames(b.secrets),
+    });
+  }
+  return out.length > 0 ? out : null;
+}
+
 function parseAlert(v: unknown): InboxAlert | null {
   if (!isRec(v)) return null;
   const message = str(v.message);
@@ -273,6 +331,7 @@ function parsePending(v: unknown, now: number, sessionFallback?: string): Pendin
   const d = num(v.deadline_s);
   const deadline_s = d !== null && d > 0 ? Math.min(d, MAX_DEADLINE_S) : DEFAULT_DEADLINE_S;
   return {
+    secrets_used: parseSecretNames(v.secrets_used),
     session_summary: parseSummary(v.session_summary),
     session_history: parseHistory(v.session_history, MAX_HISTORY),
     earlier_denied: parseHistory(v.earlier_denied, MAX_EARLIER_DENIED, true),
@@ -298,7 +357,7 @@ const sameCall = (p: { session_id: string; call_id: string }, session_id: string
 function withSession(sessions: Record<string, InboxSession>, session_id: string): Record<string, InboxSession> {
   if (sessions[session_id]) return sessions;
   if (Object.keys(sessions).length >= MAX_SESSIONS) return sessions;
-  return { ...sessions, [session_id]: { session_id, servers: [], state: "open" } };
+  return { ...sessions, [session_id]: { session_id, servers: [], boundary: null, state: "open" } };
 }
 
 /** Pure: returns a new state, or the SAME state object when the event changes nothing / is invalid. */
@@ -313,7 +372,7 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
         if (!isRec(s)) continue;
         const session_id = id(s.session_id);
         if (session_id === null) continue;
-        sessions[session_id] = { session_id, servers: parseServers(s.servers), state: "open" };
+        sessions[session_id] = { session_id, servers: parseServers(s.servers), boundary: parseBoundary(s.boundary), state: "open" };
         if (Array.isArray(s.pending)) {
           for (const p of s.pending) {
             const c = parsePending(p, now, session_id);
@@ -409,7 +468,7 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
       const servers = Array.isArray(event.servers) ? parseServers(event.servers) : (existing?.servers ?? []);
       return {
         ...state,
-        sessions: { ...state.sessions, [session_id]: { session_id, servers, state: event.state } },
+        sessions: { ...state.sessions, [session_id]: { session_id, servers, boundary: event.boundary !== undefined ? parseBoundary(event.boundary) : (existing?.boundary ?? null), state: event.state } },
       };
     }
     default:

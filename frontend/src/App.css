@@ -701,3 +701,11 @@
 .inbox-toast.ok { border-color: #22c55e; background: rgba(34, 197, 94, 0.12); }
 .inbox-toast.err { border-color: #ef4444; background: rgba(239, 68, 68, 0.12); }
 .inbox-toast-close { flex-shrink: 0; background: transparent; border: 1px solid #4b5563; border-radius: 4px; color: #e5e7eb; font-size: 11px; cursor: pointer; }
+
+/* ===== ENFORCEMENT BOUNDARY ===== */
+.inbox-boundary { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; }
+.inbox-boundary-server { display: contents; }
+.inbox-boundary-chip { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; border: 1px solid #4b5563; color: #d1d5db; overflow-wrap: anywhere; }
+.inbox-boundary-chip.unsandboxed { color: #fecaca; border-color: #ef4444; background: rgba(239, 68, 68, 0.2); }
+.inbox-boundary-chip.weak { color: #fde68a; border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); }
+.inbox-secrets { margin-bottom: 8px; padding: 10px 12px; border: 2px solid #f59e0b; border-radius: 6px; background: rgba(245, 158, 11, 0.18); color: #fde68a; font-weight: 700; font-size: 13px; overflow-wrap: anywhere; }

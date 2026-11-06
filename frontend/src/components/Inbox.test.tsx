@@ -19,6 +19,7 @@ const call = (over: Record<string, unknown> = {}) => ({
   args: { path: "/tmp/x", content: "hi" },
   auto: false,
   alerts: [],
+  secrets_used: [],
   session_summary: null,
   session_history: [],
   earlier_denied: [],
@@ -266,6 +267,71 @@ describe("Inbox", () => {
     expect(html).toContain(">timeout<");
     expect(html).toContain("ok: wrote Decision: APPROVE");
     expect(html).not.toContain("‮");
+  });
+
+  describe("enforcement boundary", () => {
+    const sess = (boundary: unknown, servers = ["fs"]) => ({ s: { session_id: "s", servers, boundary, state: "open" } });
+    const b = (over: Record<string, unknown> = {}) => ({ server: "fs", lifecycle: "session", layers: ["env", "landlock_fs"], missing: [], network: "none", secrets: [], ...over });
+
+    it("sandboxed server: net chip and fs sandboxed, no unsandboxed/weak chip", () => {
+      state.sessions = sess([b()]);
+      const html = render();
+      expect(html).toContain('data-testid="inbox-boundary"');
+      expect(html).toContain(">fs: net none<");
+      expect(html).toContain(">fs sandboxed<");
+      expect(html).not.toContain("unsandboxed");
+      expect(html).not.toContain("inbox-boundary-weak");
+      expect(html).not.toContain("fresh worker");
+    });
+
+    it("net loopback / host and per_call lifecycle", () => {
+      state.sessions = sess([b({ network: "loopback", lifecycle: "per_call" }), b({ server: "git", network: "host", layers: ["env"] })]);
+      const html = render();
+      expect(html).toContain(">fs: net loopback<");
+      expect(html).toContain(">git: net host<");
+      expect(html).toContain(">fresh worker per call<");
+      expect(html.match(/>fs sandboxed</g)).toHaveLength(1);
+    });
+
+    it("empty layers => red unsandboxed chip", () => {
+      state.sessions = sess([b({ layers: [], network: null })]);
+      const html = render();
+      expect(html).toContain('class="inbox-boundary-chip unsandboxed" data-testid="inbox-boundary-chip">fs: unsandboxed<');
+    });
+
+    it("no boundary info => one unsandboxed chip per known server (or a single one without servers)", () => {
+      state.sessions = sess(null, ["fs", "git"]);
+      let html = render();
+      expect(html).toContain(">fs: unsandboxed<");
+      expect(html).toContain(">git: unsandboxed<");
+      state.sessions = sess(null, []);
+      html = render();
+      expect(html.match(/>unsandboxed</g)).toHaveLength(1);
+    });
+
+    it("missing layers => amber 'weaker than requested' chip", () => {
+      state.sessions = sess([b({ missing: ["landlock_net", "netns"] })]);
+      const html = render();
+      expect(html).toContain('data-testid="inbox-boundary-weak">fs: weaker than requested: landlock_net, netns<');
+    });
+
+    it("a hostile server name stays plain escaped text", () => {
+      state.sessions = sess([b({ server: "<img src=x onerror=1>" })]);
+      const html = render();
+      expect(html).not.toContain("<img");
+      expect(html).toContain("&lt;img src=x onerror=1&gt;: net none");
+    });
+
+    it("credentials warning: alert block with the names; absent when none; buttons unchanged", () => {
+      state.pending = [call({ secrets_used: ["API_KEY", "DB_PASS"] })];
+      const html = render();
+      expect(html).toContain('class="inbox-secrets" role="alert" data-testid="inbox-secrets-warning">This call will receive credentials: API_KEY, DB_PASS (exist only during this call)<');
+      expect(html).toContain(">Approve<");
+      expect(html).toContain(">Deny<");
+      expect(html.match(/disabled=""/g)).toBeNull();
+      state.pending = [call()];
+      expect(render()).not.toContain("inbox-secrets");
+    });
   });
 
   describe("operator panels", () => {

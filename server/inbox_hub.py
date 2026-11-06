@@ -68,7 +68,65 @@ NOTE_LIMIT = 200
 # resolutions that are nobody's decision about the call's content: not counted, never "earlier denied"
 RULE_RATE_LIMIT = 20       # inbox_rule_request per RULE_RATE_WINDOW_S, hub wide
 RULE_RATE_WINDOW_S = 60.0
+NAME_RE = re.compile(r"[A-Z_][A-Z0-9_]{0,63}")
+MAX_SECRET_NAMES = 20
+BOUNDARY_LAYERS = frozenset({"env", "rlimit", "no_new_privs", "netns", "landlock_net", "landlock_fs"})
+BOUNDARY_NETWORK = frozenset({"none", "loopback", "host"})
+BOUNDARY_LIFECYCLE = frozenset({"session", "per_call"})
+_BOUNDARY_KEYS = frozenset({"lifecycle", "layers", "missing", "network", "secrets"})
 NOT_A_DECISION = frozenset({"cancelled", "disconnected", "restart", "log_unavailable"})
+
+
+def _names(v: Any) -> list | None:
+    """A list of <= 20 environment-variable NAMES (closed pattern), de-duplicated in order; anything else => None.
+    Only names can pass the pattern, so a secret VALUE is never stored."""
+    if not isinstance(v, list) or len(v) > MAX_SECRET_NAMES:
+        return None
+    out: list = []
+    for x in v:
+        if not isinstance(x, str) or not NAME_RE.fullmatch(x):
+            return None
+        if x not in out:
+            out.append(x)
+    return out
+
+
+def validate_secrets_used(v: Any) -> list:
+    """proxy_call.secrets_used: valid => the names, invalid or absent => [] (never fatal)."""
+    names = _names(v)
+    return names if names is not None else []
+
+
+def validate_boundary(v: Any) -> dict | None:
+    """proxy_hello.boundary: {server: {lifecycle, layers, missing, network, secrets}} with the closed shapes of
+    docs/plans/ENFORCEMENT-BOUNDARY.md. ANY violation => None (treated as absent, never fatal)."""
+    try:
+        if not isinstance(v, dict) or len(v) > MAX_SERVERS:
+            return None
+        out: dict = {}
+        for name, b in v.items():
+            if not _is_str(name, MAX_SHORT, min_len=1) or not isinstance(b, dict) or not set(b) <= _BOUNDARY_KEYS:
+                return None
+            lifecycle, network = b.get("lifecycle"), b.get("network")
+            if lifecycle is not None and (not isinstance(lifecycle, str) or lifecycle not in BOUNDARY_LIFECYCLE):
+                return None
+            if network is not None and (not isinstance(network, str) or network not in BOUNDARY_NETWORK):
+                return None
+            lists = {}
+            for key in ("layers", "missing"):
+                items = b.get(key, [])
+                if not isinstance(items, list) or len(items) > len(BOUNDARY_LAYERS) or \
+                        not all(isinstance(x, str) and x in BOUNDARY_LAYERS for x in items):
+                    return None
+                lists[key] = list(dict.fromkeys(items))
+            secrets = _names(b.get("secrets", []))
+            if secrets is None:
+                return None
+            out[name] = {"lifecycle": lifecycle, "layers": lists["layers"], "missing": lists["missing"],
+                         "network": network, "secrets": secrets}
+        return out
+    except Exception:
+        return None
 
 
 def clean_note(v: Any) -> str | None:
@@ -171,6 +229,7 @@ class _Pending:
     policy_digest: str | None = None
     policy_mode: bool = False
     note: str | None = None
+    secrets_used: list = field(default_factory=list)
     summary: dict = field(default_factory=dict)
     history: list = field(default_factory=list)
     earlier_denied: list = field(default_factory=list)
@@ -204,6 +263,7 @@ class ProxySession:
     starting: set = field(default_factory=set)         # reserved, still inside the monitor (not yet pending)
     cancelled_early: set = field(default_factory=set)  # proxy_cancel arrived while in `starting`
     logged_hello: bool = False
+    boundary: dict | None = None
     ring: Any = field(default_factory=lambda: collections.deque(maxlen=RING_SIZE))
     counts: dict = field(default_factory=lambda: {"approved": 0, "denied": 0, "auto": 0, "policy": 0})
 
@@ -369,6 +429,7 @@ class InboxHub:
              "args": p.args, "auto": p.auto, "alerts": p.alerts, "deadline_s": deadline_s}
         if p.policy_mode:
             d["rule_id"], d["policy_digest"] = p.rule_id, p.policy_digest
+        d["secrets_used"] = list(p.secrets_used)
         d["session_summary"], d["session_history"], d["earlier_denied"] = p.summary, p.history, p.earlier_denied
         return d
 
@@ -410,6 +471,7 @@ class InboxHub:
         if live is not None and not live.closed:
             return await reject("duplicate_session_id")
         session = ProxySession(sid, list(servers), list(auto_approve), conn)
+        session.boundary = validate_boundary(frame.get("boundary"))
         self.sessions[sid] = session          # claimed before any await: a racing second hello sees it
         try:
             session.policy_mode, session.policy, session.policy_registry = await asyncio.to_thread(_resolve_policy)
@@ -453,7 +515,7 @@ class InboxHub:
         return {"session_id": session.session_id, "servers": session.servers, "auto_approve": session.auto_approve,
                 "monitor_mode": getattr(mon, "mode", None) if mon is not None else None,
                 "policy_digest": session.policy.digest() if session.policy is not None else None,
-                "registry_digest": reg_digest, "frozen_model_sha256": frozen}
+                "registry_digest": reg_digest, "frozen_model_sha256": frozen, "boundary": session.boundary}
 
     async def handle_proxy_frame(self, session: ProxySession, frame: Any) -> bool:
         """Process one parsed frame. Returns False when the connection must be closed (protocol violation)."""
@@ -545,6 +607,7 @@ class InboxHub:
             await self._reply(session, call_id, "deny", "invalid")
             return
 
+        secrets_used = validate_secrets_used(frame.get("secrets_used"))     # names only; invalid => []
         alerts: list = []
         # "working": a monitor with a detector looked at the call, did not hit an error, and returned a list
         mon = session.monitor
@@ -578,7 +641,8 @@ class InboxHub:
             if session.policy is not None:
                 try:
                     dec = await asyncio.to_thread(session.policy.evaluate, server, tool, args,
-                                                  registry=session.policy_registry, alerts_present=bool(alerts))
+                                                  registry=session.policy_registry, alerts_present=bool(alerts),
+                                                  secrets_used=bool(secrets_used))
                     verdict, rule_id = dec.verdict, dec.rule_id
                     if verdict not in ("allow", "deny", "ask"):
                         verdict, rule_id = "ask", None
@@ -596,7 +660,7 @@ class InboxHub:
                 immediate = ("deny", "policy", "policy")
             elif verdict == "allow" and working and not alerts:
                 immediate = ("approve", "policy", "policy")
-        elif auto and working and not alerts:
+        elif auto and working and not alerts and not secrets_used:     # credentials are never granted by the legacy flag
             immediate = ("approve", "auto", "auto")
 
         # secret VALUES of this call (from its own arguments): free text that may echo them (alert messages, tool output) is scrubbed before it is logged
@@ -608,7 +672,8 @@ class InboxHub:
         # write-ahead: call_proposed is on disk before inbox_pending / any auto or policy reply
         res = await self._append("call_proposed", sid, call_id,
                                  {"server": server, "tool": tool, "args": args, "auto": auto,
-                                  "alerts": self._alert_records(alerts, call_secrets), "policy": policy_rec})
+                                  "alerts": self._alert_records(alerts, call_secrets), "policy": policy_rec,
+                                  "secrets_used": secrets_used})
         if res == "dup":
             return
         if res == "fail":
@@ -637,7 +702,7 @@ class InboxHub:
 
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
         p = _Pending(session, call_id, server, tool, args, auto, alerts, rule_id=rule_id, policy_digest=digest,
-                     policy_mode=session.policy_mode)
+                     policy_mode=session.policy_mode, secrets_used=secrets_used)
         p.summary, p.history, p.earlier_denied = session.views()        # state BEFORE this call
         session.pending[call_id] = p
         session.starting.discard(call_id)
@@ -715,7 +780,7 @@ class InboxHub:
             for p in s.pending.values():
                 d = self._pending_payload(p, self._timeout)
                 pend.append(d)
-            sessions.append({"session_id": s.session_id, "servers": s.servers, "pending": pend})
+            sessions.append({"session_id": s.session_id, "servers": s.servers, "boundary": s.boundary, "pending": pend})
         caps = capabilities if capabilities is not None else {"policy_writable": False, "event_log": self.store is not None}
         return {"event": "inbox_snapshot", "sessions": sessions, "recent": list(recent or []), "capabilities": caps}
 

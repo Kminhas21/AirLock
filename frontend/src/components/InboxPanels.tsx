@@ -3,7 +3,7 @@
 // Class names are constants; the only dynamic style is a numeric percentage computed by lib/inboxView.scoreBar.
 
 import { useId, useState } from "react";
-import type { HistoryItem, InboxAlert, SessionSummary } from "../lib/inboxRoute";
+import type { HistoryItem, InboxAlert, InboxSession, SessionSummary } from "../lib/inboxRoute";
 import { outcomeLabel, ruleRequestFrame, SCOPE_LABEL, scopesFor, scopeWords, scoreBar, type Scope, type Verdict } from "../lib/inboxView";
 import { singleLine, stripUnsafe } from "../lib/safeText";
 
@@ -182,6 +182,56 @@ export function StandingRules({ tool, server, sessionId, callId, disabled, onReq
           Rule request not sent, reconnecting.
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------- Boundary chips ----------
+
+/** One chip row per session: what each downstream server is confined to. No boundary info or no layers => red "unsandboxed". */
+export function BoundaryChips({ session }: { session: InboxSession }) {
+  const entries =
+    session.boundary ??
+    (session.servers.length > 0 ? session.servers : [""]).map((server) => ({
+      server: singleLine(server, 120),
+      lifecycle: "session" as const,
+      layers: [],
+      missing: [],
+      network: null,
+      secrets: [],
+    }));
+  return (
+    <div className="inbox-boundary" data-testid="inbox-boundary">
+      <span className="detail-label">Boundary</span>
+      {entries.map((b, i) => (
+        <span className="inbox-boundary-server" key={i}>
+          {b.network && (
+            <span className="inbox-boundary-chip net" data-testid="inbox-boundary-chip">
+              {b.server ? `${b.server}: ` : ""}net {b.network}
+            </span>
+          )}
+          {b.layers.includes("landlock_fs") && (
+            <span className="inbox-boundary-chip fs" data-testid="inbox-boundary-chip">
+              {b.network ? "" : b.server ? `${b.server}: ` : ""}fs sandboxed
+            </span>
+          )}
+          {b.lifecycle === "per_call" && (
+            <span className="inbox-boundary-chip lifecycle" data-testid="inbox-boundary-chip">
+              {b.network || b.layers.includes("landlock_fs") ? "" : b.server ? `${b.server}: ` : ""}fresh worker per call
+            </span>
+          )}
+          {b.layers.length === 0 && (
+            <span className="inbox-boundary-chip unsandboxed" data-testid="inbox-boundary-chip">
+              {b.server ? `${b.server}: ` : ""}unsandboxed
+            </span>
+          )}
+          {b.missing.length > 0 && (
+            <span className="inbox-boundary-chip weak" data-testid="inbox-boundary-weak">
+              {b.server ? `${b.server}: ` : ""}weaker than requested: {b.missing.join(", ")}
+            </span>
+          )}
+        </span>
+      ))}
     </div>
   );
 }
