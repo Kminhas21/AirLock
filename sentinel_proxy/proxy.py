@@ -150,6 +150,7 @@ class Proxy:
         self.names: dict[str, tuple[str, str]] = {}
         self.exposed_tools: list[types.Tool] = []
         self._by_orig: dict[tuple[str, str], types.Tool] = {}
+        self._taps: list[StderrTap] = []  # session servers' taps (for emergency_stop)
 
     # ------------------------------------------------------------ spawning
     @asynccontextmanager
@@ -178,6 +179,7 @@ class Proxy:
 
     async def _enter_session(self, stack: AsyncExitStack, sc: ServerConfig) -> tuple[ClientSession, StderrTap]:
         session, tap = await stack.enter_async_context(self.open_session(sc))
+        self._taps.append(tap)
         return session, tap
 
     def _check_status(self, sc: ServerConfig, tap: StderrTap) -> None:
@@ -249,6 +251,23 @@ class Proxy:
         for n, b in self.boundary().items():
             log(f"boundary {n}: lifecycle={b['lifecycle']} network={b['network']} layers={b['layers']} "
                 f"missing={b['missing']} secrets={b['secrets']}")
+
+    def emergency_stop(self) -> None:
+        """Hard stop for a fatal error while serving: SIGKILL our child processes, remove sandbox HOMEs. Best effort."""
+        import signal
+
+        try:
+            for task in os.listdir("/proc/self/task"):
+                with open(f"/proc/self/task/{task}/children") as f:
+                    for pid in f.read().split():
+                        try:
+                            os.kill(int(pid), signal.SIGKILL)
+                        except OSError:
+                            pass
+        except OSError:
+            pass
+        for tap in self._taps:
+            remove_sandbox_home(tap.status)
 
     def boundary(self) -> dict[str, dict[str, Any]]:
         out: dict[str, dict[str, Any]] = {}

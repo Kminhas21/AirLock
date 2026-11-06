@@ -60,11 +60,8 @@ async def serve(cfg) -> int:
                 done, _ = await asyncio.wait({srv_task, fatal_task}, return_when=asyncio.FIRST_COMPLETED)
                 if fatal_task in done:
                     print(f"sentinel-proxy: {link.fatal_reason}", file=sys.stderr)
-                    # The stdio reader thread may be blocked on stdin forever: stop the children cleanly, then leave hard.
-                    try:
-                        await asyncio.wait_for(stack.aclose(), 15)
-                    except Exception as e:  # noqa: BLE001 - leaving anyway
-                        log(f"downstream shutdown incomplete: {type(e).__name__}")
+                    # The stdio reader thread may be blocked on stdin forever, so the context managers cannot unwind: kill children, leave.
+                    proxy.emergency_stop()
                     sys.stderr.flush()
                     os._exit(3)
                 else:
