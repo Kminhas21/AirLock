@@ -3,7 +3,7 @@
 Applies the sandbox layers to THIS process and then execs the command, so the command is the process: stdin/stdout/stderr
 pass through untouched (MCP stdio).  Nothing is ever written to stdout.  One status line goes to stderr just before exec:
 
-    SENTINEL_SANDBOX_STATUS {"layers": [...], "missing": [...], "network": "...", "landlock_abi": n}
+    SENTINEL_SANDBOX_STATUS {"layers": [...], "missing": [...], "network": "...", "landlock_abi": n, "home": "<private dir to remove after exit>" | null}
 
 Exit codes: 126 = fail closed (invalid spec, or `require` and a layer could not be applied; the command was NOT run, also
 used when the command exists but cannot be executed inside the sandbox), 127 = command not found.
@@ -179,7 +179,8 @@ def main(argv=None, *, execve=os.execve) -> int:
         return EXIT_FAIL_CLOSED
 
     # (f) exec
-    status = {"layers": layers, "missing": missing, "network": net, "landlock_abi": abi}
+    # `home` = the private HOME/TMPDIR created above; nothing can delete it after the exec, so the PROXY removes it once the worker has exited
+    status = {"layers": layers, "missing": missing, "network": net, "landlock_abi": abi, "home": home if home != "/nonexistent" else None}
     _err("SENTINEL_SANDBOX_STATUS " + json.dumps(status, sort_keys=False))
     os.closerange(3, fd_limit + 1)                               # nothing inherited from the proxy may leak into the server
     try:

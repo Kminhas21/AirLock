@@ -739,7 +739,10 @@ class TestStatusAndStdio:
     def test_status_line_content_and_order(self):
         cp = run(spec(network="none"), "import sys; sys.stderr.write('child-stderr\\n')")
         st = status_of(cp)
-        assert list(st) == ["layers", "missing", "network", "landlock_abi"]
+        assert list(st) == ["layers", "missing", "network", "landlock_abi", "home"]
+        # the private HOME is reported so the PROXY can remove it after the worker exits (nothing can delete it after the exec)
+        assert isinstance(st["home"], str) and os.path.basename(st["home"]).startswith("sentinel-sbx-") and os.path.isdir(st["home"])
+        shutil.rmtree(st["home"], ignore_errors=True)
         expect = ["env", "rlimit", "no_new_privs"] + (["netns"] if NS else ["landlock_net"]) + ["landlock_fs"]
         assert st["layers"] == expect and st["missing"] == [] and st["network"] == "none" and st["landlock_abi"] == ABI
         lines = cp.stderr.decode().splitlines()
