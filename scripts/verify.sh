@@ -63,6 +63,9 @@ if [ -d frontend/node_modules ]; then
     run "browser inbox (real proxy + downstream; held calls, approve/deny, alert holds an auto-approved call, token required)" bash -c "cd frontend && INBOX_STAGE=1 INBOX_TOKEN=gate-inbox-token SENTINEL_MONITOR=action_sim npx playwright test inbox"
     # policy engine (DECISIONS.md D18): rules decide allow / deny / ask in the real UI; the proxy's auto flag is ignored when a policy is configured
     run "browser inbox policy (allow/deny/ask by rule; proxy auto flag ignored)" bash -c "cd frontend && POLICY_STAGE=1 INBOX_TOKEN=gate-inbox-token SENTINEL_MONITOR=action_sim SENTINEL_POLICY=$R/tests/e2e/data/policy_e2e.json npx playwright test policy"
+    # operator UI (DECISIONS.md D20): deny with a reason, why/what-so-far evidence, standing rule through the two-step confirm, in a real browser
+    OPPOL="$TMPD/operator_policy.json"
+    run "browser operator UI (reason reaches the agent, evidence panels, standing rule applies to a new session)" bash -c "echo '{\"version\":1,\"default\":\"ask\",\"rules\":[]}' > $OPPOL && cd frontend && OPERATOR_STAGE=1 INBOX_TOKEN=gate-inbox-token SENTINEL_MONITOR=action_sim SENTINEL_POLICY=$OPPOL SENTINEL_POLICY_WRITABLE=1 npx playwright test operator"
   else
     echo "--- FAIL: no Chromium at \${CHROMIUM_PATH:-/opt/pw-browsers/chromium}; set CHROMIUM_PATH"; fail=1
   fi

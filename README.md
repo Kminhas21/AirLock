@@ -62,6 +62,8 @@ Policy engine (allow/deny/ask rules for the MCP proxy; DECISIONS.md D18): `docs/
 
 Durable tamper-evident event log (opt-in; DECISIONS.md D19): `docs/eventlog.md`.
 
+Operator UI (why flagged, session so far, deny with a reason, standing rules; DECISIONS.md D20): `docs/operator-ui.md`.
+
 Full walkthrough of everything built, with workflows: `docs/COURSE.md`.
 
 Verify everything: `pip install -r requirements-dev.txt && scripts/verify.sh` (exit 0 = green). See `DECISIONS.md`.

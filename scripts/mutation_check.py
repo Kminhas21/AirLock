@@ -75,6 +75,11 @@ MUTANTS = [
     ("Z5 hub: alert messages are logged unscrubbed", "server/inbox_hub.py", '"message": eventlog.scrub(a.get("message"), secrets)', '"message": a.get("message")', 1),
     ("Z6 hub: tool output is stored by default", "server/inbox_hub.py", 'if os.environ.get("SENTINEL_LOG_RESULTS") == "1":', "if True:", 1),
     ("Z7 a UI is registered for broadcasts before its snapshot is sent", "server/inbox_hub.py", "        async with ui._lock:\n            self._uis.append(ui)\n            recent: list = []", "        self._uis.append(ui)\n        async with asyncio.Lock():\n            recent: list = []", 1),
+    # operator UI (DECISIONS.md D20)
+    ("O1 hub: a standing rule is written without the explicit confirm", "server/inbox_hub.py", '            if frame.get("confirm") is not True:', "            if False:", 1),
+    ("O2 hub: the operator note is attached to approvals too", "server/inbox_hub.py", 'note = p.note if (decision == "deny" and reason == "human") else None      # never a note on an approve', "note = p.note      # never a note on an approve", 1),
+    ("O3 drift_update no longer carries the active threshold", "server/events.py", '        out["threshold"] = float(threshold)', "        pass", 1),
+    ("O4 hub: standing rules are offered although the policy is not writable", "server/inbox_hub.py", 'return {"policy_writable": writable, "event_log": self.store is not None}', 'return {"policy_writable": True, "event_log": self.store is not None}', 1),
     ("X6 proxy forwards a denied call", "sentinel_proxy/proxy.py", "if not decision.approved:", "if False:", 1),
     ("R4 denied-party match ignored when choosing the earlier denied proposal for the alert text", "server/proposal_monitor.py",
      'pool = [d for d in self._denied_props if party in d[2].reaches] or list(self._denied_props)',
@@ -86,6 +91,8 @@ FRONTEND_MUTANTS = [
     ("F1 drawer shows the raw (multi-line) tool name", "frontend/src/components/NodeDetail.tsx", "singleLine(data.toolName)", "String(data.toolName)", 1),
     ("F2 drawer colours drift against the old 2.5", "frontend/src/components/NodeDetail.tsx", "driftPoint.mahalanobisDistance > DRIFT_THRESHOLD", "driftPoint.mahalanobisDistance > 2.5", 1),
     ("F3 sanitiser removes nothing", "frontend/src/lib/safeText.ts", '.replace(UNSAFE, "")', '.replace(UNSAFE, "$&")', 1),
+    ("F5 the standing-rule frame is built without confirm=true semantics (unknown verdicts are offered)", "frontend/src/lib/inboxView.ts", "confirm: true as const", "confirm: false as unknown as true", 1),
+    ("F6 the UI offers standing rules although the hub says it is not writable", "frontend/src/lib/inboxRoute.ts", "policy_writable: isRec(event.capabilities) && event.capabilities.policy_writable === true,", "policy_writable: true,", 1),
     ("F4 result panel is raw text again", "frontend/src/components/NodeDetail.tsx", "<AgentText text={data.result} />", "<pre className=\"detail-code\">{String(data.result)}</pre>", 1),
 ]
 

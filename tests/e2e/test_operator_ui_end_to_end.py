@@ -67,11 +67,12 @@ def backend(tmp_path):
             p.wait()
 
 
-async def next_event(ws, name, timeout=30):
+async def next_event(ws, name, timeout=30, **where):
+    """Next event called `name` whose fields equal `where` (earlier unread events of the same kind are skipped)."""
     async def go():
         while True:
             e = json.loads(await ws.recv())
-            if e.get("event") == name:
+            if e.get("event") == name and all(e.get(k) == v for k, v in where.items()):
                 return e
     return await asyncio.wait_for(go(), timeout)
 
@@ -150,11 +151,11 @@ async def test_a_standing_rule_written_from_one_call_applies_to_the_next_session
         async with ctx2 as b:
             r = await asyncio.wait_for(b.call_tool("read_file", {"path": "/project/docs/b.txt"}), 60)
             assert not r.is_error
-            resolved = await next_event(u, "inbox_resolved")
+            resolved = await next_event(u, "inbox_resolved", session_id="op-two")
             assert (resolved["reason"], resolved["decision"], resolved["rule_id"]) == ("policy", "approve", res["rule_id"])
             # ...but a call outside the folder is still held
             t = asyncio.create_task(b.call_tool("read_file", {"path": "/project/other/c.txt"}))
-            held = await next_event(u, "inbox_pending")
+            held = await next_event(u, "inbox_pending", session_id="op-two")
             assert held["rule_id"] is None
             await decide(u, held, "deny")
             assert (await asyncio.wait_for(t, 20)).is_error

@@ -302,3 +302,13 @@ Not built: Postgres, retention/rotation/pruning, external transparency log, moni
 Gate follow-up (D19): the first full gate after the event log was RED on two things. (1) `test_call_result_logged...` asserted the old call_result shape that D19 deliberately changed (fixed; plus a test for the opt-in scrubbed summary).
 (2) A ~50% flaky hub test turned out to be a real race: `ui_connected` registered the UI for broadcasts BEFORE awaiting the history read, so a broadcast (e.g. the previous proxy closing) could reach a UI ahead of its snapshot.
 Fixed by holding the UI's send lock from registration to the end of the snapshot send; regression test `tests/server/test_inbox_snapshot_first.py` (fails on the old order) and mutant Z7. Flaky-looking == race until proven otherwise.
+
+## D20: operator UI (docs/PROPOSALS.md #8), first iteration
+Plan: docs/plans/OPERATOR-UI.md; operator guide: docs/operator-ui.md. Inbox cards: "Why flagged" (alert score vs the alert's own threshold + earlier denied calls), "Session so far" (counters + last 10 calls, redacted previews),
+deny-with-reason (the operator's cleaned note reaches the agent for human denials only, is logged, and is shown in history), and standing rules.
+Standing rules are the risky part (persistent widening of authority), so: OFF unless `SENTINEL_POLICY_WRITABLE=1` and a usable `SENTINEL_POLICY`; the browser never composes a rule (the hub builds it from a call it saw; scopes exact | tool_under | tool,
+`tool` never for allow); explicit `confirm === true`; whole-policy validation before an atomic write with `.bak`; write-ahead `policy_rule_added` event in the log (a failed log write writes nothing); 20 requests/minute; applies to NEW sessions only (policy is pinned per session).
+Threshold: `drift_update.threshold` carries the active breach threshold (optional; absent in recorded replays), the chart and drawer use it, with the constant as fallback.
+Design choices: the live card shows the current call's arguments UNREDACTED (the operator must see what they approve; a credential being sent is itself a risk signal), the history previews and the log are redacted; monitors were not changed (no structured alert evidence yet).
+Found on the way: two test-design slips of mine (matching the next `inbox_resolved` instead of the right session; asserting redaction on the live card) and a hub test that raced the broadcast order (the agent made it wait for the event). None was a product bug.
+Not built: editing/removing rules from the UI, rule expiry, per-operator identity (needs #6), structured alert evidence from the monitors, the built-in loop's UI.
