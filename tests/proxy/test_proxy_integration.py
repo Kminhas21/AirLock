@@ -312,27 +312,40 @@ async def _stderr_of_session(cfg):
     return err.decode()
 
 
-async def test_send_failure_closes_connection_denies_in_flight_and_reconnects(tmp_path):
-    from conftest import FakeBackend
-    from websockets.asyncio.server import serve
-    b = FakeBackend()
-    hang = asyncio.Event()
+async def test_send_timeout_aborts_socket_and_denies_all_in_flight_immediately(monkeypatch):
+    """A half-dead socket (send never completes) must not make every later call wait the full timeout."""
+    import time
+    from sentinel_proxy.backend import LOST, BackendLink
+    monkeypatch.setenv("SENTINEL_SEND_TIMEOUT_S", "0.3")
 
-    async def stall(ws, f):  # stop reading from this socket: backpressure builds up
-        await hang.wait()
-    b.on_call = stall
-    cfg, log = make_config(tmp_path, "ws://x/")
-    async with serve(b.handler, "127.0.0.1", 0, max_size=None, max_queue=1) as srv:
-        url = f"ws://127.0.0.1:{srv.sockets[0].getsockname()[1]}/proxy/ws"
-        cfg, log = make_config(tmp_path, url)
-        big = "x" * (1024 * 1024)
-        async with agent(cfg, {"SENTINEL_SEND_TIMEOUT_S": "1"}) as s:
-            results = await asyncio.wait_for(asyncio.gather(
-                *[s.call_tool("echo", {"blob": big, "i": i}) for i in range(24)]), 40)
-            assert all(r.is_error and "SENTINEL backend connection lost" in text(r) for r in results), [text(r)[:80] for r in results]
-            await b.wait_for("proxy_hello", n=2, timeout=20)  # it reconnected
-        hang.set()
-    assert downstream_calls(log) == []
+    class Transport:
+        aborted = False
+        def abort(self):
+            self.aborted = True
+
+    class HalfDeadWS:
+        def __init__(self):
+            self.transport = Transport()
+            self.sent = []
+        async def send(self, data):
+            if '"hang"' in data:
+                await asyncio.sleep(3600)
+            self.sent.append(data)
+
+    link = BackendLink("ws://x/", {}, call_timeout_s=60)
+    ws = HalfDeadWS()
+    link._ws, link._connected = ws, True
+    t0 = time.monotonic()
+    waiting = asyncio.create_task(link.decide({"call_id": "a", "event": "proxy_call"}))  # sent fine, awaits decision
+    await asyncio.sleep(0.1)
+    assert not waiting.done()
+    d_hang = await asyncio.wait_for(link.decide({"call_id": "b", "event": "proxy_call", "x": "hang"}), 5)
+    d_wait = await asyncio.wait_for(waiting, 1)
+    assert (d_hang.approved, d_hang.reason) == (False, LOST) == (d_wait.approved, d_wait.reason)
+    assert time.monotonic() - t0 < 5 and ws.transport.aborted and not link.connected
+    # later calls fail fast instead of piling onto the dead socket
+    d_later = await asyncio.wait_for(link.decide({"call_id": "c", "event": "proxy_call"}), 1)
+    assert not d_later.approved and "unreachable" in d_later.reason
 
 
 async def test_agent_cli_serve_keeps_one_session(tmp_path, backend):
