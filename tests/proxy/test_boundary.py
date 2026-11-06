@@ -66,7 +66,7 @@ async def wait_until(fn, timeout=15):
 def server_cfg(tmp_path, *, network="none", **over):
     allowed = tmp_path / "allowed"
     allowed.mkdir(exist_ok=True)
-    pidfile = tmp_path / "pids.txt"
+    pidfile = allowed / "pids.txt"
     sc = {"command": sys.executable, "args": [PROBE_SERVER], "env": {"FAKE_PID_FILE": str(pidfile)},
           "sandbox": {"read": [HERE], "write": [str(allowed)], "network": network, "env_allow": ["FAKE_PID_FILE"],
                       "require": True}}

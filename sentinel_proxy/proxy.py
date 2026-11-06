@@ -321,14 +321,17 @@ class Proxy:
                 return _denied("secret_unavailable")
             values[n] = v
         vals = list(values.values())
+        timed_out = False
         try:
             async with self.open_session(sc, secrets=values, label=f"{sc.name}:call") as (session, _tap):
-                with anyio.fail_after(sc.call_timeout_s):
-                    await session.initialize()
-                    res = await session.call_tool(tool, args)
+                try:  # caught INSIDE the transport's task group, or it would surface as an ExceptionGroup
+                    with anyio.fail_after(sc.call_timeout_s):
+                        await session.initialize()
+                        res = await session.call_tool(tool, args)
+                except TimeoutError:
+                    timed_out = True
         except TimeoutError:
-            await self.link.send_result(call_id, "error", "worker timed out")
-            return _error(f"Downstream server {sc.name!r}: worker timed out")
+            timed_out = True
         except MCPError as e:
             msg = scrub(summarize(e.error.message, 500), vals)
             await self.link.send_result(call_id, "error", msg[:300])
@@ -337,6 +340,9 @@ class Proxy:
             log(f"worker for {sc.name!r} failed: {type(e).__name__}")
             await self.link.send_result(call_id, "error", f"worker failed: {type(e).__name__}")
             return _error(f"Downstream server {sc.name!r} failed: {type(e).__name__}")
+        if timed_out:
+            await self.link.send_result(call_id, "error", "worker timed out")
+            return _error(f"Downstream server {sc.name!r}: worker timed out")
         await self.link.send_result(call_id, "error" if res.is_error else "ok", scrub(_summary(res), vals))
         return res
 
