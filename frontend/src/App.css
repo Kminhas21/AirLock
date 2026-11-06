@@ -654,6 +654,7 @@
 .inbox-decision { font-size: 11px; font-weight: 700; }
 .inbox-decision.approve { color: #22c55e; }
 .inbox-decision.deny { color: #ef4444; }
+.inbox-decision.cancelled { color: #9ca3af; }
 .inbox-reason, .inbox-result { color: #9ca3af; font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 800px) {
   .view-tabs { padding: 6px 12px 0; }

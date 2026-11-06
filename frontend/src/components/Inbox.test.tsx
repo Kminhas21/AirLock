@@ -182,6 +182,24 @@ describe("Inbox", () => {
     expect(html).toContain('class="inbox-state closed">closed<');
   });
 
+  it("labels only reason 'cancelled' as CANCELLED (neutral class); human denials and timeouts stay DENIED", () => {
+    const row = (call_id: string, decision: string, reason: string) => ({ session_id: "s", call_id, server: "fs", tool: "t", decision, reason, result: null });
+    state.resolved = [row("1", "deny", "cancelled"), row("2", "deny", "timeout"), row("3", "deny", "human"), row("4", "approve", "cancelled")];
+    const html = render();
+    expect(html.match(/inbox-decision cancelled">CANCELLED</g)).toHaveLength(1);
+    expect(html.match(/inbox-decision deny">DENIED</g)).toHaveLength(2);
+    expect(html.match(/inbox-decision approve">APPROVED</g)).toHaveLength(1);
+    expect(html).toContain('data-testid="inbox-resolved" data-reason="cancelled"');
+    expect(html).toContain('data-reason="timeout"');
+  });
+
+  it("data-reason is an escaped, single-line attribute", () => {
+    state.resolved = [{ session_id: "s", call_id: "1", server: "", tool: "t", decision: "deny", reason: '"><img src=x>\nx', result: null }];
+    const html = render();
+    expect(html).not.toContain("<img");
+    expect(html).toContain('data-reason="&quot;&gt;&lt;img src=x&gt; x"');
+  });
+
   it("lists resolved items with decision and reason (single line, sanitised)", () => {
     state.resolved = [
       { session_id: "s", call_id: "1", server: "fs", tool: "rm", decision: "deny", reason: "timeout", result: null },

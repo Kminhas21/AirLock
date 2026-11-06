@@ -119,9 +119,12 @@ function PendingCard({
 
 function ResolvedRow({ item }: { item: ResolvedCall }) {
   const approved = item.decision === "approve";
+  // only the exact reason "cancelled" (the agent/proxy abandoned the call) gets the neutral label; everything else is a decision
+  const cancelled = !approved && item.reason === "cancelled";
+  const cls = approved ? "approve" : cancelled ? "cancelled" : "deny";
   return (
-    <li className="inbox-resolved-row" data-testid="inbox-resolved">
-      <span className={approved ? "inbox-decision approve" : "inbox-decision deny"}>{approved ? "APPROVED" : "DENIED"}</span>
+    <li className="inbox-resolved-row" data-testid="inbox-resolved" data-reason={singleLine(item.reason, 40)}>
+      <span className={`inbox-decision ${cls}`}>{approved ? "APPROVED" : cancelled ? "CANCELLED" : "DENIED"}</span>
       <span className="inbox-tool">{singleLine(item.tool, MAX_TOOL_NAME) || "(unknown tool)"}</span>
       {item.reason && <span className="inbox-reason">{singleLine(item.reason)}</span>}
       {item.result && (

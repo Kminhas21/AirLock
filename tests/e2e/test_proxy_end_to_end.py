@@ -269,3 +269,27 @@ async def test_a_backend_without_a_token_refuses_both_sockets(tmp_path):
     finally:
         p.kill()
         p.wait()
+
+
+async def test_agent_cancel_clears_the_card_and_a_late_approve_changes_nothing(tmp_path, backend_proc):
+    """The agent abandons a call that is waiting for the human: the card is resolved as CANCELLED, nothing is forwarded, and a late Approve
+    (the human clicking a stale card) is ignored. The monitor is not taught a denial."""
+    _, port = backend_proc()
+    path, log = cfg(tmp_path, port)
+    async with websockets.connect(ui_url(port)) as ui:
+        async with H.agent(path, {"SENTINEL_WS_TOKEN": TOKEN}) as agent:
+            task = asyncio.create_task(call(agent, "write_file", {"path": "/tmp/a"}))
+            pend = await next_event(ui, "inbox_pending")
+            task.cancel()                                  # the SDK sends notifications/cancelled to the proxy
+            resolved = await next_event(ui, "inbox_resolved", 20)
+            assert (resolved["call_id"], resolved["decision"], resolved["reason"]) == (pend["call_id"], "deny", "cancelled")
+            await decide(ui, pend, "approve")              # a late click on the stale card
+            await asyncio.sleep(1.0)
+            assert downstream_calls(log) == [], "a cancelled call is never forwarded, even after a late approve"
+            # the session is still healthy: a fresh call is held and can be approved normally
+            t2 = asyncio.create_task(call(agent, "echo", {"n": 2}))
+            p2 = await next_event(ui, "inbox_pending")
+            assert p2["call_id"] != pend["call_id"]
+            await decide(ui, p2, "approve")
+            assert not (await asyncio.wait_for(t2, 20)).is_error
+            assert [c["tool"] for c in downstream_calls(log)] == ["echo"]

@@ -86,6 +86,12 @@ describe("reduceInbox", () => {
     ]);
   });
 
+  it("inbox_resolved with reason cancelled removes the pending card and records a deny/cancelled row", () => {
+    const s = run([pendingEv(), { event: "inbox_resolved", session_id: "s1", call_id: "c1", decision: "deny", reason: "cancelled" }]);
+    expect(s.pending).toHaveLength(0);
+    expect(s.resolved[0]).toMatchObject({ call_id: "c1", decision: "deny", reason: "cancelled", tool: "write_file" });
+  });
+
   it("inbox_resolved for an unknown call still records it; the same call twice appears once", () => {
     const ev = { event: "inbox_resolved", session_id: "s9", call_id: "zz", decision: "deny", reason: "disconnected" };
     const s = run([ev, ev]);

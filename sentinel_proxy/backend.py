@@ -39,6 +39,7 @@ class BackendLink:
         self._ws: Any = None
         self._connected = False
         self._ever_connected = False
+        self._bg: set[asyncio.Task[Any]] = set()
         self._pending: dict[str, asyncio.Future[Decision]] = {}
         self.ready = asyncio.Event()
         self.fatal = asyncio.Event()
@@ -130,9 +131,25 @@ class BackendLink:
                 return Decision(False, LOST)
             return await asyncio.wait_for(fut, self._call_timeout)
         except asyncio.TimeoutError:
+            self._cancel_upstream(ws, cid, fut, "timeout")
             return Decision(False, "timeout")
+        except asyncio.CancelledError:
+            self._cancel_upstream(ws, cid, fut, "cancelled")
+            raise
         finally:
             self._pending.pop(cid, None)
+
+    def _cancel_upstream(self, ws: Any, call_id: str, fut: "asyncio.Future[Decision]", reason: str) -> None:
+        """Tell the hub we dropped a call we were still waiting on. Best effort, never raises, never blocks.
+
+        Skipped when a decision/loss already resolved the call or the connection it was sent on is gone.
+        """
+        if fut.done() or not self._connected or self._ws is not ws:
+            return
+        frame = json.dumps({"event": "proxy_cancel", "call_id": call_id, "reason": reason})
+        task = asyncio.get_running_loop().create_task(self._send(ws, frame))
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
 
     async def _send(self, ws: Any, data: str) -> bool:
         """Send with a bound. On failure/timeout kill the socket, deny everything in flight, reconnect."""
