@@ -61,7 +61,7 @@ class FakeStore:
         self.events.append((kind, session_id, call_id, payload))
         return SimpleNamespace(seq=len(self.events))
 
-    def recent_resolved(self, n=50):
+    def recent_resolved(self, n=50, tenant=None):
         return self.recent[:n]
 
     def close(self):
