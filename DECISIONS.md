@@ -261,3 +261,13 @@ Evidence: 70 proxy tests, 87 hub tests, 68 UI unit tests, 11 full-stack tests (r
 Known and accepted for v1: no `proxy_cancel` frame (if the agent cancels, a stale card can sit until its timeout, and a late approve is logged
 although the proxy forwards nothing); `error_count()` is process-wide (an error in another session can cause a spurious hold, which errs safe);
 stdio downstream only; the proxy does not forward tools/list_changed; no OpenTelemetry observe-only mode.
+
+## D17: proxy_cancel
+When the agent cancels a request (`notifications/cancelled`) or the proxy's own safety-net timeout fires, the proxy sends
+`{"event":"proxy_cancel","call_id","reason":"cancelled"|"timeout"}` (best effort, detached task, existing send timeout) and never forwards the call afterwards.
+The hub resolves the pending call as deny/`cancelled`, broadcasts `inbox_resolved`, sends no `proxy_decision` and does NOT register anything with the monitor
+(a cancelled call is not a human denial and must not teach a denied effect); a cancel arriving while the monitor still runs marks the call so it is never held
+or approved; a late `inbox_decision` is ignored; a cancel racing an approve is a no-op after the approve. The UI shows such rows as CANCELLED.
+Closes the "stale card / late approve logged" limit of D16. Tests: 75 proxy, hub cancel tests incl. both race orders, 1 full-stack test with a real SDK
+cancel, UI label tests; 3 new mutants (X7-X9).
+Also filed for later (GitHub issues, not built): #3 policy engine, #4 durable tamper-evident event log with storage.

@@ -30,4 +30,4 @@ alert always holds the call, even an allow-listed one.
 - Monitor history is per proxy session: a restarted proxy starts with an empty denied history. Keep `session_id` stable, and note a second live proxy with
   the same id is rejected.
 - Token limit: it keeps out processes that cannot read your environment. Anything with full access to your account can read it.
-- Not covered yet: HTTP/SSE downstream servers, `proxy_cancel`, tools/list_changed, multi-user, hosted deployment. See DECISIONS D16.
+- Not covered yet: HTTP/SSE downstream servers, tools/list_changed, multi-user, hosted deployment. See DECISIONS D16.
