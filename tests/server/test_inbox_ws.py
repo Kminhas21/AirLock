@@ -39,7 +39,10 @@ def open_pair(client, ws_ui, ws_proxy):
                     "capabilities": {"policy_writable": False, "event_log": False}}
     ws_proxy.send_json(HELLO)
     assert ws_proxy.receive_json() == {"event": "hello_ack", "session_id": "e2e"}
-    assert ws_ui.receive_json() == {"event": "inbox_session", "session_id": "e2e", "state": "open"}
+    # the open event carries the servers and the boundary (None when the proxy sent none) so an already-open UI never shows a sandboxed session as unsandboxed
+    opened = ws_ui.receive_json()
+    assert opened["event"] == "inbox_session" and opened["session_id"] == "e2e" and opened["state"] == "open"
+    assert isinstance(opened["servers"], list) and "boundary" in opened
 
 
 PATHS = ["/proxy/ws", "/inbox/ws"]
