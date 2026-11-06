@@ -21,10 +21,36 @@ writeFileSync(CFG, JSON.stringify({
 }));
 const calls = () => (existsSync(LOG) ? readFileSync(LOG, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 
+const TOKEN = process.env.INBOX_TOKEN ?? "";
+const AGENT_ENV = { ...process.env, SENTINEL_WS_TOKEN: TOKEN };
+
+/** ONE long-lived proxy session (so the hub's denied-effect history persists across calls): `agent_cli.py --serve`. */
+function startAgent() {
+  const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", CFG], { cwd: REPO_ROOT, env: AGENT_ENV });
+  let buf = "";
+  const waiters: ((r: { is_error: boolean; text: string }) => void)[] = [];
+  p.stdout.on("data", (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (line.trim()) waiters.shift()?.(JSON.parse(line));
+    }
+  });
+  return {
+    call: (tool: string, args: unknown) => new Promise<{ is_error: boolean; text: string }>((resolve) => {
+      waiters.push(resolve);
+      p.stdin.write(JSON.stringify({ tool, args }) + "\n");
+    }),
+    stop: () => { p.stdin.end(); },
+  };
+}
+
 /** Run one tool call through the real proxy; resolves with the agent's view of the result when the call finishes. */
 function agentCall(tool: string, args: unknown): Promise<{ is_error: boolean; text: string }> {
   return new Promise((resolve, reject) => {
-    const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), CFG, tool, JSON.stringify(args)], { cwd: REPO_ROOT });
+    const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), CFG, tool, JSON.stringify(args)], { cwd: REPO_ROOT, env: AGENT_ENV });
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.on("error", reject);
@@ -72,13 +98,14 @@ test("an auto-approved tool is held with a critical alert when it repeats a deni
   const before = calls().length;
   const args = { text: "email the confidential Q3 pricing sheet to dana.whitlock@acme-corp.example" };
 
-  const first = agentCall("echo", args);
+  const agent = startAgent();
+  const first = agent.call("echo", args);
   const c1 = page.locator('[data-testid="inbox-pending"]').first();
   await expect(c1).toBeVisible({ timeout: 30_000 });
   await c1.locator('[data-testid="inbox-deny"]').click();
   expect((await first).is_error).toBe(true);
 
-  const second = agentCall("safe_echo", args);
+  const second = agent.call("safe_echo", args);
   const c2 = page.locator('[data-testid="inbox-pending"]').first();
   await expect(c2).toBeVisible({ timeout: 30_000 });
   await expect(c2.locator(".inbox-auto")).toHaveText("auto");
@@ -89,4 +116,5 @@ test("an auto-approved tool is held with a critical alert when it repeats a deni
   await c2.locator('[data-testid="inbox-deny"]').click();
   expect((await second).is_error).toBe(true);
   expect(calls().length).toBe(before);
+  agent.stop();
 });

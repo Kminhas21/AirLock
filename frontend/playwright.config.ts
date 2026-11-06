@@ -26,6 +26,8 @@ function backend(port: number, registry: string | undefined) {
       HF_HUB_OFFLINE: "1",
       // the e2e specs assert the full registry / frozen-model paths from /health (local development opt-in, server/health_view.py)
       SENTINEL_HEALTH_DETAIL: "1",
+      // inbox stage: /inbox/ws and /proxy/ws refuse every connection without a token
+      ...(process.env.INBOX_TOKEN ? { SENTINEL_WS_TOKEN: process.env.INBOX_TOKEN } : {}),
       // Pinned explicitly: the server default is action_sim, but live.spec.ts and the default replay expectations
       // (REPLAY_DETECTOR=D1) are about the RULES monitor. The action_sim / learned / registry runs are separate gate stages.
       SENTINEL_MONITOR: process.env.SENTINEL_MONITOR ?? "rules",
@@ -65,7 +67,7 @@ export default defineConfig({
       command: `npx vite --port ${UI_PORT} --strictPort`,
       url: `http://localhost:${UI_PORT}`,
       reuseExistingServer: false,
-      env: { VITE_SENTINEL_WS_URL: `ws://127.0.0.1:${API_PORT}/ws`, VITE_SENTINEL_INBOX_WS_URL: `ws://127.0.0.1:${API_PORT}/inbox/ws` },
+      env: { VITE_SENTINEL_WS_URL: `ws://127.0.0.1:${API_PORT}/ws`, VITE_SENTINEL_INBOX_WS_URL: `ws://127.0.0.1:${API_PORT}/inbox/ws`, ...(process.env.INBOX_TOKEN ? { VITE_SENTINEL_WS_TOKEN: process.env.INBOX_TOKEN } : {}) },
     },
   ],
 });

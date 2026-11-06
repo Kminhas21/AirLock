@@ -239,3 +239,25 @@ registry wrongly lists a relay). Opt-in, not the default, not recommended withou
 - Mutation check: 31 mutants (9 new: H1-H4 health, U1 union, F1-F4 frontend run through vitest, with a baseline check of the unmutated copy).
   The first run was RED: F2 (drift colour reverted to 2.5) survived because no test pinned the colour. A test was added; F2 is now killed.
 - Still open: parameters panel shows pretty JSON (newlines escaped, safe); alert banners were already safe (D11).
+
+## D16: MCP proxy + approval inbox (PROPOSALS #1, first version)
+Owner decisions: MCP-based agents first; BLOCK until a human decides; decision in the existing web UI; local developer tool; stdio only;
+operator `auto_approve` allowlist (downstream `readOnlyHint` NOT trusted unless `trust_read_only_hint` is set per server); simple session id;
+call-based monitors only (the proxy sees tool calls, not reasoning, so no Seismograph drift for proxied sessions). Plan and wire protocol:
+docs/plans/PROPOSAL-1-mcp-proxy.md.
+Built as three parallel tickets (hub `server/inbox_hub.py`, proxy `sentinel_proxy/`, UI inbox `frontend/src/**/Inbox*`), then an independent
+security review (read-only reviewer) found 1 BLOCKER and 4 MAJOR defects, all fixed and re-tested:
+- BLOCKER `/inbox/ws` was reachable by any local process without an Origin header (the agent could approve its own calls). Both inbox sockets now
+  REFUSE every connection unless SENTINEL_WS_TOKEN is set and presented. Limit: a token stops a process that cannot read your environment; software
+  with full access to your account cannot be stopped by this.
+- MAJOR auto-approve failed open when the monitor was degraded (rules fallback; real monitors swallow exceptions and return []). Now auto-approve
+  applies only when a working monitor looked at the call, did not error (process-wide error counter did not rise) and raised no alert.
+- MAJOR a duplicate call_id across sessions could resolve the wrong call. (session_id, call_id) is reserved synchronously; `inbox_decision` requires session_id.
+- MAJOR the UI truncated arguments, so a human could approve content they never saw. Over the display limit the card shows a TRUNCATED banner and Approve is disabled.
+- MAJOR a stuck UI stalled the hub / orphaned its socket. Sends are concurrent with a per-peer timeout, failed peers are closed so browsers reconnect.
+- Smaller: duplicate token= query, silent never-matching auto_approve entries (now warned), half-dead proxy sockets (now dropped and reconnected), unbounded sets.
+Evidence: 70 proxy tests, 87 hub tests, 68 UI unit tests, 11 full-stack tests (real uvicorn + real stdio proxy + real downstream + human client),
+2 Playwright tests (real browser, 390 px viewport) and 6 new mutants in the gate.
+Known and accepted for v1: no `proxy_cancel` frame (if the agent cancels, a stale card can sit until its timeout, and a late approve is logged
+although the proxy forwards nothing); `error_count()` is process-wide (an error in another session can cause a spurious hold, which errs safe);
+stdio downstream only; the proxy does not forward tools/list_changed; no OpenTelemetry observe-only mode.

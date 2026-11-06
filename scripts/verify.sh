@@ -58,6 +58,9 @@ if [ -d frontend/node_modules ]; then
     # tool name, loud fallback without a registry).
     run "browser replay parity: union (D9c OR D3, merged authored1 registry)" bash -c "cd frontend && REPLAY_IDS=$IDS3 FAKE_LLM_TRACES=$TR3 SENTINEL_MONITOR=registry_learned_dropout_or_action REPLAY_REGISTRY=$REG3 SENTINEL_REGISTRY_MODEL_V3=$RFZ3 REPLAY_DETECTOR=U9c REPLAY_FROZEN_V3=$RFZ3 npx playwright test replay-traces"
     run "browser registry UI union (banner before the click; fallback without a registry)" bash -c "python scripts/make_replay_registry.py --v3 --ids v3a-001 --out $UIREG3 && cd frontend && FALLBACK_API_PORT=8082 UI_TRACE_ID=v3a-001 FAKE_LLM_TRACES=$TR3 SENTINEL_MONITOR=registry_learned_dropout_or_action REPLAY_REGISTRY=$UIREG3 SENTINEL_REGISTRY_MODEL_V3=$RFZ3 REPLAY_DETECTOR=U9c REPLAY_FROZEN_V3=$RFZ3 REPLAY_IDS=v3a-001 npx playwright test registry-ui-union"
+    # MCP proxy + approval inbox (DECISIONS.md D16): real browser <-> real backend hub <-> REAL stdio proxy subprocess <-> real downstream MCP
+    # server; the backend runs action_sim with real MiniLM so a repeated denied effect raises a real alert; the inbox sockets require a token.
+    run "browser inbox (real proxy + downstream; held calls, approve/deny, alert holds an auto-approved call, token required)" bash -c "cd frontend && INBOX_STAGE=1 INBOX_TOKEN=gate-inbox-token SENTINEL_MONITOR=action_sim npx playwright test inbox"
   else
     echo "--- FAIL: no Chromium at \${CHROMIUM_PATH:-/opt/pw-browsers/chromium}; set CHROMIUM_PATH"; fail=1
   fi

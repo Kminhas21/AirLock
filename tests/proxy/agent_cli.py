@@ -6,6 +6,7 @@
 Starts the REAL proxy over stdio (like any MCP client would), calls one tool, prints {"is_error":..,"text":..} and exits."""
 import asyncio
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -17,7 +18,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _params(cfg: str) -> StdioServerParameters:
     return StdioServerParameters(command=sys.executable, args=["-m", "sentinel_proxy", "--config", cfg], cwd=str(ROOT),
-                                 env={"SENTINEL_PROXY_CONNECT_WAIT_S": "2", "PYTHONUNBUFFERED": "1"})
+                                 env={"SENTINEL_PROXY_CONNECT_WAIT_S": "2", "PYTHONUNBUFFERED": "1",
+                                      **({"SENTINEL_WS_TOKEN": os.environ["SENTINEL_WS_TOKEN"]} if os.environ.get("SENTINEL_WS_TOKEN") else {})})
 
 
 def _out(res) -> str:

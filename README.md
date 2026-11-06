@@ -56,6 +56,8 @@ v3 registry monitors (OPT-IN, PROVISIONAL, DECISIONS.md D10; default unchanged):
 
 Union monitor (OPT-IN, DECISIONS.md D13-D14): `SENTINEL_MONITOR=registry_learned_dropout_or_action` = frozen D9c OR D3, needs `SENTINEL_REGISTRY`, same fallbacks as the other registry modes.
 
+MCP proxy + approval inbox (monitor an agent you did not write; DECISIONS.md D16): `docs/proxy.md`.
+
 Full walkthrough of everything built, with workflows: `docs/COURSE.md`.
 
 Verify everything: `pip install -r requirements-dev.txt && scripts/verify.sh` (exit 0 = green). See `DECISIONS.md`.
