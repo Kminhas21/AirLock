@@ -35,7 +35,7 @@ Goal: declarative `allow` / `deny` / `ask` rules so humans only see the ambiguou
   `..` that escapes the prefix is outside; the match is on whole segments (`/project2` is NOT under `/project`). Symlinks cannot be known: documented.
 - Uncertainty rule (the fail-closed core): a condition that cannot be evaluated (path missing, wrong type, value not a string for a path op) is
   FALSE for positive ops (`equals`, `in`, `glob`, `under`, `contains`, `exists`, `max_len`) and TRUE for negative ops (`not_equals`, `not_in`, `not_glob`,
-  `not_under`, `not_exists`). `lint` WARNS when an `allow` rule uses a negative op (it would allow on unknowns).
+  `not_under`, `not_exists`). `lint` WARNS when an `allow` rule uses a negative op (it would allow on unknowns). A `server`/`tool` NAME that cannot be evaluated (not a string, control/format/bidi/surrogate/line-separator characters, longer than 20,000 chars) makes that condition FALSE in `allow` rules and TRUE in `deny` and `ask` rules, so a deny/ask rule still catches it and no allow rule can ever allow it.
 
 ## Evaluation
 `evaluate(server, tool, args, *, registry=None, alerts_present=False) -> Decision`

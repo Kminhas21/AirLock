@@ -492,7 +492,7 @@ def _clean_name(s: Any) -> bool:
 
 def _name_matches(name_ok: bool, name: Any, patterns: tuple, verdict: str) -> bool:
     if not name_ok:
-        return verdict != "allow"          # unevaluable name: FALSE in allow rules, TRUE in deny / ask rules
+        return False                    # unevaluable name: FALSE in allow rules, TRUE in deny / ask rules
     return any(fnmatchcase(name, p) for p in patterns)
 
 

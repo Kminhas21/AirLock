@@ -292,23 +292,44 @@ class TestServerTool:
             assert p.evaluate("s", "t", {}).verdict == "deny"
             assert p.evaluate(None, None, None).verdict == "deny"       # nothing to check, so even junk matches
 
-    @pytest.mark.parametrize("tool", [None, 5, b"read_x", ["read_x"], {"a": 1}, True, 1.5])
-    def test_non_string_tool_never_matches(self, tool):
-        p = pol([rule("a", "allow", tool="*")])
-        d = p.evaluate("s", tool, {})
+    ODD = [None, 5, b"read_x", ["read_x"], {"a": 1}, True, 1.5, "read_\x00x", "write_\u202ex", "write_\u200bx",
+           "write_\nx", "write_\x1bx", "write_\ud800x", "write_\u2028x", "write_" + "a" * 20001]
+
+    @pytest.mark.parametrize("name", ODD)
+    @pytest.mark.parametrize("field", ["tool", "server"])
+    def test_unevaluable_name_never_allowed(self, field, name):
+        p = pol([rule("a", "allow", **{field: "*"})])
+        args = ("s", name) if field == "tool" else (name, "t")
+        d = p.evaluate(*args, {})
         assert d.verdict == "ask" and d.matched == ()
+        d = pol([rule("a", "allow", **{field: "*"})], default="deny").evaluate(*args, {})
+        assert d.verdict == "deny" and d.rule_id is None
 
-    @pytest.mark.parametrize("server", [None, 5, b"fs", ["fs"], {}])
-    def test_non_string_server_never_matches(self, server):
-        p = pol([rule("a", "allow", server="*")])
-        assert p.evaluate(server, "t", {}).verdict == "ask"
+    @pytest.mark.parametrize("name", ODD)
+    @pytest.mark.parametrize("field", ["tool", "server"])
+    def test_unevaluable_name_still_caught_by_deny(self, field, name):
+        pat = "write_*" if field == "tool" else "fs*"
+        p = pol([rule("d", "deny", **{field: pat}), rule("a", "allow")], default="allow")
+        args = ("s", name) if field == "tool" else (name, "t")
+        d = p.evaluate(*args, {})
+        assert (d.verdict, d.rule_id) == ("deny", "d")
+        assert d.matched == ("d", "a")
 
-    @pytest.mark.parametrize("name", ["read_\x00x", "read_‮x", "read_​x", "read_\nx", "read_\x1bx", "read_\ud800x",
-                                      "read_ x"])
-    def test_control_and_bidi_names_never_match(self, name):
-        p = pol([rule("a", "allow", tool="read_*")])
-        assert p.evaluate("s", name, {}).verdict == "ask"
+    @pytest.mark.parametrize("name", ODD)
+    def test_unevaluable_name_caught_by_ask(self, name):
+        p = pol([rule("q", "ask", tool="write_*")], default="allow")
+        d = p.evaluate("s", name, {})
+        assert (d.verdict, d.rule_id) == ("ask", "q")
+
+    def test_unevaluable_name_with_other_conditions(self):
+        p = pol([rule("d", "deny", tool="write_*", args=[arg("path", "not_under", "/project")])], default="allow")
+        assert p.evaluate("s", "w\x00", {"path": "/project/a"}).verdict == "allow"      # other conditions still apply
+        assert p.evaluate("s", "w\x00", {"path": "/etc/a"}).verdict == "deny"
+
+    def test_evaluable_names_unchanged(self):
+        p = pol([rule("d", "deny", tool="write_*"), rule("a", "allow", tool="read_*")])
         assert p.evaluate("s", "read_x", {}).verdict == "allow"
+        assert p.evaluate("s", "other", {}).verdict == "ask"
 
     def test_glob_metachar_in_tool_name_is_literal(self):
         p = pol([rule("a", "allow", tool="read_file")])
