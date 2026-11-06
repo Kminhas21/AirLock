@@ -233,11 +233,11 @@ async def test_agent_auth_and_forbidden_server():
     ws = FakeWS([hello("a1", servers=["fs"])], {"authorization": "Bearer " + TOK["ci"]})
     task = await run_proxy(w, ws)
     assert ws.sent[0] == {"event": "hello_ack", "session_id": "a1"}
-    assert w.hub.sessions["a1"].agent_id == "ci-bot" and w.hub.sessions["a1"].tenant == "acme"
+    assert w.hub.sessions[("acme", "a1")].agent_id == "ci-bot" and w.hub.sessions[("acme", "a1")].tenant == "acme"
     task.cancel()
     ws2 = FakeWS([hello("a2", servers=["fs", "shell"])], {"authorization": "Bearer " + TOK["ci"]})
     await run_proxy(w, ws2)
-    assert ws2.sent == [{"event": "hello_reject", "reason": "forbidden_server"}] and "a2" not in w.hub.sessions
+    assert ws2.sent == [{"event": "hello_reject", "reason": "forbidden_server"}] and ("acme", "a2") not in w.hub.sessions
     ws3 = FakeWS([{"event": "auth", "token": TOK["alice"]}, hello("a3")])           # an operator token is not an agent credential
     await run_proxy(w, ws3)
     assert ws3.sent == [{"event": "hello_reject", "reason": "unauthorized"}] and ws3.closed_code == 1008
@@ -720,3 +720,129 @@ def test_legacy_mode_is_unchanged_when_no_identity_file(monkeypatch):
             snap = ui.receive_json()
             assert snap["event"] == "inbox_snapshot" and "principal" not in snap
             assert snap["capabilities"] == {"policy_writable": False, "event_log": False}
+
+
+# ------------------------------------------------------------------ tenant-scoped session ids
+class SharedWorld(World):
+    """Both tenants use session id 's' and call id 'c1'."""
+
+    async def start(self):
+        await self.ui("alice")
+        await self.ui("dave")
+        self.a = await self.agent("ci", "s")
+        # World keys its helper dicts by sid, so keep the second tenant's objects by hand
+        peer = FakePeer()
+        self.gpeer = peer
+        self.g = await self.hub.proxy_hello(peer, hello("s", servers=["fs"]), self.principal("agent", "gbot"))
+        await settle()
+        return self
+
+
+async def test_two_tenants_can_use_the_same_session_id_at_the_same_time():
+    w = await SharedWorld().start()
+    assert w.a is not None and w.g is not None and w.a is not w.g
+    assert set(w.hub.sessions) == {("acme", "s"), ("globex", "s")}
+    # duplicate_session_id applies only INSIDE one tenant
+    dup = FakePeer()
+    assert await w.hub.proxy_hello(dup, hello("s"), w.principal("agent", "ci")) is None
+    assert dup.sent == [{"event": "hello_reject", "reason": "duplicate_session_id"}]
+    assert ("acme", "s") in w.hub.sessions and ("globex", "s") in w.hub.sessions
+    # each tenant's UI sees only its own session in the snapshot and the open events
+    la, ld = FakePeer(), FakePeer()
+    await w.hub.ui_connected(la, w.principal("operator", "alice"))
+    await w.hub.ui_connected(ld, w.principal("operator", "dave"))
+    assert [x["session_id"] for x in la.sent[0]["sessions"]] == ["s"] and [x["session_id"] for x in ld.sent[0]["sessions"]] == ["s"]
+    assert len(w.uis["alice"].events("inbox_session")) == 1 and len(w.uis["dave"].events("inbox_session")) == 1
+
+
+async def test_same_session_and_call_ids_never_cross_for_pending_decisions_and_cancels():
+    w = await SharedWorld().start()
+    await w.hub.handle_proxy_frame(w.a, call("c1", tool="ta"))
+    await w.hub.handle_proxy_frame(w.g, call("c1", tool="tg"))
+    pa, pg = await w.pending("alice", "c1"), await w.pending("dave", "c1")
+    assert pa["tool"] == "ta" and pg["tool"] == "tg" and pa["tenant"] == "acme" and pg["tenant"] == "globex"
+    assert w.hub.pending_count() == 2
+    # alice decides HER call: only acme's proxy hears it, globex stays pending
+    await w.decide("alice", "s", "c1", "approve")
+    await wait_for(lambda: w.proxies["s"].events("proxy_decision"))
+    await settle(30)
+    assert w.proxies["s"].events("proxy_decision")[0]["decision"] == "approve"
+    assert w.gpeer.events("proxy_decision") == [] and w.hub.pending_count() == 1
+    assert len(w.uis["dave"].events("inbox_resolved")) == 0
+    # dave cancels/denies his: acme's earlier resolution is untouched
+    await w.hub.handle_proxy_frame(w.g, {"event": "proxy_cancel", "call_id": "c1"})
+    await wait_for(lambda: w.uis["dave"].events("inbox_resolved"))
+    assert w.uis["dave"].events("inbox_resolved")[0]["reason"] == "cancelled"
+    assert len(w.uis["alice"].events("inbox_resolved")) == 1 and w.uis["alice"].events("inbox_resolved")[0]["decision"] == "approve"
+    assert w.gpeer.events("proxy_decision") == []                           # a cancel sends no proxy_decision
+
+
+async def test_forged_session_id_of_the_other_tenant_is_unknown_even_when_it_exists_in_both():
+    w = await SharedWorld().start()
+    await w.hub.handle_proxy_frame(w.a, call("only-acme"))
+    await w.pending("alice", "only-acme")
+    before = list(w.uis["dave"].sent)
+    await w.decide("dave", "s", "only-acme", "approve")          # session 's' exists for dave, but the call is acme's
+    await settle(40)
+    assert w.proxies["s"].events("proxy_decision") == [] and w.hub.pending_count() == 1
+    assert w.uis["dave"].sent == before and w.uis["dave"].events("inbox_forbidden") == []
+
+
+async def test_concurrent_decisions_and_escalations_per_tenant_do_not_cross():
+    w = await SharedWorld().start()
+    await asyncio.gather(w.hub.handle_proxy_frame(w.a, call("c1")), w.hub.handle_proxy_frame(w.g, call("c1")))
+    await w.pending("alice", "c1")
+    await w.pending("dave", "c1")
+    await settle()
+    w.ft.advance(61)                                             # globex has no escalation levels; acme has two
+    await wait_for(lambda: w.uis["alice"].events("inbox_escalated"))
+    await settle(30)
+    assert [c.name for c, _ in w.notifier.sent] == ["oncall"] and w.notifier.sent[0][1]["tenant"] == "acme"
+    assert w.uis["dave"].events("inbox_escalated") == []
+    await asyncio.gather(w.decide("alice", "s", "c1", "deny"), w.decide("dave", "s", "c1", "approve"))
+    await wait_for(lambda: w.proxies["s"].events("proxy_decision") and w.gpeer.events("proxy_decision"))
+    assert w.proxies["s"].events("proxy_decision")[0]["decision"] == "deny"
+    assert w.gpeer.events("proxy_decision")[0]["decision"] == "approve"
+    assert w.uis["alice"].events("inbox_resolved")[0]["operator"] == "alice"
+    assert w.uis["dave"].events("inbox_resolved")[0]["operator"] == "dave"
+
+
+async def test_shared_ids_in_the_event_log_history_and_restart_recovery(tmp_path):
+    db = tmp_path / "e.db"
+    st = eventlog.EventStore(db, key=b"k" * 20)
+    st.open()
+    w = World(store=st)
+    await w.ui("alice")
+    await w.ui("dave")
+    a = await w.agent("ci", "s")
+    gpeer = FakePeer()
+    g = await w.hub.proxy_hello(gpeer, hello("s", servers=["fs"]), w.principal("agent", "gbot"))
+    await w.hub.handle_proxy_frame(a, call("c1", tool="ta"))
+    await w.hub.handle_proxy_frame(g, call("c1", tool="tg"))
+    await w.pending("alice", "c1")
+    await w.pending("dave", "c1")
+    await w.decide("alice", "s", "c1", "approve")
+    await w.decide("dave", "s", "c1", "deny")
+    await wait_for(lambda: w.uis["alice"].events("inbox_resolved") and w.uis["dave"].events("inbox_resolved"))
+    # one proposal and one decision per tenant: the unique indexes did not collide
+    rows = list(st.events())
+    sids = {e.session_id for e in rows if e.kind in ("call_proposed", "decision")}
+    assert sids == {"acme/s", "globex/s"}
+    assert sum(1 for e in rows if e.kind == "decision") == 2 and sum(1 for e in rows if e.kind == "call_proposed") == 2
+    # the UI history shows the plain session id and only its own tenant's call
+    la, ld = FakePeer(), FakePeer()
+    await w.hub.ui_connected(la, w.principal("operator", "alice"))
+    await w.hub.ui_connected(ld, w.principal("operator", "dave"))
+    assert [(r["session_id"], r["tool"], r["decision"]) for r in la.sent[0]["recent"]] == [("s", "ta", "approve")]
+    assert [(r["session_id"], r["tool"], r["decision"]) for r in ld.sent[0]["recent"]] == [("s", "tg", "deny")]
+    # two unresolved shared (session, call) pairs are both recovered at the next start
+    await w.hub.handle_proxy_frame(a, call("c2"))
+    await w.hub.handle_proxy_frame(g, call("c2"))
+    await w.pending("alice", "c2")
+    await w.pending("dave", "c2")
+    st.close()                                                  # (simulates the restart: the process is gone with them pending)
+    st2 = eventlog.EventStore(db, key=b"k" * 20)
+    info = st2.open()
+    assert sorted(r["session_id"] for r in info["recovered"]) == ["acme/s", "globex/s"]
+    st2.close()
+    assert eventlog.verify_file(db, key=b"k" * 20).ok
