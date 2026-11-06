@@ -100,9 +100,10 @@ def proxy_params(cfg_path, env=None):
 
 
 @asynccontextmanager
-async def agent(cfg_path, env=None):
+async def agent(cfg_path, env=None, errlog=None):
     """The 'agent': the SDK's own stdio client talking to the real proxy subprocess."""
-    async with stdio_client(proxy_params(cfg_path, env)) as (r, w):
+    kw = {"errlog": errlog} if errlog is not None else {}
+    async with stdio_client(proxy_params(cfg_path, env), **kw) as (r, w):
         async with ClientSession(r, w) as s:
             await s.initialize()
             yield s
