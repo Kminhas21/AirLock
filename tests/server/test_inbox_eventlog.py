@@ -119,7 +119,8 @@ async def test_held_call_write_ahead_order_human_approve():
     i_res = idx(tl, lambda e: e[:3] == ("send", "ui", "inbox_resolved"))
     assert i_prop < i_pend < i_dec < i_pd and i_dec < i_res
     prop = logged(st, "call_proposed")[0][3]
-    assert prop == {"server": "fs", "tool": "write_file", "args": {"p": 1}, "auto": False, "alerts": [], "policy": None}
+    assert prop == {"server": "fs", "tool": "write_file", "args": {"p": 1}, "auto": False, "alerts": [], "policy": None,
+                    "secrets_used": []}
     assert logged(st, "decision")[0][3] == {"decision": "approve", "reason": "human", "actor": "human", "rule_id": None,
                                             "policy_digest": None}
 

@@ -116,7 +116,7 @@ async def test_hello_ack_and_snapshot_and_session_event():
     assert r.ui.events("inbox_session")[0]["state"] == "open"
     late = FakePeer()
     await r.hub.ui_connected(late)
-    assert late.sent[0]["sessions"] == [{"session_id": "s1", "servers": ["fs"], "pending": []}]
+    assert late.sent[0]["sessions"] == [{"session_id": "s1", "servers": ["fs"], "boundary": None, "pending": []}]
 
 
 @pytest.mark.parametrize("frame,reason", [
@@ -158,7 +158,7 @@ async def test_approve_flow_orders_monitor_reply_broadcast():
     assert p == {"event": "inbox_pending", "session_id": "s1", "call_id": "c1", "server": "fs", "tool": "write_file",
                  "args": {"p": 1}, "auto": False, "alerts": [], "deadline_s": 5.0,
                  "session_summary": {"approved": 0, "denied": 0, "auto": 0, "policy": 0}, "session_history": [],
-                 "earlier_denied": []}
+                 "earlier_denied": [], "secrets_used": []}
     assert r.decisions() == []          # nothing happens until a human decides
     await r.decide("c1", "approve")
     await wait_for(lambda: r.decisions())
