@@ -200,6 +200,35 @@ describe("Inbox", () => {
     expect(html).toContain('data-reason="&quot;&gt;&lt;img src=x&gt; x"');
   });
 
+  it("pending card with a rule_id shows 'held by rule' as plain single-line text; none without", () => {
+    state.pending = [call({ rule_id: "ask-writes", policy_digest: "d" })];
+    const html = render();
+    expect(html).toContain('<span class="inbox-rule" data-testid="inbox-rule">held by rule ask-writes</span>');
+    state.pending = [call({ rule_id: null })];
+    expect(render()).not.toContain("inbox-rule");
+  });
+
+  it("policy rows: auto-allowed / denied by rule, 'by policy' without a rule, hostile ids stay escaped text", () => {
+    const row = (call_id: string, decision: string, rule_id: string | null) => ({ session_id: "s", call_id, server: "fs", tool: "t", decision, reason: "policy", rule_id, policy_digest: null, result: null });
+    state.resolved = [row("1", "approve", "read-ok"), row("2", "deny", "no-rm"), row("3", "deny", null), row("4", "approve", '"><img src=x>')];
+    const html = render();
+    expect(html).toContain('class="inbox-decision policy approve">auto-allowed by rule read-ok<');
+    expect(html).toContain('class="inbox-decision policy deny">denied by rule no-rm<');
+    expect(html).toContain('class="inbox-decision policy deny">denied by policy<');
+    expect(html).toContain('data-reason="policy" data-rule-id="read-ok"');
+    expect(html).toContain('data-reason="policy"');
+    expect(html.match(/data-rule-id=/g)).toHaveLength(3);
+    expect(html).not.toContain("<img");
+    expect(html).toContain("rule &quot;&gt;&lt;img src=x&gt;<");
+  });
+
+  it("a rule_id on a non-policy row is not shown as a policy label", () => {
+    state.resolved = [{ session_id: "s", call_id: "1", server: "", tool: "t", decision: "deny", reason: "human", rule_id: "r", policy_digest: null, result: null }];
+    const html = render();
+    expect(html).toContain(">DENIED<");
+    expect(html).not.toContain("data-rule-id");
+  });
+
   it("lists resolved items with decision and reason (single line, sanitised)", () => {
     state.resolved = [
       { session_id: "s", call_id: "1", server: "fs", tool: "rm", decision: "deny", reason: "timeout", result: null },

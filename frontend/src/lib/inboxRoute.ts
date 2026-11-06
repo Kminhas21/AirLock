@@ -4,6 +4,8 @@
 // shape of each event, coerces fields to plain strings/numbers, and ignores anything else WITHOUT throwing.
 // Display-time sanitising (singleLine / AgentText) happens in the components.
 
+import { singleLine } from "./safeText";
+
 export const MAX_RESOLVED = 200;
 export const MAX_PENDING = 2000;
 /** The Inbox renders at most this many pending cards; the rest are counted in a visible "N more pending not shown" line. */
@@ -29,7 +31,13 @@ export interface InboxSession {
   state: "open" | "closed";
 }
 
+export const MAX_RULE_ID = 60;
+const MAX_DIGEST = 80;
+
 export interface PendingCall {
+  /** Matched policy rule that made the hub hold this call (policy-file data; null = default verdict / no policy). */
+  rule_id: string | null;
+  policy_digest: string | null;
   session_id: string;
   call_id: string;
   server: string;
@@ -43,6 +51,8 @@ export interface PendingCall {
 }
 
 export interface ResolvedCall {
+  rule_id: string | null;
+  policy_digest: string | null;
   session_id: string;
   call_id: string;
   server: string;
@@ -68,6 +78,12 @@ const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !
 const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 const id = (v: unknown): string | null => (typeof v === "string" && v.length > 0 && v.length <= 200 ? v : null);
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
+/** Policy-file data: strings only, one line, bounded; anything else (or empty) is null. */
+function label(v: unknown, max: number): string | null {
+  if (typeof v !== "string") return null;
+  return singleLine(v, max) || null;
+}
 
 function parseAlert(v: unknown): InboxAlert | null {
   if (!isRec(v)) return null;
@@ -105,6 +121,8 @@ function parsePending(v: unknown, now: number, sessionFallback?: string): Pendin
   const d = num(v.deadline_s);
   const deadline_s = d !== null && d > 0 ? Math.min(d, MAX_DEADLINE_S) : DEFAULT_DEADLINE_S;
   return {
+    rule_id: label(v.rule_id, MAX_RULE_ID),
+    policy_digest: label(v.policy_digest, MAX_DIGEST),
     session_id,
     call_id,
     server: str(v.server) ?? "",
@@ -181,6 +199,8 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
       if (session_id === null || call_id === null) return state;
       const prior = state.pending.find((p) => sameCall(p, session_id, call_id));
       const item: ResolvedCall = {
+        rule_id: label(event.rule_id, MAX_RULE_ID) ?? prior?.rule_id ?? null,
+        policy_digest: label(event.policy_digest, MAX_DIGEST) ?? prior?.policy_digest ?? null,
         session_id,
         call_id,
         server: prior?.server ?? "",

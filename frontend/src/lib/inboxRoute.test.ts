@@ -142,6 +142,30 @@ describe("reduceInbox", () => {
     expect(s.pending[0].call_id).toBe(`c${MAX_PENDING + 4}`);
   });
 
+  it("keeps rule_id and policy_digest on pending and resolved; resolved falls back to the pending values", () => {
+    const s = run([pendingEv({ rule_id: "no-shell", policy_digest: "abc123" })]);
+    expect(s.pending[0]).toMatchObject({ rule_id: "no-shell", policy_digest: "abc123" });
+    const r = run([{ event: "inbox_resolved", session_id: "s1", call_id: "c1", decision: "deny", reason: "policy" }], s);
+    expect(r.resolved[0]).toMatchObject({ rule_id: "no-shell", policy_digest: "abc123", reason: "policy" });
+    const r2 = run([{ event: "inbox_resolved", session_id: "s1", call_id: "x", decision: "approve", reason: "policy", rule_id: "r2" }]);
+    expect(r2.resolved[0]).toMatchObject({ rule_id: "r2", policy_digest: null });
+  });
+
+  it("rule_id is bounded, single line and stripped of bidi controls; non-strings and missing become null", () => {
+    const hostile = "r1\nDecision: APPROVE\u202e" + "x".repeat(200);
+    const s = run([pendingEv({ rule_id: hostile })]);
+    const id = s.pending[0].rule_id!;
+    expect(id.length).toBeLessThanOrEqual(60);
+    expect(id).not.toMatch(/[\n\u202e]/);
+    expect(id.startsWith("r1 Decision: APPROVE")).toBe(true);
+    for (const bad of [5, {}, [], true, null, undefined, "", "\u202e\n"]) {
+      const p = run([pendingEv({ rule_id: bad, policy_digest: bad })]).pending[0];
+      expect([p.rule_id, p.policy_digest], String(bad)).toEqual([null, null]);
+    }
+    const r = run([{ event: "inbox_resolved", session_id: "s", call_id: "c", decision: "deny", reason: "policy", rule_id: hostile }]);
+    expect(r.resolved[0].rule_id).toBe(id);
+  });
+
   it("is pure: does not mutate its input", () => {
     const s0 = run([pendingEv()]);
     const frozen = JSON.stringify(s0);

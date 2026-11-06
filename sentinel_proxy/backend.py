@@ -12,7 +12,7 @@ from websockets.asyncio.client import connect
 
 from sentinel_proxy.config import strip_query
 
-_KNOWN_REASONS = {"human", "auto", "timeout", "invalid", "disconnected", "duplicate"}
+_KNOWN_REASONS = {"human", "auto", "policy", "timeout", "invalid", "disconnected", "duplicate"}
 UNREACHABLE = "SENTINEL backend unreachable"
 LOST = "SENTINEL backend connection lost"
 

@@ -71,6 +71,11 @@ function PendingCard({
           {singleLine(call.tool, MAX_TOOL_NAME)}
         </span>
         {call.auto && <span className="inbox-auto">auto</span>}
+        {call.rule_id && (
+          <span className="inbox-rule" data-testid="inbox-rule">
+            held by rule {singleLine(call.rule_id, 60)}
+          </span>
+        )}
         <span className="inbox-countdown" data-testid="inbox-countdown">
           {left > 0 ? `${left}s left` : "expired"}
         </span>
@@ -121,10 +126,24 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
   const approved = item.decision === "approve";
   // only the exact reason "cancelled" (the agent/proxy abandoned the call) gets the neutral label; everything else is a decision
   const cancelled = !approved && item.reason === "cancelled";
+  const policy = item.reason === "policy";
+  const rule = item.rule_id ? singleLine(item.rule_id, 60) : "";
   const cls = approved ? "approve" : cancelled ? "cancelled" : "deny";
+  const text = policy
+    ? `${approved ? "auto-allowed" : "denied"} by ${rule ? `rule ${rule}` : "policy"}`
+    : approved
+      ? "APPROVED"
+      : cancelled
+        ? "CANCELLED"
+        : "DENIED";
   return (
-    <li className="inbox-resolved-row" data-testid="inbox-resolved" data-reason={singleLine(item.reason, 40)}>
-      <span className={`inbox-decision ${cls}`}>{approved ? "APPROVED" : cancelled ? "CANCELLED" : "DENIED"}</span>
+    <li
+      className="inbox-resolved-row"
+      data-testid="inbox-resolved"
+      data-reason={singleLine(item.reason, 40)}
+      data-rule-id={policy && rule ? rule : undefined}
+    >
+      <span className={`inbox-decision ${policy ? "policy " : ""}${cls}`}>{text}</span>
       <span className="inbox-tool">{singleLine(item.tool, MAX_TOOL_NAME) || "(unknown tool)"}</span>
       {item.reason && <span className="inbox-reason">{singleLine(item.reason)}</span>}
       {item.result && (

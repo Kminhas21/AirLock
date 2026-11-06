@@ -654,6 +654,8 @@
 .inbox-decision { font-size: 11px; font-weight: 700; }
 .inbox-decision.approve { color: #22c55e; }
 .inbox-decision.deny { color: #ef4444; }
+.inbox-rule { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 10px; background: rgba(245, 158, 11, 0.15); color: #f59e0b; overflow-wrap: anywhere; min-width: 0; }
+.inbox-decision.policy { font-weight: 600; overflow-wrap: anywhere; }
 .inbox-decision.cancelled { color: #9ca3af; }
 .inbox-reason, .inbox-result { color: #9ca3af; font-size: 12px; overflow-wrap: anywhere; }
 @media (max-width: 800px) {
