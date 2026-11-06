@@ -67,3 +67,14 @@ def event_log_view(info: dict, detail: bool) -> dict:
     if detail:
         out = {"path": info.get("path"), **out}
     return out
+
+
+def identity_view(store: object, detail: bool) -> dict:
+    """/health `identity` entry (only in identity mode). Public: {legacy}. Detail: {tenants, operators, agents, digest, legacy}.
+    Never any token or token digest."""
+    legacy = bool(getattr(store, "is_legacy", False))
+    if not detail:
+        return {"legacy": legacy}
+    tenants = getattr(store, "tenants", {}) or {}
+    return {"tenants": len(tenants), "operators": len(getattr(store, "_ops", ()) or ()),
+            "agents": len(getattr(store, "_agents", ()) or ()), "digest": store.digest(), "legacy": legacy}

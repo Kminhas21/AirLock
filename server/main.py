@@ -41,6 +41,7 @@ SCENARIOS = ("aligned", "adversarial")
 async def lifespan(_app: FastAPI):
     # Load MiniLM (Seismograph + proposal monitor) in the background so the first session does not pay for it.
     proposal_monitor.warm_up_in_background()
+    await inbox_hub.setup_identity_from_env()   # SENTINEL_IDENTITY_FILE unset => legacy token mode; unusable => refuse everyone
     await inbox_hub.open_log_from_env()      # SENTINEL_EVENT_LOG unset => nothing; unusable => sessions are refused
     try:
         yield
@@ -71,6 +72,10 @@ async def health(request: Request):
     detail = health_view.detail_allowed(request.query_params.get("token"), request.headers.get("authorization"))
     if not detail:
         info = health_view.public_view(info)
+    if inbox_hub.identity is not None:
+        info = {**info, "identity": health_view.identity_view(inbox_hub.identity, detail)}
+    elif inbox_hub.identity_broken:
+        info = {**info, "identity": {"legacy": False, "usable": False}}
     log_info = inbox_hub.event_log_info()
     if log_info is not None:
         info = {**info, "event_log": health_view.event_log_view(log_info, detail)}
@@ -201,11 +206,27 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 _warned_no_token = False
+_warned_query_token = False
 
 
 async def _guarded_accept(websocket: WebSocket, name: str) -> bool:
     """The inbox sockets can approve tool calls, so they REQUIRE SENTINEL_WS_TOKEN (fail closed when it is unset)."""
-    global _warned_no_token
+    global _warned_no_token, _warned_query_token
+    if inbox_hub.identity_mode:
+        # identity mode: credentials never travel in the URL (header or first frame, checked by the hub); the browser Origin
+        # allow-list still applies. A ?token= is ignored (and said so once).
+        if websocket.query_params.get("token") is not None and not _warned_query_token:
+            _warned_query_token = True
+            logger.warning("ignoring ?token= on %s: with SENTINEL_IDENTITY_FILE credentials go in the Authorization header "
+                           "or an auth first frame", name)
+        origin_env = {k: os.environ[k] for k in ("SENTINEL_ALLOWED_ORIGINS",) if k in os.environ}
+        access = check_ws_access(websocket.headers.get("origin"), None, origin_env)
+        if not access.allowed:
+            logger.warning("rejected %s connection: %s", name, access.reason)
+            await websocket.close(code=1008)
+            return False
+        await websocket.accept()
+        return True
     if not os.environ.get("SENTINEL_WS_TOKEN"):
         if not _warned_no_token:
             _warned_no_token = True
