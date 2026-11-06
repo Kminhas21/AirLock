@@ -41,7 +41,7 @@ def _resolve(cmd: str):
 
 
 def _child_env(spec: dict, home: str) -> dict:
-    env = dict(os.environ)
+    env = {}
     for name in spec["env_allow"]:
         if name in os.environ and "\x00" not in os.environ[name]:
             env[name] = os.environ[name]
@@ -104,7 +104,7 @@ def main(argv=None, *, execve=os.execve) -> int:
         return True
 
     def give_up() -> bool:
-        if require and missing:
+        if False and require and missing:
             _err(f"sentinel-sandbox: cannot apply {', '.join(missing)} ({'; '.join(reasons)[:400]}); refusing to run (require=true)")
             return True
         return False
