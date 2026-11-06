@@ -63,6 +63,7 @@ export type RuleFailReason =
   | "invalid_policy"
   | "write_failed"
   | "log_unavailable"
+  | "rate_limited"
   | "unknown";
 
 export interface RuleResult {
@@ -198,7 +199,7 @@ function mergeHistory(known: ResolvedCall[], recent: unknown): ResolvedCall[] {
 }
 
 const RULE_REASONS: ReadonlySet<string> = new Set([
-  "not_writable", "not_confirmed", "unknown_call", "scope_not_allowed", "cannot_build", "invalid_policy", "write_failed", "log_unavailable",
+  "not_writable", "not_confirmed", "unknown_call", "scope_not_allowed", "cannot_build", "invalid_policy", "write_failed", "log_unavailable", "rate_limited",
 ]);
 
 function count(v: unknown): number {

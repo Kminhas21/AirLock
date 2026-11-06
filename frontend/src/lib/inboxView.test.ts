@@ -57,12 +57,15 @@ describe("words", () => {
   });
   it("ruleToast: ok and every closed-set failure, unknown reason generic", () => {
     expect(ruleToast({ ok: true, rule_id: "ui-allow-ab12", reason: "ok" })).toBe("Rule ui-allow-ab12 added (applies to new sessions)");
-    for (const r of ["not_writable", "not_confirmed", "unknown_call", "scope_not_allowed", "cannot_build", "invalid_policy", "write_failed", "log_unavailable"] as const) {
+    for (const r of ["not_writable", "not_confirmed", "unknown_call", "scope_not_allowed", "cannot_build", "invalid_policy", "write_failed", "log_unavailable", "rate_limited"] as const) {
       const t = ruleToast({ ok: false, rule_id: null, reason: r });
       expect(t.startsWith("Rule not added: "), r).toBe(true);
-      expect(t).not.toContain("unknown reason");
+      expect(t).not.toBe("Rule not added");
       expect(t).not.toContain("_");
     }
-    expect(ruleToast({ ok: false, rule_id: null, reason: "unknown" })).toBe("Rule not added: unknown reason");
+    expect(ruleToast({ ok: false, rule_id: null, reason: "rate_limited" })).toBe("Rule not added: Too many rule requests; wait a minute");
+    // anything outside the closed set (even if it got past the reducer) is generic and never echoed
+    for (const raw of ["unknown", "<script>x</script>", "__proto__", "toString", "constructor"])
+      expect(ruleToast({ ok: false, rule_id: null, reason: raw as never }), raw).toBe("Rule not added");
   });
 });

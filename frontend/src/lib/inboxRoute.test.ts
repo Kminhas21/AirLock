@@ -281,6 +281,8 @@ describe("reduceInbox", () => {
       const rr = (e: Record<string, unknown>) => run([{ event: "inbox_rule_result", ...e }]).ruleResult;
       expect(rr({ ok: true, rule_id: "ui-allow-ab", reason: "ok" })).toEqual({ ok: true, rule_id: "ui-allow-ab", reason: "ok" });
       expect(rr({ ok: false, rule_id: null, reason: "cannot_build" })).toEqual({ ok: false, rule_id: null, reason: "cannot_build" });
+      expect(rr({ ok: false, reason: "rate_limited" })!.reason).toBe("rate_limited");
+      expect(rr({ ok: false, reason: "__proto__" })!.reason).toBe("unknown");
       expect(rr({ ok: false, reason: "<script>" })).toEqual({ ok: false, rule_id: null, reason: "unknown" });
       expect(rr({ ok: "yes", reason: "ok" })!.ok).toBe(false);
       expect(rr({ ok: true, rule_id: "x\ny\u202e" + "q".repeat(200) })!.rule_id!.length).toBeLessThanOrEqual(60);

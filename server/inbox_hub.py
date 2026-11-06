@@ -20,6 +20,7 @@ from typing import Any, Callable
 import eventlog
 import gate
 import policy as policy_mod
+import policy_writer
 import proposal_monitor
 import safe_text
 
@@ -65,6 +66,8 @@ EARLIER_DENIED_SHOWN = 5
 PREVIEW_LIMIT = 120
 NOTE_LIMIT = 200
 # resolutions that are nobody's decision about the call's content: not counted, never "earlier denied"
+RULE_RATE_LIMIT = 20       # inbox_rule_request per RULE_RATE_WINDOW_S, hub wide
+RULE_RATE_WINDOW_S = 60.0
 NOT_A_DECISION = frozenset({"cancelled", "disconnected", "restart", "log_unavailable"})
 
 
@@ -250,6 +253,8 @@ class InboxHub:
         self.sessions: dict[str, ProxySession] = {}
         self._uis: list[_Peer] = []
         self._bg: set = set()
+        self._rule_times: collections.deque = collections.deque()
+        self._rule_lock = asyncio.Lock()
         self.store = store                 # durable event log (eventlog.EventStore-like) or None: legacy behaviour
         self.log_unusable = False          # a log was configured but could not be opened: refuse every session
         self.log_path: str | None = None
@@ -755,9 +760,92 @@ class InboxHub:
         if ui in self._uis:
             self._uis.remove(ui)
 
+    # ------------------------------------------------------------------ standing rules (OP4)
+    def _find_call(self, sid: Any, call_id: Any):
+        """(server, tool, args) of a call this hub saw in THAT session (pending or the in-memory ring), else None."""
+        if not isinstance(sid, str) or not isinstance(call_id, str):
+            return None
+        s = self.sessions.get(sid)
+        if s is None:
+            return None
+        p = s.pending.get(call_id)
+        if p is not None:
+            return p.server, p.tool, p.args
+        for item in reversed(s.ring):
+            if item["call_id"] == call_id:
+                return item["server"], item["tool"], item["args"]
+        return None
+
+    def _writable_policy(self):
+        """-> (path, digest_before) when standing rules may be written, else None. Reads the file: run in a thread."""
+        if (os.environ.get("SENTINEL_POLICY_WRITABLE") or "").strip() != "1":
+            return None
+        path = (os.environ.get("SENTINEL_POLICY") or "").strip()
+        if not path:
+            return None
+        pol = policy_mod.load_policy_file(path)[0]
+        return (path, pol.digest()) if pol is not None else None
+
+    async def _rule_result(self, ok: bool, reason: str, rule_id: str | None = None, digest: str | None = None) -> None:
+        await self._broadcast({"event": "inbox_rule_result", "ok": ok, "rule_id": rule_id, "reason": reason,
+                               "policy_digest": digest, "applies": "new_sessions"})
+
+    async def _rule_request(self, frame: dict) -> None:
+        now = time.monotonic()
+        while self._rule_times and now - self._rule_times[0] > RULE_RATE_WINDOW_S:
+            self._rule_times.popleft()
+        if len(self._rule_times) >= RULE_RATE_LIMIT:
+            await self._rule_result(False, "rate_limited")
+            return
+        self._rule_times.append(now)
+        try:
+            await self._rule_request_inner(frame)
+        except Exception:
+            logger.exception("inbox: unexpected error while adding a standing rule")
+            await self._rule_result(False, "write_failed")
+
+    async def _rule_request_inner(self, frame: dict) -> None:
+        async with self._rule_lock:            # one rule write at a time: digest_before is the digest of what we then change
+            target = await asyncio.to_thread(self._writable_policy)
+            if target is None:
+                return await self._rule_result(False, "not_writable")
+            if frame.get("confirm") is not True:
+                return await self._rule_result(False, "not_confirmed")
+            sid, call_id = frame.get("session_id"), frame.get("call_id")
+            found = self._find_call(sid, call_id)
+            if found is None:
+                return await self._rule_result(False, "unknown_call")
+            server, tool, args = found
+            path, digest_before = target
+            note = f"added from the Inbox (session {sid}, call {safe_text.clean_field(call_id, 64)})"[:200]
+            try:
+                rule = await asyncio.to_thread(policy_writer.build_rule, frame.get("verdict"), frame.get("scope"),
+                                               server, tool, args, note=note)
+            except ValueError as exc:
+                reason = str(exc) if str(exc) in ("cannot_build", "scope_not_allowed") else "cannot_build"
+                return await self._rule_result(False, reason)
+            # write-ahead: the event is on disk BEFORE the policy file changes; no log, no change
+            if self.store is not None:
+                res = await self._append("policy_rule_added", sid, call_id,
+                                         {"rule": rule, "digest_before": digest_before, "session_id": sid, "call_id": call_id})
+                if res != "ok":
+                    return await self._rule_result(False, "log_unavailable")
+            try:
+                out = await asyncio.to_thread(policy_writer.append_rule, path, rule)
+            except policy_writer.PolicyWriteError as exc:
+                reason = exc.reason if exc.reason in ("invalid_policy", "write_failed") else "write_failed"
+                logger.error("inbox: standing rule not written (%s)", reason)
+                return await self._rule_result(False, reason)
+            logger.info("inbox: standing rule %s added (policy digest %s -> %s); applies to NEW sessions",
+                        out.get("rule_id"), out.get("digest_before"), out.get("digest_after"))
+            await self._rule_result(True, "ok", out.get("rule_id"), out.get("digest_after"))
+
     async def handle_ui_frame(self, frame: Any) -> None:
         """Only inbox_decision does anything. Never raises, never approves anything but the exact string 'approve'.
         session_id is REQUIRED: the decision resolves only that session's call."""
+        if isinstance(frame, dict) and frame.get("event") == "inbox_rule_request":
+            await self._rule_request(frame)
+            return
         if not isinstance(frame, dict) or frame.get("event") != "inbox_decision":
             logger.warning("inbox: ignoring a UI frame that is not an inbox_decision")
             return

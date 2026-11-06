@@ -94,9 +94,12 @@ const FAIL_WORDS: Record<string, string> = {
   invalid_policy: "the resulting policy would be invalid",
   write_failed: "writing the policy file failed",
   log_unavailable: "the event log is unavailable",
+  rate_limited: "Too many rule requests; wait a minute",
 };
 
 export function ruleToast(r: RuleResult): string {
   if (r.ok) return `Rule ${r.rule_id ? singleLine(r.rule_id, 60) : "(unnamed)"} added (applies to new sessions)`;
-  return `Rule not added: ${FAIL_WORDS[r.reason] ?? "unknown reason"}`;
+  // a reason outside the closed set is never shown raw
+  const words = Object.prototype.hasOwnProperty.call(FAIL_WORDS, r.reason) ? FAIL_WORDS[r.reason] : null;
+  return words ? `Rule not added: ${words}` : "Rule not added";
 }
