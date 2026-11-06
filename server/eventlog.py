@@ -39,7 +39,7 @@ log = logging.getLogger("sentinel.eventlog")
 SCHEMA_VERSION = 1
 GENESIS = "0" * 64
 KINDS = ("log_open", "proxy_hello", "proxy_close", "call_proposed", "decision", "call_result", "checkpoint",
-         "policy_rule_added")
+         "policy_rule_added", "auth_failed", "notification")
 _RESERVED = ("log_open", "checkpoint")                  # written by the store itself, never by callers
 _NEEDS_CALL = ("call_proposed", "decision", "call_result")
 SECRET_KEY_PARTS = ("password", "passwd", "secret", "token", "apikey", "api_key", "authorization", "cookie",
@@ -816,16 +816,20 @@ class EventStore:
             except sqlite3.Error as e:
                 raise EventLogError(f"cannot read the event log: {e}") from None
 
-    def recent_resolved(self, n: int = 50) -> list:
+    def recent_resolved(self, n: int = 50, tenant: "str | None" = None) -> list:
+        """Newest-first resolved calls. With `tenant`, only decisions whose payload carries that tenant (identity mode)."""
         if isinstance(n, bool) or not isinstance(n, int) or n < 0:
             raise ValueError("n must be a non-negative integer")
+        if tenant is not None and not isinstance(tenant, str):
+            raise ValueError("tenant must be a string or None")
         n = min(n, 10000)
+        where, params = ("", (n,)) if tenant is None else (" AND json_extract(d.payload, '$.tenant') = ?", (tenant, n))
         with self._lock:
             try:
                 rows = self._require().execute(
                     "SELECT d.session_id, d.call_id, d.payload, d.ts, (SELECT p.payload FROM events p WHERE "
                     "p.kind = 'call_proposed' AND p.session_id = d.session_id AND p.call_id = d.call_id) "
-                    "FROM events d WHERE d.kind = 'decision' ORDER BY d.seq DESC LIMIT ?", (n,)).fetchall()
+                    "FROM events d WHERE d.kind = 'decision'" + where + " ORDER BY d.seq DESC LIMIT ?", params).fetchall()
             except sqlite3.Error as e:
                 raise EventLogError(f"cannot read the event log: {e}") from None
         out = []
