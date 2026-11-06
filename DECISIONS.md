@@ -271,3 +271,20 @@ or approved; a late `inbox_decision` is ignored; a cancel racing an approve is a
 Closes the "stale card / late approve logged" limit of D16. Tests: 75 proxy, hub cancel tests incl. both race orders, 1 full-stack test with a real SDK
 cancel, UI label tests; 3 new mutants (X7-X9).
 Also filed for later (GitHub issues, not built): #3 policy engine, #4 durable tamper-evident event log with storage.
+
+## D18: policy engine (GitHub issue #3), first iteration
+Plan and decisions: docs/plans/POLICY-ENGINE.md. JSON policy (`SENTINEL_POLICY`), ordered rules `allow|deny|ask` over server, tool, argument conditions
+(equals/in/glob/under/contains/exists/max_len and negations), registry destination (internal/external/relay/none, party) and alert presence. No regex.
+Precedence deny > ask > allow, then default (`ask`); the reported rule is the most specific of the winning class. An alert escalates an allow to ask, never a deny.
+Fail closed: unparseable/invalid/oversized policy => policy mode stays ON and EVERY call is held (never legacy auto-approve); a rule that raises => ask unless a deny matched;
+a condition that cannot be evaluated is false for positive operators and true for negative ones (lint warns on negative ops in allow rules); a tool/server name that cannot be
+evaluated (control/bidi/oversize/non-string) is false in allow rules and TRUE in deny/ask rules. Hub: the policy decides (the proxy's `auto_approve` flag is ignored when a
+usable policy is configured); an allow stands only if a working monitor looked at the call and raised no alert; the policy is pinned per proxy session (digest recorded); every
+resolved call carries `rule_id` and `policy_digest`; UI shows "auto-allowed by rule X" / "denied by rule X" / "held by rule X". CLI: `policy_cli lint|explain|test` (test replays recorded traces:
+on eval/final_v3/traces.json the example policy would allow 11 of the violating proposals, all semantic cases a path rule cannot see, and ask for 193 benign ones: the policy
+is a burden reducer, not a detector).
+Bugs found on the way: (1) an independent review of the engine's own ambiguity list exposed that odd tool names could bypass a deny rule (fixed as above);
+(2) `load_policy_file(5)` opened file descriptor 5 and CLOSED it, which killed pytest's event loop and looked like a flaky crash for two agents; the loader now rejects non-path
+inputs (regression test + mutant Y7). Lesson: a "flaky" crash that reproduces twice in a row is a bug, not flakiness.
+Evidence: 365 policy tests, hub policy tests, 13 full-stack tests (incl. allow/deny/ask/default/broken policy), 1 Playwright test, 7 new mutants.
+Not built (follow-up): built-in agent-loop integration, drift-state inputs, per-session policy overrides, hot reload inside a running session, YAML.

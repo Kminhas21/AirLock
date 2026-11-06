@@ -28,6 +28,8 @@ function backend(port: number, registry: string | undefined) {
       SENTINEL_HEALTH_DETAIL: "1",
       // inbox stage: /inbox/ws and /proxy/ws refuse every connection without a token
       ...(process.env.INBOX_TOKEN ? { SENTINEL_WS_TOKEN: process.env.INBOX_TOKEN } : {}),
+      // policy stage: the hub reads SENTINEL_POLICY at every proxy session start
+      ...(process.env.SENTINEL_POLICY ? { SENTINEL_POLICY: process.env.SENTINEL_POLICY } : {}),
       // Pinned explicitly: the server default is action_sim, but live.spec.ts and the default replay expectations
       // (REPLAY_DETECTOR=D1) are about the RULES monitor. The action_sim / learned / registry runs are separate gate stages.
       SENTINEL_MONITOR: process.env.SENTINEL_MONITOR ?? "rules",

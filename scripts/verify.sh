@@ -61,6 +61,8 @@ if [ -d frontend/node_modules ]; then
     # MCP proxy + approval inbox (DECISIONS.md D16): real browser <-> real backend hub <-> REAL stdio proxy subprocess <-> real downstream MCP
     # server; the backend runs action_sim with real MiniLM so a repeated denied effect raises a real alert; the inbox sockets require a token.
     run "browser inbox (real proxy + downstream; held calls, approve/deny, alert holds an auto-approved call, token required)" bash -c "cd frontend && INBOX_STAGE=1 INBOX_TOKEN=gate-inbox-token SENTINEL_MONITOR=action_sim npx playwright test inbox"
+    # policy engine (DECISIONS.md D18): rules decide allow / deny / ask in the real UI; the proxy's auto flag is ignored when a policy is configured
+    run "browser inbox policy (allow/deny/ask by rule; proxy auto flag ignored)" bash -c "cd frontend && POLICY_STAGE=1 INBOX_TOKEN=gate-inbox-token SENTINEL_MONITOR=action_sim SENTINEL_POLICY=$R/tests/e2e/data/policy_e2e.json npx playwright test policy"
   else
     echo "--- FAIL: no Chromium at \${CHROMIUM_PATH:-/opt/pw-browsers/chromium}; set CHROMIUM_PATH"; fail=1
   fi

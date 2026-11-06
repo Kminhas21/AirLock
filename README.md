@@ -58,6 +58,8 @@ Union monitor (OPT-IN, DECISIONS.md D13-D14): `SENTINEL_MONITOR=registry_learned
 
 MCP proxy + approval inbox (monitor an agent you did not write; DECISIONS.md D16): `docs/proxy.md`.
 
+Policy engine (allow/deny/ask rules for the MCP proxy; DECISIONS.md D18): `docs/policy.md`.
+
 Full walkthrough of everything built, with workflows: `docs/COURSE.md`.
 
 Verify everything: `pip install -r requirements-dev.txt && scripts/verify.sh` (exit 0 = green). See `DECISIONS.md`.
