@@ -365,3 +365,122 @@ async def test_agent_cli_serve_keeps_one_session(tmp_path, backend):
     assert len(backend.of("proxy_hello")) == 1
     assert [c["args"] for c in backend.of("proxy_call")] == [{"n": 0}, {"n": 1}]
     assert len(downstream_calls(log)) == 2
+
+
+async def _raw_agent(cfg, env=None):
+    from conftest import proxy_params
+    p = proxy_params(cfg, env)
+    proc = await asyncio.create_subprocess_exec(p.command, *p.args, cwd=p.cwd, env={**os.environ, **p.env},
+                                                stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                                                stderr=asyncio.subprocess.DEVNULL)
+
+    async def send(o):
+        proc.stdin.write((json.dumps(o) + "\n").encode())
+        await proc.stdin.drain()
+    await send({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}})
+    await asyncio.wait_for(proc.stdout.readline(), 20)
+    await send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+    return proc, send
+
+
+async def test_agent_cancel_sends_exactly_one_proxy_cancel_and_late_approve_dropped(tmp_path, backend):
+    gate = asyncio.Event()
+    held = []
+
+    async def hold(ws, f):
+        held.append((ws, f))
+        await gate.wait()
+        await backend.approve(ws, f)
+    backend.on_call = hold
+    cfg, log = make_config(tmp_path, backend.url)
+    proc, send = await _raw_agent(cfg)
+    try:
+        await send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "write_file", "arguments": {}}})
+        await backend.wait_for("proxy_call")
+        await send({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2}})
+        await backend.wait_for("proxy_cancel")
+        gate.set()
+        await asyncio.sleep(0.7)
+        cancels = backend.of("proxy_cancel")
+        assert len(cancels) == 1
+        assert cancels[0] == {"event": "proxy_cancel", "call_id": backend.of("proxy_call")[0]["call_id"], "reason": "cancelled"}
+        assert downstream_calls(log) == []
+        assert backend.of("proxy_result") == []
+    finally:
+        proc.kill()
+        await proc.wait()
+
+
+async def test_proxy_safety_net_timeout_sends_cancel_reason_timeout(tmp_path, backend):
+    async def never(ws, f):
+        pass
+    backend.on_call = never
+    cfg, log = make_config(tmp_path, backend.url)
+    env = {"SENTINEL_GATE_TIMEOUT_S": "0.5", "SENTINEL_PROXY_GATE_MARGIN_S": "0.5"}
+    async with agent(cfg, env) as s:
+        res = await asyncio.wait_for(s.call_tool("write_file", {}), 20)
+        await backend.wait_for("proxy_cancel", timeout=5)
+        await asyncio.sleep(0.3)
+        # a decision arriving after the timeout must not be honoured either
+        call = backend.of("proxy_call")[0]
+        await backend.approve(backend.conns[-1], call)
+        await asyncio.sleep(0.5)
+    assert res.is_error and text(res) == "Denied by SENTINEL: timeout"
+    cancels = backend.of("proxy_cancel")
+    assert len(cancels) == 1 and cancels[0]["reason"] == "timeout" and cancels[0]["call_id"] == call["call_id"]
+    assert downstream_calls(log) == []
+
+
+async def test_decided_call_sends_no_cancel(tmp_path, backend):
+    cfg, _ = make_config(tmp_path, backend.url)
+    async with agent(cfg) as s:
+        assert not (await s.call_tool("echo", {})).is_error
+        backend.on_call = backend.deny
+        assert (await s.call_tool("echo", {})).is_error
+        await asyncio.sleep(0.5)
+    assert backend.of("proxy_cancel") == []
+
+
+async def test_cancel_while_backend_down_sends_nothing_and_does_not_crash(tmp_path):
+    cfg, log = make_config(tmp_path, f"ws://127.0.0.1:{free_port()}/proxy/ws")
+    proc, send = await _raw_agent(cfg, {"SENTINEL_PROXY_CONNECT_WAIT_S": "0.2"})
+    try:
+        await send({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "echo", "arguments": {}}})
+        line = json.loads(await asyncio.wait_for(proc.stdout.readline(), 20))
+        assert line["id"] == 2 and line["result"]["isError"] is True  # denied immediately
+        await send({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 2}})  # late, harmless
+        await send({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+        assert json.loads(await asyncio.wait_for(proc.stdout.readline(), 20))["id"] == 3
+        assert proc.returncode is None
+    finally:
+        proc.kill()
+        await proc.wait()
+
+
+async def test_cancel_frame_failure_is_best_effort_unit(monkeypatch):
+    """A cancel send that fails must not raise into the cancel path."""
+    from sentinel_proxy.backend import BackendLink
+    monkeypatch.setenv("SENTINEL_SEND_TIMEOUT_S", "0.2")
+
+    class Tr:
+        def abort(self):
+            pass
+
+    class WS:
+        transport = Tr()
+        sent = []
+        async def send(self, data):
+            if "proxy_cancel" in data:
+                raise ConnectionError("boom")
+            self.sent.append(data)
+
+    link = BackendLink("ws://x/", {}, call_timeout_s=60)
+    link._ws, link._connected = WS(), True
+    t = asyncio.create_task(link.decide({"call_id": "a", "event": "proxy_call"}))
+    await asyncio.sleep(0.1)
+    t.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t
+    await asyncio.sleep(0.3)  # background cancel send fails quietly
+    assert not link.connected  # per half-dead logic, a *failed* send tears the socket down

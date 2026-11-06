@@ -109,6 +109,7 @@ class _Pending:
     event: asyncio.Event = field(default_factory=asyncio.Event)
     decision: str | None = None
     reason: str | None = None
+    cancelled: bool = False       # resolved by the proxy's proxy_cancel (not a human decision)
 
     def claim(self, decision: str, reason: str) -> bool:
         """Once-only: the first claim wins (sync, so there is no await between check and set)."""
@@ -131,6 +132,8 @@ class ProxySession:
     pending: dict = field(default_factory=dict)
     tasks: set = field(default_factory=set)
     closed: bool = False
+    starting: set = field(default_factory=set)         # reserved, still inside the monitor (not yet pending)
+    cancelled_early: set = field(default_factory=set)  # proxy_cancel arrived while in `starting`
 
     def reserve(self, call_id: str) -> bool:
         """Synchronous duplicate check + registration (no await in between). False: already seen."""
@@ -227,8 +230,28 @@ class InboxHub:
         if ev == "proxy_result":
             await self._forward_result(session, frame)
             return True
+        if ev == "proxy_cancel":
+            self._cancel(session, frame)
+            return True
         logger.warning("inbox: proxy %s sent unknown event %s; ignoring", session.session_id, repr(ev)[:80])
         return True
+
+    def _cancel(self, session: ProxySession, frame: dict) -> None:
+        """proxy_cancel: the proxy dropped the call. Never approves, never closes the connection, never teaches the monitor."""
+        call_id = frame.get("call_id")
+        if not _is_str(call_id, MAX_CALL_ID, min_len=1):
+            logger.warning("inbox: ignoring a proxy_cancel without a usable call_id from %s", session.session_id)
+            return
+        reason = "timeout" if frame.get("reason") == "timeout" else "cancelled"
+        p = session.pending.get(call_id)
+        if p is not None:
+            if p.claim("deny", reason):          # once-only: a no-op if a human (or the timer) already decided
+                p.cancelled = True
+            return
+        if call_id in session.starting:
+            session.cancelled_early.add(call_id)
+            return
+        logger.info("inbox: proxy_cancel for an unknown or already resolved call ignored")
 
     def _start_call(self, session: ProxySession, frame: dict) -> bool:
         call_id = frame.get("call_id")
@@ -243,6 +266,7 @@ class InboxHub:
             logger.warning("inbox: session %s exceeded %d in-flight calls", session.session_id, MAX_INFLIGHT)
             coro = self._reply(session, call_id, "deny", "invalid")
         else:
+            session.starting.add(call_id)
             coro = self._run_call(session, call_id, frame)
         task = asyncio.create_task(coro)
         session.tasks.add(task)
@@ -269,6 +293,9 @@ class InboxHub:
             logger.exception("inbox: unexpected error handling call %r; denying", call_id)
             session.pending.pop(call_id, None)
             await self._reply(session, call_id, "deny", "invalid")
+        finally:
+            session.starting.discard(call_id)
+            session.cancelled_early.discard(call_id)
 
     async def _run_call_inner(self, session: ProxySession, call_id: str, frame: dict) -> None:
         sid = session.session_id
@@ -293,6 +320,8 @@ class InboxHub:
                 alerts, working = [], False
             if proposal_monitor.error_count() > errors_before:      # real monitors swallow errors and return []
                 working = False
+        if call_id in session.cancelled_early:     # the proxy dropped it while the monitor ran: never hold or approve
+            return
         if session.closed:
             await self._register(session, tool, args, "deny")
             return
@@ -307,6 +336,7 @@ class InboxHub:
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
         p = _Pending(session, call_id, server, tool, args, auto, alerts)
         session.pending[call_id] = p
+        session.starting.discard(call_id)
         # the decision timer starts NOW; the broadcast runs beside it and cannot delay it
         announce = self._spawn(self._broadcast({"event": "inbox_pending", **self._pending_payload(p, self._timeout)}))
         try:
@@ -314,6 +344,11 @@ class InboxHub:
         except asyncio.TimeoutError:
             p.claim("deny", "timeout")
         session.pending.pop(call_id, None)
+        if p.cancelled:                  # proxy_cancel: no proxy_decision, no monitor registration
+            await asyncio.gather(announce, return_exceptions=True)
+            await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
+                                   "decision": "deny", "reason": p.reason})
+            return
         decision, reason = ("approve" if p.decision == "approve" else "deny"), p.reason or "invalid"
         await self._register(session, tool, args, decision)
         await self._reply(session, call_id, decision, reason)

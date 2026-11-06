@@ -129,7 +129,7 @@ class BackendLink:
         try:
             if not await self._send(ws, json.dumps(call)):
                 return Decision(False, LOST)
-            return await asyncio.wait_for(fut, self._call_timeout)
+            return await asyncio.wait_for(asyncio.shield(fut), self._call_timeout)  # shield: wait_for must not cancel fut
         except asyncio.TimeoutError:
             self._cancel_upstream(ws, cid, fut, "timeout")
             return Decision(False, "timeout")

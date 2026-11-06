@@ -207,7 +207,12 @@ def summarize(text: str, limit: int = 300) -> str:
 
 
 def gate_timeout_s() -> float:
+    """Proxy safety net: hub gate timeout + margin (SENTINEL_PROXY_GATE_MARGIN_S, default 30; a test knob)."""
     try:
-        return float(os.environ.get("SENTINEL_GATE_TIMEOUT_S", "300")) + 30.0
+        margin = float(os.environ.get("SENTINEL_PROXY_GATE_MARGIN_S", "30"))
     except ValueError:
-        return 330.0
+        margin = 30.0
+    try:
+        return float(os.environ.get("SENTINEL_GATE_TIMEOUT_S", "300")) + margin
+    except ValueError:
+        return 300.0 + margin

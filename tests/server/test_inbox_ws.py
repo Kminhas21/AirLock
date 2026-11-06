@@ -205,3 +205,20 @@ def test_garbage_does_not_crash_hub(client):
         ui.send_json({"event": "inbox_decision", "session_id": "e2e", "call_id": "none", "decision": "approve"})
     with client.websocket_connect(U) as ui:          # hub still serves
         assert ui.receive_json()["event"] == "inbox_snapshot"
+
+
+def test_cancel_over_the_wire(client):
+    with client.websocket_connect(U) as ui, client.websocket_connect(P) as proxy:
+        open_pair(client, ui, proxy)
+        proxy.send_json(call())
+        assert ui.receive_json()["event"] == "inbox_pending"
+        proxy.send_json({"event": "proxy_cancel", "call_id": "c1", "reason": "timeout"})
+        r = ui.receive_json()
+        assert r == {"event": "inbox_resolved", "session_id": "e2e", "call_id": "c1", "decision": "deny",
+                     "reason": "timeout"}
+        ui.send_json({"event": "inbox_decision", "session_id": "e2e", "call_id": "c1", "decision": "approve"})
+        proxy.send_json({"event": "proxy_cancel", "call_id": 5})        # malformed: connection stays up
+        proxy.send_json(call("c2"))
+        assert ui.receive_json()["call_id"] == "c2"                      # no proxy_decision was sent for c1
+        ui.send_json({"event": "inbox_decision", "session_id": "e2e", "call_id": "c2", "decision": "deny"})
+        assert proxy.receive_json()["call_id"] == "c2"

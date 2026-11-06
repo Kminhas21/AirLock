@@ -591,3 +591,120 @@ async def test_inflight_cap_denies_extra_calls(monkeypatch):
     await r.send(call("extra"))
     await wait_for(lambda: r.decisions())
     assert r.decisions() == [{"event": "proxy_decision", "call_id": "extra", "decision": "deny", "reason": "invalid"}]
+
+
+# ---------------------------------------------------------------- proxy_cancel
+class SpyMonitor(FakeMonitor):
+    def __init__(self, delay=0.0):
+        super().__init__()
+        self.delay = delay
+
+    def on_proposal(self, agent_text, tool, args, node_id):
+        if self.delay:
+            import time
+            time.sleep(self.delay)
+        return super().on_proposal(agent_text, tool, args, node_id)
+
+
+def cancel(cid="c1", **kw):
+    return {"event": "proxy_cancel", "call_id": cid, **kw}
+
+
+async def test_cancel_resolves_without_decision_or_monitor_teaching():
+    r = await Rig(SpyMonitor()).start()
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    assert await r.send(cancel(reason="cancelled")) is True
+    await wait_for(lambda: r.ui.events("inbox_resolved"))
+    assert r.ui.events("inbox_resolved")[0] == {"event": "inbox_resolved", "session_id": "s1", "call_id": "c1",
+                                                "decision": "deny", "reason": "cancelled"}
+    await settle()
+    assert r.decisions() == [] and r.monitor.decisions == []
+    assert r.hub.pending_count() == 0
+    # a late approve is ignored (once-only)
+    await r.decide("c1", "approve")
+    await settle()
+    assert r.decisions() == [] and len(r.ui.events("inbox_resolved")) == 1
+
+
+@pytest.mark.parametrize("reason,expected", [("timeout", "timeout"), ("cancelled", "cancelled"), ("bogus", "cancelled"),
+                                             (None, "cancelled"), (5, "cancelled")])
+async def test_cancel_reason_is_a_closed_set(reason, expected):
+    r = await Rig().start()
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    await r.send(cancel(reason=reason))
+    await wait_for(lambda: r.ui.events("inbox_resolved"))
+    assert r.ui.events("inbox_resolved")[0]["reason"] == expected and r.ui.events("inbox_resolved")[0]["decision"] == "deny"
+
+
+async def test_cancel_stops_the_decision_timer_no_late_broadcast():
+    r = await Rig(timeout=0.15).start()
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    await r.send(cancel())
+    await wait_for(lambda: r.ui.events("inbox_resolved"))
+    await asyncio.sleep(0.3)                       # well past the would-be timeout
+    assert len(r.ui.events("inbox_resolved")) == 1 and r.decisions() == []
+    assert not r.session.tasks
+
+
+@pytest.mark.parametrize("frame", [{"event": "proxy_cancel"}, cancel(5), cancel(None), cancel(["c1"]), cancel("x" * 5000),
+                                   cancel("")])
+async def test_malformed_cancel_ignored_connection_kept(frame):
+    r = await Rig(timeout=0.2).start()
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    assert await r.send(frame) is True
+    await settle()
+    assert r.hub.pending_count() == 1 and not r.ui.events("inbox_resolved")
+    await r.decide("c1", "deny")
+    await wait_for(lambda: r.decisions())
+
+
+async def test_cancel_unknown_resolved_or_other_session_ignored():
+    r = await Rig().start()
+    proxy2 = FakePeer()
+    s2 = await r.hub.proxy_hello(proxy2, hello("s2"))
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    await r.hub.handle_proxy_frame(s2, cancel("c1"))        # other session's cancel
+    await r.send(cancel("nope"))
+    await settle()
+    assert r.hub.pending_count() == 1 and not r.ui.events("inbox_resolved")
+    await r.decide("c1", "approve")
+    await wait_for(lambda: r.decisions())
+    await r.send(cancel("c1"))                              # already resolved
+    await settle()
+    assert [d["decision"] for d in r.decisions()] == ["approve"] and len(r.ui.events("inbox_resolved")) == 1
+
+
+async def test_cancel_racing_approve_either_order():
+    # approve first: the cancel is a no-op
+    r = await Rig(SpyMonitor()).start()
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    await asyncio.gather(r.decide("c1", "approve"), r.send(cancel()))
+    await wait_for(lambda: r.decisions())
+    assert r.decisions()[0]["decision"] == "approve" and r.ui.events("inbox_resolved")[0]["decision"] == "approve"
+    # cancel first: the approve is ignored, nothing is approved
+    r = await Rig(SpyMonitor()).start()
+    await r.send(call())
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    await asyncio.gather(r.send(cancel()), r.decide("c1", "approve"))
+    await wait_for(lambda: r.ui.events("inbox_resolved"))
+    await settle()
+    assert r.decisions() == [] and r.ui.events("inbox_resolved")[0]["reason"] == "cancelled"
+    assert r.monitor.decisions == []
+
+
+async def test_cancel_during_monitor_run_never_holds_or_approves():
+    for auto in (False, True):
+        r = await Rig(SpyMonitor(delay=0.2)).start()
+        await r.send(call(auto=auto))
+        await asyncio.sleep(0.05)                           # the call is inside on_proposal (a worker thread)
+        assert not r.ui.events("inbox_pending")
+        await r.send(cancel())
+        await wait_for(lambda: not r.session.tasks)
+        assert not r.ui.events("inbox_pending") and not r.ui.events("inbox_resolved")
+        assert r.decisions() == [] and r.monitor.decisions == [] and r.hub.pending_count() == 0
