@@ -67,6 +67,13 @@ MUTANTS = [
     ("Y5 a policy allow stands without a working monitor", "server/inbox_hub.py", 'if verdict == "allow" and working and not alerts:', 'if verdict == "allow":', 1),
     ("Y6 a failing policy evaluation allows", "server/inbox_hub.py", '                    logger.exception("inbox: policy evaluation failed; asking the human")\n                    verdict, rule_id = "ask", None', '                    logger.exception("inbox: policy evaluation failed; asking the human")\n                    verdict, rule_id = "allow", None', 1),
     ("Y7 the policy loader treats an int path as a file descriptor", "server/policy.py", "if isinstance(path, bool) or not isinstance(path, (str, os.PathLike)):", "if False:", 1),
+    # durable event log (DECISIONS.md D19)
+    ("Z1 event log: a broken hash link is no longer reported", "server/eventlog.py", "            if prev != prev_seen_hash:", "            if False:", 1),
+    ("Z2 event log: secret keys are no longer redacted", "server/eventlog.py", "out[key] = REDACTED if _secret_key(key) else _clean(val, b, depth + 1)", "out[key] = _clean(val, b, depth + 1)", 1),
+    ("Z3 hub: an approve whose record cannot be written still goes out", "server/inbox_hub.py", '            if decision == "approve":\n                decision, reason, actor = "deny", "log_unavailable", "system"', '            if False:\n                decision, reason, actor = "deny", "log_unavailable", "system"', 1),
+    ("Z4 hub: runs unlogged when the log is unusable", "server/inbox_hub.py", "        if self.log_unusable:\n            return await reject(\"log_unavailable\")", "        if False:\n            return await reject(\"log_unavailable\")", 1),
+    ("Z5 hub: alert messages are logged unscrubbed", "server/inbox_hub.py", '"message": eventlog.scrub(a.get("message"), secrets)', '"message": a.get("message")', 1),
+    ("Z6 hub: tool output is stored by default", "server/inbox_hub.py", 'if os.environ.get("SENTINEL_LOG_RESULTS") == "1":', "if True:", 1),
     ("X6 proxy forwards a denied call", "sentinel_proxy/proxy.py", "if not decision.approved:", "if False:", 1),
     ("R4 denied-party match ignored when choosing the earlier denied proposal for the alert text", "server/proposal_monitor.py",
      'pool = [d for d in self._denied_props if party in d[2].reaches] or list(self._denied_props)',

@@ -161,6 +161,7 @@ class ProxySession:
     conn: _Peer
     monitor: Any = None
     seen: set = field(default_factory=set)
+    secrets: dict = field(default_factory=dict)        # call_id -> secret argument values (bounded), used only to scrub logged free text
     seen_order: Any = field(default_factory=collections.deque)
     pending: dict = field(default_factory=dict)
     tasks: set = field(default_factory=set)
@@ -272,12 +273,12 @@ class InboxHub:
         return decision, reason, actor
 
     @staticmethod
-    def _alert_records(alerts: list) -> list:
+    def _alert_records(alerts: list, secrets=frozenset()) -> list:
         out = []
         for a in alerts:
             if isinstance(a, dict):
                 out.append({"severity": a.get("severity"), "trigger": a.get("trigger"), "score": a.get("drift_score"),
-                            "threshold": a.get("threshold"), "message": a.get("message")})
+                            "threshold": a.get("threshold"), "message": eventlog.scrub(a.get("message"), secrets)})
         return out
 
     # ------------------------------------------------------------------ helpers
@@ -527,10 +528,16 @@ class InboxHub:
         elif auto and working and not alerts:
             immediate = ("approve", "auto", "auto")
 
+        # secret VALUES of this call (from its own arguments): free text that may echo them (alert messages, tool output) is scrubbed before it is logged
+        call_secrets = eventlog.secret_values(args) if self.store is not None else frozenset()
+        if call_secrets:
+            session.secrets[call_id] = call_secrets
+            while len(session.secrets) > 200:
+                session.secrets.pop(next(iter(session.secrets)))
         # write-ahead: call_proposed is on disk before inbox_pending / any auto or policy reply
         res = await self._append("call_proposed", sid, call_id,
                                  {"server": server, "tool": tool, "args": args, "auto": auto,
-                                  "alerts": self._alert_records(alerts), "policy": policy_rec})
+                                  "alerts": self._alert_records(alerts, call_secrets), "policy": policy_rec})
         if res == "dup":
             return
         if res == "fail":
@@ -597,7 +604,12 @@ class InboxHub:
         summary = safe_text.clean_field(frame.get("summary", "") if isinstance(frame.get("summary"), str) else "",
                                         SUMMARY_LIMIT)
         if self.store is not None:         # best effort: never raises into the call path
-            await self._append("call_result", session.session_id, call_id, {"status": status, "summary": summary})
+            # the tool OUTPUT is free text and often echoes the arguments: by default only its status and length are logged;
+            # SENTINEL_LOG_RESULTS=1 also stores the summary, scrubbed of this call's secret argument values
+            rec = {"status": status, "summary_len": len(summary)}
+            if os.environ.get("SENTINEL_LOG_RESULTS") == "1":
+                rec["summary"] = eventlog.scrub(summary, session.secrets.get(call_id, frozenset()))
+            await self._append("call_result", session.session_id, call_id, rec)
         await self._broadcast({"event": "inbox_result", "session_id": session.session_id, "call_id": call_id,
                                "status": status, "summary": summary})
 

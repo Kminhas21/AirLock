@@ -168,6 +168,36 @@ def _clean(v: Any, b: _Budget, depth: int) -> Any:
     return _cut(f"[{type(v).__name__}]")
 
 
+def secret_values(obj: Any, max_items: int = 2000) -> frozenset:
+    """String values (>= 4 chars) found under secret-looking keys anywhere in obj.  Used to scrub FREE TEXT (alert messages, tool output) that may echo them:
+    key-name redaction cannot see a secret inside a sentence."""
+    out: set = set()
+    stack, seen = [(obj, False)], 0
+    while stack and seen < max_items:
+        v, secret = stack.pop()
+        seen += 1
+        if isinstance(v, str):
+            if secret and len(v) >= 4:
+                out.add(v)
+        elif isinstance(v, Mapping):
+            for k, val in list(v.items())[:max_items]:
+                stack.append((val, secret or (isinstance(k, str) and _secret_key(k))))
+        elif isinstance(v, (list, tuple)):
+            for val in list(v)[:max_items]:
+                stack.append((val, secret))
+    return frozenset(out)
+
+
+def scrub(text: Any, secrets) -> Any:
+    """Replace every occurrence of a known secret value in text by [REDACTED] (longest first, so a secret containing another is fully removed)."""
+    if not isinstance(text, str) or not secrets:
+        return text
+    for sec in sorted(secrets, key=len, reverse=True):
+        if sec and sec in text:
+            text = text.replace(sec, REDACTED)
+    return text
+
+
 def sanitize_payload(payload: Any, max_bytes: int = 65536) -> dict:
     """Redact secret-looking keys, cut long strings, replace an oversize payload by a digest stub.  Applied BEFORE hashing."""
     if payload is None:

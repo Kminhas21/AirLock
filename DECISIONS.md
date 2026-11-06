@@ -288,3 +288,14 @@ Bugs found on the way: (1) an independent review of the engine's own ambiguity l
 inputs (regression test + mutant Y7). Lesson: a "flaky" crash that reproduces twice in a row is a bug, not flakiness.
 Evidence: 365 policy tests, hub policy tests, 13 full-stack tests (incl. allow/deny/ask/default/broken policy), 1 Playwright test, 7 new mutants.
 Not built (follow-up): built-in agent-loop integration, drift-state inputs, per-session policy overrides, hot reload inside a running session, YAML.
+
+## D19: durable tamper-evident event log (GitHub issue #4), first iteration
+Plan: docs/plans/EVENT-LOG.md; operator guide: docs/eventlog.md. SQLite (WAL, synchronous=FULL, 0600), SHA-256 hash chain, HMAC checkpoints (`SENTINEL_LOG_KEY`) and an append-only anchor file; opt-in via
+`SENTINEL_EVENT_LOG`. Write-ahead in the hub: `proxy_hello` before the ack, `call_proposed` before any broadcast or auto/policy reply, `decision` before `proxy_decision`/`inbox_resolved`. Fail closed: an approve whose
+record cannot be written becomes deny/`log_unavailable`; an unusable log (cannot open, chain broken) makes the hub refuse every proxy session. Restart: `open()` resolves orphaned calls as deny/`restart`.
+Decided open questions: HMAC key from env plus anchor file (single-host tamper evidence); pending calls are NOT re-presented after a restart (the proxy already denied them) but are resolved in the log and shown as history.
+Found by the end-to-end test (not by the unit tests): the tool OUTPUT stored in `call_result` echoed a redacted argument (`password`), because key-name redaction cannot see a secret inside free text. Now tool output is
+not stored by default (status + length), `SENTINEL_LOG_RESULTS=1` stores a summary scrubbed of the call's own secret argument values, and alert messages are scrubbed the same way (`eventlog.secret_values` / `scrub`). Lesson: test secrecy on the BYTES
+of the file, not on the fields you meant to redact.
+Evidence: 242 store+CLI tests (6 mutation sanity checks by the author), 23 hub-log tests, kill -9 / restart / tamper / unkeyed end-to-end tests over the real backend, proxy and CLI, 6 new mutants (Z1-Z6).
+Not built: Postgres, retention/rotation/pruning, external transparency log, monitor replay of logged sessions, encryption at rest, a Playwright stage for the history badge (covered by reducer/static-render tests and the snapshot end-to-end test).

@@ -60,6 +60,8 @@ MCP proxy + approval inbox (monitor an agent you did not write; DECISIONS.md D16
 
 Policy engine (allow/deny/ask rules for the MCP proxy; DECISIONS.md D18): `docs/policy.md`.
 
+Durable tamper-evident event log (opt-in; DECISIONS.md D19): `docs/eventlog.md`.
+
 Full walkthrough of everything built, with workflows: `docs/COURSE.md`.
 
 Verify everything: `pip install -r requirements-dev.txt && scripts/verify.sh` (exit 0 = green). See `DECISIONS.md`.

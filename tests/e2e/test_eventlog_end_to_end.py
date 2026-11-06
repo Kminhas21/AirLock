@@ -26,10 +26,10 @@ TOKEN = "e2e-secret-token"
 KEY = "an-event-log-key-0123456789"
 
 
-def start_backend(db: Path, port=None):
+def start_backend(db: Path, port=None, extra=None):
     port = port or H.free_port()
     env = {**os.environ, "SENTINEL_EMBEDDER": "stub", "SENTINEL_MONITOR": "rules", "SENTINEL_GATE_TIMEOUT_S": "300", "OMP_NUM_THREADS": "1",
-           "HF_HUB_OFFLINE": "1", "SENTINEL_WS_TOKEN": TOKEN, "SENTINEL_EVENT_LOG": str(db), "SENTINEL_LOG_KEY": KEY}
+           "HF_HUB_OFFLINE": "1", "SENTINEL_WS_TOKEN": TOKEN, "SENTINEL_EVENT_LOG": str(db), "SENTINEL_LOG_KEY": KEY, **(extra or {})}
     p = subprocess.Popen([sys.executable, "-m", "uvicorn", "main:app", "--port", str(port), "--log-level", "warning"],
                          cwd=ROOT / "server", env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(300):
@@ -117,8 +117,10 @@ async def test_a_normal_session_is_fully_logged_verifies_and_hides_secrets(tmp_p
         assert k in kinds
     decisions = [(e["payload"]["decision"], e["payload"]["reason"]) for e in lines if e["kind"] == "decision"]
     assert decisions == [("approve", "human"), ("deny", "human"), ("deny", "cancelled")]
-    assert b"hunter2-SECRET" not in db.read_bytes(), "secrets are redacted BEFORE storage"
+    assert b"hunter2-SECRET" not in db.read_bytes(), "secrets are redacted BEFORE storage, also from tool output echoed back by the downstream"
     assert any(b"[REDACTED]" in l.encode() for l in cli("export", str(db), "--jsonl").stdout.splitlines())
+    results = [e for e in lines if e["kind"] == "call_result"]
+    assert results and all(set(e["payload"]) == {"status", "summary_len"} for e in results), "by default tool output text is not stored at all"
 
 
 async def test_kill_9_with_a_pending_call_is_resolved_as_restart_and_the_chain_verifies(tmp_path, backends):
@@ -179,3 +181,16 @@ async def test_without_the_key_a_chain_is_still_checked_but_truncation_is_not_de
     out = cli("verify", str(db), key=False)
     assert out.returncode in (0, 1)       # a keyed log opened without the key cannot check MACs: it must SAY so, never claim full assurance
     assert "key" in (out.stdout + out.stderr).lower()
+
+
+async def test_opt_in_result_summaries_are_scrubbed_of_secret_argument_values(tmp_path, backends):
+    """The downstream echoes its arguments (password included) in its output. By default only status+length are logged; with SENTINEL_LOG_RESULTS=1 the
+    summary is stored but every secret value of THAT call is scrubbed from it."""
+    db = tmp_path / "events.db"
+    proc, port = start_backend(db, extra={"SENTINEL_LOG_RESULTS": "1"})
+    backends.append(proc)
+    await run_session(tmp_path, port)
+    stop_gracefully(proc)
+    assert b"hunter2-SECRET" not in db.read_bytes()
+    results = [e for e in (json.loads(l) for l in cli("export", str(db), "--jsonl").stdout.splitlines() if l.strip()) if e["kind"] == "call_result"]
+    assert results and "[REDACTED]" in results[0]["payload"]["summary"] and "write_file" in results[0]["payload"]["summary"]
