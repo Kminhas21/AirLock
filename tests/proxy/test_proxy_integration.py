@@ -601,5 +601,5 @@ async def test_note_ignored_for_other_reasons(tmp_path, backend, reason):
 
 async def test_note_on_approve_ignored(tmp_path, backend):
     res, log = await _decide_with(tmp_path, backend, "approve", "human", "SECRET-NOTE")
-    assert not res.is_error and "SECRET-NOTE" not in text(res.model_dump_json() if False else res.content[0].text)
+    assert not res.is_error and "SECRET-NOTE" not in text(res)
     assert len(downstream_calls(log)) == 1

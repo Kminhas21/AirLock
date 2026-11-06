@@ -111,7 +111,8 @@ class Rig:
 async def test_hello_ack_and_snapshot_and_session_event():
     r = await Rig().start()
     assert r.proxy.sent[0] == {"event": "hello_ack", "session_id": "s1"}
-    assert r.ui.sent[0] == {"event": "inbox_snapshot", "sessions": [], "recent": []}
+    assert r.ui.sent[0] == {"event": "inbox_snapshot", "sessions": [], "recent": [],
+                               "capabilities": {"policy_writable": False, "event_log": False}}
     assert r.ui.events("inbox_session")[0]["state"] == "open"
     late = FakePeer()
     await r.hub.ui_connected(late)
@@ -155,7 +156,9 @@ async def test_approve_flow_orders_monitor_reply_broadcast():
     await wait_for(lambda: r.ui.events("inbox_pending"))
     p = r.ui.events("inbox_pending")[0]
     assert p == {"event": "inbox_pending", "session_id": "s1", "call_id": "c1", "server": "fs", "tool": "write_file",
-                 "args": {"p": 1}, "auto": False, "alerts": [], "deadline_s": 5.0}
+                 "args": {"p": 1}, "auto": False, "alerts": [], "deadline_s": 5.0,
+                 "session_summary": {"approved": 0, "denied": 0, "auto": 0, "policy": 0}, "session_history": [],
+                 "earlier_denied": []}
     assert r.decisions() == []          # nothing happens until a human decides
     await r.decide("c1", "approve")
     await wait_for(lambda: r.decisions())

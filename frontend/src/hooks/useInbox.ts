@@ -7,6 +7,7 @@ import { useInboxStore } from "../stores/inboxStore";
 import { buildInboxUrl } from "../lib/inboxUrl";
 import { createBackoff } from "../lib/backoff";
 import { planReconnect } from "../lib/reconnect";
+import { decisionFrame, ruleRequestFrame, type Scope, type Verdict } from "../lib/inboxView";
 
 const INBOX_URL = buildInboxUrl({
   url: import.meta.env.VITE_SENTINEL_INBOX_WS_URL,
@@ -60,14 +61,28 @@ export function useInbox(url: string = INBOX_URL) {
   }, [connect]);
 
   /** Returns false when the socket is not open (nothing is sent; the backend then times the call out = deny). */
-  const sendDecision = useCallback((sessionId: string, callId: string, decision: "approve" | "deny"): boolean => {
+  const sendFrame = useCallback((frame: object): boolean => {
     if (wsRef.current?.readyState !== WebSocket.OPEN) {
       console.warn("[Inbox WS] Cannot send — not connected.");
       return false;
     }
-    wsRef.current.send(JSON.stringify({ event: "inbox_decision", session_id: sessionId, call_id: callId, decision }));
+    wsRef.current.send(JSON.stringify(frame));
     return true;
   }, []);
+
+  const sendDecision = useCallback(
+    (sessionId: string, callId: string, decision: "approve" | "deny", note?: string): boolean =>
+      sendFrame(decisionFrame(sessionId, callId, decision, note)),
+    [sendFrame],
+  );
+
+  const sendRuleRequest = useCallback(
+    (sessionId: string, callId: string, verdict: Verdict, scope: Scope): boolean => {
+      const frame = ruleRequestFrame(sessionId, callId, verdict, scope);
+      return frame ? sendFrame(frame) : false;
+    },
+    [sendFrame],
+  );
 
   useEffect(() => {
     connect();
@@ -85,5 +100,5 @@ export function useInbox(url: string = INBOX_URL) {
     };
   }, [connect, setConnection]);
 
-  return { sendDecision };
+  return { sendDecision, sendRuleRequest };
 }

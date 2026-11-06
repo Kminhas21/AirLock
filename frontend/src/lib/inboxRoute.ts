@@ -34,7 +34,57 @@ export interface InboxSession {
 export const MAX_RULE_ID = 60;
 const MAX_DIGEST = 80;
 
+/** One resolved call as summarised by the hub (no full args): session_history / earlier_denied items. */
+export interface HistoryItem {
+  call_id: string;
+  server: string;
+  tool: string;
+  args_preview: string;
+  decision: InboxDecision;
+  reason: string;
+  rule_id: string | null;
+  note: string | null;
+  ts: number | null;
+}
+
+export interface SessionSummary {
+  approved: number;
+  denied: number;
+  auto: number;
+  policy: number;
+}
+
+export type RuleFailReason =
+  | "not_writable"
+  | "not_confirmed"
+  | "unknown_call"
+  | "scope_not_allowed"
+  | "cannot_build"
+  | "invalid_policy"
+  | "write_failed"
+  | "log_unavailable"
+  | "unknown";
+
+export interface RuleResult {
+  ok: boolean;
+  rule_id: string | null;
+  /** Closed set; anything else becomes "unknown". For ok results this is "ok". */
+  reason: RuleFailReason | "ok";
+}
+
+export interface InboxCapabilities {
+  policy_writable: boolean;
+}
+
+export const MAX_HISTORY = 10;
+export const MAX_EARLIER_DENIED = 5;
+
 export interface PendingCall {
+  session_summary: SessionSummary | null;
+  /** Newest first, at most MAX_HISTORY. */
+  session_history: HistoryItem[];
+  /** Newest first, at most MAX_EARLIER_DENIED; denials only. */
+  earlier_denied: HistoryItem[];
   /** Matched policy rule that made the hub hold this call (policy-file data; null = default verdict / no policy). */
   rule_id: string | null;
   policy_digest: string | null;
@@ -51,6 +101,8 @@ export interface PendingCall {
 }
 
 export interface ResolvedCall {
+  /** The operator's note on a human denial (plain text, one line, <= 200). */
+  note: string | null;
   /** True for items loaded from the durable event log (inbox_snapshot.recent), not resolved during this page's life. */
   history: boolean;
   /** Unix seconds from the log (history items only). */
@@ -73,9 +125,19 @@ export interface InboxState {
   pending: PendingCall[];
   /** Newest first, at most MAX_RESOLVED. */
   resolved: ResolvedCall[];
+  /** From the latest inbox_snapshot; default false (standing rules hidden). */
+  capabilities: InboxCapabilities;
+  /** The last inbox_rule_result (global toast), or null. */
+  ruleResult: RuleResult | null;
 }
 
-export const initialInboxState: InboxState = { sessions: {}, pending: [], resolved: [] };
+export const initialInboxState: InboxState = {
+  sessions: {},
+  pending: [],
+  resolved: [],
+  capabilities: { policy_writable: false },
+  ruleResult: null,
+};
 
 type Rec = Record<string, unknown>;
 const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -99,6 +161,7 @@ function parseRecent(v: unknown): ResolvedCall | null {
   // only the exact string "approve" approves; restart / log_unavailable are always denials
   const approved = v.decision === "approve" && reason !== "restart" && reason !== "log_unavailable";
   return {
+    note: label(v.note, 200),
     history: true,
     ts: num(v.ts),
     rule_id: label(v.rule_id, MAX_RULE_ID),
@@ -132,6 +195,45 @@ function mergeHistory(known: ResolvedCall[], recent: unknown): ResolvedCall[] {
   // history loaded by an earlier snapshot that this one no longer lists is still history
   for (const r of known) if (r.history) add(r);
   return out.slice(0, MAX_RESOLVED);
+}
+
+const RULE_REASONS: ReadonlySet<string> = new Set([
+  "not_writable", "not_confirmed", "unknown_call", "scope_not_allowed", "cannot_build", "invalid_policy", "write_failed", "log_unavailable",
+]);
+
+function count(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.min(Math.floor(v), 1_000_000_000) : 0;
+}
+
+function parseSummary(v: unknown): SessionSummary | null {
+  if (!isRec(v)) return null;
+  return { approved: count(v.approved), denied: count(v.denied), auto: count(v.auto), policy: count(v.policy) };
+}
+
+function parseHistoryItem(v: unknown): HistoryItem | null {
+  if (!isRec(v) || typeof v.tool !== "string") return null;
+  return {
+    call_id: label(v.call_id, 200) ?? "",
+    server: typeof v.server === "string" ? singleLine(v.server, 120) : "",
+    tool: singleLine(v.tool, 200),
+    args_preview: typeof v.args_preview === "string" ? singleLine(v.args_preview, 120) : "",
+    decision: v.decision === "approve" ? "approve" : "deny",
+    reason: typeof v.reason === "string" ? singleLine(v.reason, 40) : "",
+    rule_id: label(v.rule_id, MAX_RULE_ID),
+    note: label(v.note, 200),
+    ts: num(v.ts),
+  };
+}
+
+function parseHistory(v: unknown, max: number, denialsOnly = false): HistoryItem[] {
+  if (!Array.isArray(v)) return [];
+  const out: HistoryItem[] = [];
+  for (const e of v.slice(0, max * 4)) {
+    const h = parseHistoryItem(e);
+    if (h && (!denialsOnly || h.decision === "deny")) out.push(h);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 function parseAlert(v: unknown): InboxAlert | null {
@@ -170,6 +272,9 @@ function parsePending(v: unknown, now: number, sessionFallback?: string): Pendin
   const d = num(v.deadline_s);
   const deadline_s = d !== null && d > 0 ? Math.min(d, MAX_DEADLINE_S) : DEFAULT_DEADLINE_S;
   return {
+    session_summary: parseSummary(v.session_summary),
+    session_history: parseHistory(v.session_history, MAX_HISTORY),
+    earlier_denied: parseHistory(v.earlier_denied, MAX_EARLIER_DENIED, true),
     rule_id: label(v.rule_id, MAX_RULE_ID),
     policy_digest: label(v.policy_digest, MAX_DIGEST),
     session_id,
@@ -217,7 +322,15 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
         }
       }
       // snapshot order is oldest first; show newest first
-      return { sessions, pending: pending.reverse().slice(0, MAX_PENDING), resolved: mergeHistory(state.resolved, event.recent) };
+      return {
+        sessions,
+        pending: pending.reverse().slice(0, MAX_PENDING),
+        resolved: mergeHistory(state.resolved, event.recent),
+        capabilities: {
+          policy_writable: isRec(event.capabilities) && event.capabilities.policy_writable === true,
+        },
+        ruleResult: state.ruleResult,
+      };
     }
     case "inbox_pending": {
       const c = parsePending(event, now);
@@ -248,6 +361,7 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
       if (session_id === null || call_id === null) return state;
       const prior = state.pending.find((p) => sameCall(p, session_id, call_id));
       const item: ResolvedCall = {
+        note: label(event.note, 200),
         history: false,
         ts: null,
         rule_id: label(event.rule_id, MAX_RULE_ID) ?? prior?.rule_id ?? null,
@@ -280,6 +394,11 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
         ...state,
         resolved: state.resolved.map((r) => (sameCall(r, session_id, call_id) ? { ...r, result } : r)),
       };
+    }
+    case "inbox_rule_result": {
+      const ok = event.ok === true;
+      const reason = typeof event.reason === "string" && RULE_REASONS.has(event.reason) ? (event.reason as RuleFailReason) : "unknown";
+      return { ...state, ruleResult: { ok, rule_id: label(event.rule_id, MAX_RULE_ID), reason: ok ? "ok" : reason } };
     }
     case "inbox_session": {
       const session_id = id(event.session_id);

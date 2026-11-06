@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -58,6 +59,30 @@ MAX_AUTO_APPROVE = 200
 MAX_SHORT = 200            # server / tool / pattern strings
 MAX_CALL_ID = 64
 SUMMARY_LIMIT = 300
+RING_SIZE = 50             # resolved calls remembered per session (in memory only)
+HISTORY_SHOWN = 10
+EARLIER_DENIED_SHOWN = 5
+PREVIEW_LIMIT = 120
+NOTE_LIMIT = 200
+# resolutions that are nobody's decision about the call's content: not counted, never "earlier denied"
+NOT_A_DECISION = frozenset({"cancelled", "disconnected", "restart", "log_unavailable"})
+
+
+def clean_note(v: Any) -> str | None:
+    """Operator note: single line, control/bidi stripped, <= 200 chars; non-str or empty => None."""
+    if not isinstance(v, str):
+        return None
+    out = safe_text.clean_field(v, NOTE_LIMIT)
+    return out or None
+
+
+def args_preview(args: Any) -> str:
+    """One line <= 120 chars; secret-looking keys redacted by the event log's own sanitiser; control/bidi stripped."""
+    try:
+        return safe_text.clean_field(json.dumps(eventlog.sanitize_payload(args), ensure_ascii=False, default=str),
+                                     PREVIEW_LIMIT)
+    except Exception:
+        return ""
 HELLO_TIMEOUT_S = 10.0
 UI_SEND_TIMEOUT_S = 5.0
 PROXY_SEND_TIMEOUT_S = 5.0
@@ -142,6 +167,10 @@ class _Pending:
     rule_id: str | None = None
     policy_digest: str | None = None
     policy_mode: bool = False
+    note: str | None = None
+    summary: dict = field(default_factory=dict)
+    history: list = field(default_factory=list)
+    earlier_denied: list = field(default_factory=list)
     cancelled: bool = False       # resolved by the proxy's proxy_cancel (not a human decision)
 
     def claim(self, decision: str, reason: str) -> bool:
@@ -172,6 +201,35 @@ class ProxySession:
     starting: set = field(default_factory=set)         # reserved, still inside the monitor (not yet pending)
     cancelled_early: set = field(default_factory=set)  # proxy_cancel arrived while in `starting`
     logged_hello: bool = False
+    ring: Any = field(default_factory=lambda: collections.deque(maxlen=RING_SIZE))
+    counts: dict = field(default_factory=lambda: {"approved": 0, "denied": 0, "auto": 0, "policy": 0})
+
+    def record(self, call_id, server, tool, args, decision, reason, rule_id, note) -> None:
+        self.ring.append({"call_id": call_id, "server": server, "tool": tool, "args": args,
+                          "args_preview": args_preview(args), "decision": decision, "reason": reason,
+                          "rule_id": rule_id, "note": note, "ts": time.time()})
+        if reason in NOT_A_DECISION:
+            return
+        if reason == "auto":
+            self.counts["auto"] += 1
+        elif reason == "policy":
+            self.counts["policy"] += 1
+        elif decision == "approve":
+            self.counts["approved"] += 1
+        else:
+            self.counts["denied"] += 1
+
+    @staticmethod
+    def _public(item: dict) -> dict:
+        return {k: item[k] for k in ("call_id", "server", "tool", "args_preview", "decision", "reason", "rule_id", "note", "ts")}
+
+    def views(self) -> tuple[dict, list, list]:
+        """(session_summary, session_history, earlier_denied) as sent to the UI: newest first, never the full args."""
+        newest = list(reversed(self.ring))
+        history = [self._public(i) for i in newest[:HISTORY_SHOWN]]
+        denied = [self._public(i) for i in newest
+                  if i["decision"] == "deny" and i["reason"] not in NOT_A_DECISION][:EARLIER_DENIED_SHOWN]
+        return dict(self.counts), history, denied
 
     def reserve(self, call_id: str) -> bool:
         """Synchronous duplicate check + registration (no await in between). False: already seen."""
@@ -258,16 +316,19 @@ class InboxHub:
             return "fail"
 
     async def _log_decision(self, session: "ProxySession", call_id: str, decision: str, reason: str, actor: str,
-                            rule_id: str | None, digest: str | None):
+                            rule_id: str | None, digest: str | None, note: str | None = None):
         """Write the decision record BEFORE anything is sent. -> (decision, reason, actor) EFFECTIVE, or None if the
         decision was already recorded (duplicate: ignore). An approve that cannot be recorded becomes deny/log_unavailable."""
         payload = {"decision": decision, "reason": reason, "actor": actor, "rule_id": rule_id, "policy_digest": digest}
+        if note and decision == "deny" and reason == "human":
+            payload["note"] = note
         res = await self._append("decision", session.session_id, call_id, payload)
         if res == "dup":
             return None
         if res == "fail":
             if decision == "approve":
                 decision, reason, actor = "deny", "log_unavailable", "system"
+                payload.pop("note", None)
                 await self._append("decision", session.session_id, call_id,
                                    {**payload, "decision": decision, "reason": reason, "actor": actor})   # best effort
         return decision, reason, actor
@@ -303,6 +364,7 @@ class InboxHub:
              "args": p.args, "auto": p.auto, "alerts": p.alerts, "deadline_s": deadline_s}
         if p.policy_mode:
             d["rule_id"], d["policy_digest"] = p.rule_id, p.policy_digest
+        d["session_summary"], d["session_history"], d["earlier_denied"] = p.summary, p.history, p.earlier_denied
         return d
 
     @staticmethod
@@ -442,8 +504,12 @@ class InboxHub:
         task.add_done_callback(session.tasks.discard)
         return True
 
-    async def _reply(self, session: ProxySession, call_id: str, decision: str, reason: str) -> None:
-        await session.conn.send({"event": "proxy_decision", "call_id": call_id, "decision": decision, "reason": reason})
+    async def _reply(self, session: ProxySession, call_id: str, decision: str, reason: str,
+                     note: str | None = None) -> None:
+        msg = {"event": "proxy_decision", "call_id": call_id, "decision": decision, "reason": reason}
+        if note and decision == "deny" and reason == "human":      # the operator's note reaches the agent on human denials only
+            msg["note"] = note
+        await session.conn.send(msg)
 
     async def _register(self, session: ProxySession, tool: str, args: dict, decision: str) -> None:
         if session.monitor is None:
@@ -557,6 +623,7 @@ class InboxHub:
             if eff is None:
                 return
             decision, reason, _actor = eff
+            session.record(call_id, server, tool, args, decision, reason, rule_id, None)
             await self._register(session, tool, args, decision)
             await self._reply(session, call_id, decision, reason)
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
@@ -566,6 +633,7 @@ class InboxHub:
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
         p = _Pending(session, call_id, server, tool, args, auto, alerts, rule_id=rule_id, policy_digest=digest,
                      policy_mode=session.policy_mode)
+        p.summary, p.history, p.earlier_denied = session.views()        # state BEFORE this call
         session.pending[call_id] = p
         session.starting.discard(call_id)
         # the decision timer starts NOW; the broadcast runs beside it and cannot delay it
@@ -580,21 +648,27 @@ class InboxHub:
             await asyncio.gather(announce, return_exceptions=True)
             if eff is None:
                 return
+            session.record(call_id, server, tool, args, "deny", "cancelled", rule_id, None)
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
                                    "decision": "deny", "reason": p.reason, **self._policy_fields(p)})
             return
         decision, reason = ("approve" if p.decision == "approve" else "deny"), p.reason or "invalid"
         actor = "human" if reason == "human" else "system"
-        eff = await self._log_decision(session, call_id, decision, reason, actor, rule_id, digest)
+        note = p.note if (decision == "deny" and reason == "human") else None      # never a note on an approve
+        eff = await self._log_decision(session, call_id, decision, reason, actor, rule_id, digest, note)
         if eff is None:
             await asyncio.gather(announce, return_exceptions=True)
             return
         decision, reason, _actor = eff
+        if not (decision == "deny" and reason == "human"):
+            note = None
+        session.record(call_id, server, tool, args, decision, reason, rule_id, note)
         await self._register(session, tool, args, decision)
-        await self._reply(session, call_id, decision, reason)
+        await self._reply(session, call_id, decision, reason, note)
         await asyncio.gather(announce, return_exceptions=True)       # pending before resolved on every UI
+        extra_note = {"note": note} if note else {}
         await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                               "decision": decision, "reason": reason, **self._policy_fields(p)})
+                               "decision": decision, "reason": reason, **self._policy_fields(p), **extra_note})
 
     async def _forward_result(self, session: ProxySession, frame: dict) -> None:
         call_id, status = frame.get("call_id"), frame.get("status")
@@ -629,7 +703,7 @@ class InboxHub:
         await self._broadcast({"event": "inbox_session", "session_id": session.session_id, "state": "closed"})
 
     # ------------------------------------------------------------------ UI side
-    def snapshot(self, recent: list | None = None) -> dict:
+    def snapshot(self, recent: list | None = None, capabilities: dict | None = None) -> dict:
         sessions = []
         for s in self.sessions.values():
             pend = []
@@ -637,7 +711,20 @@ class InboxHub:
                 d = self._pending_payload(p, self._timeout)
                 pend.append(d)
             sessions.append({"session_id": s.session_id, "servers": s.servers, "pending": pend})
-        return {"event": "inbox_snapshot", "sessions": sessions, "recent": list(recent or [])}
+        caps = capabilities if capabilities is not None else {"policy_writable": False, "event_log": self.store is not None}
+        return {"event": "inbox_snapshot", "sessions": sessions, "recent": list(recent or []), "capabilities": caps}
+
+    def _capabilities(self) -> dict:
+        """policy_writable: SENTINEL_POLICY_WRITABLE=1 AND a usable SENTINEL_POLICY file. Runs in a thread (reads the file)."""
+        writable = False
+        if (os.environ.get("SENTINEL_POLICY_WRITABLE") or "").strip() == "1":
+            path = (os.environ.get("SENTINEL_POLICY") or "").strip()
+            if path:
+                try:
+                    writable = policy_mod.load_policy_file(path)[0] is not None
+                except Exception:
+                    writable = False
+        return {"policy_writable": writable, "event_log": self.store is not None}
 
     async def ui_connected(self, peer: Any) -> _Peer:
         """Register a UI and send its snapshot. The UI's send lock is held from registration until the snapshot is out, so any broadcast that
@@ -652,8 +739,9 @@ class InboxHub:
                     recent = await asyncio.to_thread(self.store.recent_resolved, 50)
                 except Exception:
                     logger.exception("inbox: could not read the recent history from the event log")
+            caps = await asyncio.to_thread(self._capabilities)
             try:
-                await asyncio.wait_for(ui.peer.send_json(self.snapshot(recent)), UI_SEND_TIMEOUT_S)
+                await asyncio.wait_for(ui.peer.send_json(self.snapshot(recent, caps)), UI_SEND_TIMEOUT_S)
             except Exception:
                 logger.warning("inbox: could not send the snapshot to a UI; closing it")
                 ui.dead = True
@@ -683,7 +771,8 @@ class InboxHub:
         if p is None:
             logger.info("inbox: decision for an unknown or already resolved call ignored")
             return
-        p.claim(decision, "human")
+        if p.claim(decision, "human") and decision == "deny":
+            p.note = clean_note(frame.get("note"))
 
 
 # ---------------------------------------------------------------------- socket loops (duck-typed websocket)

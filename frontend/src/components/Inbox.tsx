@@ -5,15 +5,19 @@
 // a class name or attribute except data-call-id (an escaped React attribute). Class names below are constants or come
 // from small closed sets (severity is coerced to "warning" | "critical" by the reducer).
 
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useInboxStore } from "../stores/inboxStore";
-import { callKey, MAX_PENDING_RENDERED, type InboxAlert, type InboxDecision, type PendingCall, type ResolvedCall } from "../lib/inboxRoute";
-import { panelView, singleLine, stripUnsafe } from "../lib/safeText";
+import { callKey, MAX_PENDING_RENDERED, type InboxDecision, type PendingCall, type ResolvedCall } from "../lib/inboxRoute";
+import { panelView, singleLine } from "../lib/safeText";
+import { ruleToast, type Scope, type Verdict } from "../lib/inboxView";
 import { AgentText } from "./AgentText";
+import { SessionSoFar, StandingRules, WhyFlagged } from "./InboxPanels";
 
 export interface InboxProps {
   /** Returns false when the decision could not be sent (socket not open). */
-  onDecision: (sessionId: string, callId: string, decision: InboxDecision) => boolean;
+  onDecision: (sessionId: string, callId: string, decision: InboxDecision, note?: string) => boolean;
+  /** Ask the hub to turn a call into a standing rule. Returns false when not sent. */
+  onRuleRequest: (sessionId: string, callId: string, verdict: Verdict, scope: Scope) => boolean;
   /** Fixed clock for tests; the live view ticks once a second. */
   nowMs?: number;
 }
@@ -30,37 +34,25 @@ function prettyArgs(args: unknown): string {
   }
 }
 
-function AlertBox({ alert }: { alert: InboxAlert }) {
-  const critical = alert.severity === "critical";
-  return (
-    <div className={`alert-banner inbox-alert ${critical ? "critical" : "warning"}`}>
-      <span className="alert-icon">{critical ? "!!" : "!"}</span>
-      <div className="alert-content">
-        <span className="alert-label">{critical ? "CRITICAL ALERT" : "WARNING"}</span>
-        <span className="alert-message">{stripUnsafe(alert.message)}</span>
-      </div>
-      {alert.trigger && (
-        <div className="alert-meta">
-          <span className="alert-trigger">Trigger: {singleLine(alert.trigger)}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function PendingCard({
   call,
   now,
   canDecide,
   notSent,
+  policyWritable,
   onDecision,
+  onRuleRequest,
 }: {
   call: PendingCall;
   now: number;
   canDecide: boolean;
   notSent: boolean;
-  onDecision: (decision: InboxDecision) => void;
+  policyWritable: boolean;
+  onDecision: (decision: InboxDecision, note?: string) => void;
+  onRuleRequest: (verdict: Verdict, scope: Scope) => boolean;
 }) {
+  const [note, setNote] = useState("");
+  const noteId = useId();
   const argsText = prettyArgs(call.args);
   const hiddenChars = panelView(argsText, MAX_ARGS_PANEL).hiddenChars;
   const left = Math.max(0, Math.ceil((call.deadline_at - now) / 1000));
@@ -90,9 +82,23 @@ function PendingCard({
         </div>
       )}
       <AgentText text={argsText} max={MAX_ARGS_PANEL} />
-      {call.alerts.map((a, i) => (
-        <AlertBox alert={a} key={i} />
-      ))}
+      <WhyFlagged alerts={call.alerts} earlierDenied={call.earlier_denied} />
+      <SessionSoFar summary={call.session_summary} history={call.session_history} />
+      <div className="inbox-note-row">
+        <label htmlFor={noteId} className="detail-label">
+          Reason sent to the agent
+        </label>
+        <input
+          id={noteId}
+          className="inbox-note-input"
+          data-testid="inbox-note"
+          type="text"
+          maxLength={200}
+          value={note}
+          placeholder="optional, used when you deny"
+          onChange={(e) => setNote(e.target.value)}
+        />
+      </div>
       <div className="inbox-actions">
         <button
           className="btn-approve"
@@ -108,11 +114,21 @@ function PendingCard({
           data-testid="inbox-deny"
           data-call-id={call.call_id}
           disabled={!canDecide}
-          onClick={() => onDecision("deny")}
+          onClick={() => onDecision("deny", note)}
         >
           Deny
         </button>
       </div>
+      {policyWritable && (
+        <StandingRules
+          tool={call.tool}
+          server={call.server}
+          sessionId={call.session_id}
+          callId={call.call_id}
+          disabled={!canDecide}
+          onRequest={(f) => onRuleRequest(f.verdict, f.scope)}
+        />
+      )}
       {notSent && (
         <div className="inbox-not-sent" data-testid="inbox-not-sent">
           Not sent, reconnecting. Try again once the connection is back.
@@ -154,6 +170,11 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
         </span>
       )}
       <span className="inbox-tool">{singleLine(item.tool, MAX_TOOL_NAME) || "(unknown tool)"}</span>
+      {item.note && (
+        <span className="inbox-note-shown" data-testid="inbox-resolved-note">
+          note: {singleLine(item.note, 200)}
+        </span>
+      )}
       {item.reason && <span className="inbox-reason">{singleLine(item.reason)}</span>}
       {item.result && (
         <span className="inbox-result">
@@ -164,7 +185,7 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
   );
 }
 
-export function Inbox({ onDecision, nowMs }: InboxProps) {
+export function Inbox({ onDecision, onRuleRequest, nowMs }: InboxProps) {
   const sessions = useInboxStore((s) => s.sessions);
   const pending = useInboxStore((s) => s.pending);
   const resolved = useInboxStore((s) => s.resolved);
@@ -172,6 +193,9 @@ export function Inbox({ onDecision, nowMs }: InboxProps) {
   const snapshotReceived = useInboxStore((s) => s.snapshotReceived);
   const notSent = useInboxStore((s) => s.notSent);
   const markNotSent = useInboxStore((s) => s.markNotSent);
+  const policyWritable = useInboxStore((s) => s.capabilities.policy_writable);
+  const ruleResult = useInboxStore((s) => s.ruleResult);
+  const clearRuleResult = useInboxStore((s) => s.clearRuleResult);
 
   const [tick, setTick] = useState(() => Date.now());
   useEffect(() => {
@@ -193,6 +217,15 @@ export function Inbox({ onDecision, nowMs }: InboxProps) {
           {connLabel}
         </span>
       </div>
+
+      {ruleResult && (
+        <div className={`inbox-toast ${ruleResult.ok ? "ok" : "err"}`} data-testid="inbox-rule-toast" role="status">
+          <span>{ruleToast(ruleResult)}</span>
+          <button className="inbox-toast-close" data-testid="inbox-rule-toast-dismiss" onClick={clearRuleResult}>
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <section className="inbox-section">
         <h3 className="inbox-subtitle">Sessions</h3>
@@ -229,7 +262,9 @@ export function Inbox({ onDecision, nowMs }: InboxProps) {
                   now={now}
                   canDecide={connection === "connected" && snapshotReceived}
                   notSent={key in notSent}
-                  onDecision={(d) => markNotSent(key, !onDecision(c.session_id, c.call_id, d))}
+                  policyWritable={policyWritable}
+                  onDecision={(d, n) => markNotSent(key, !onDecision(c.session_id, c.call_id, d, n))}
+                  onRuleRequest={(v, sc) => onRuleRequest(c.session_id, c.call_id, v, sc)}
                   key={key}
                 />
               );
