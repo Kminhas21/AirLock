@@ -365,6 +365,10 @@ def _parse_bytes(raw: bytes, label: str) -> Any:
 
 def _read_file(path) -> bytes:
     """Read a regular file of at most MAX_FILE_BYTES; raises PolicyUnreadable."""
+    # An int is a FILE DESCRIPTOR to os.stat / open(): open(5) would read AND CLOSE fd 5, which belongs to somebody else (found when a test
+    # killed the event loop's selector). Only real paths are ever opened.
+    if isinstance(path, bool) or not isinstance(path, (str, os.PathLike)):
+        raise PolicyUnreadable([f"policy path must be a string or a path, not {type(path).__name__}"])
     try:
         st = os.stat(path)
         if not stat.S_ISREG(st.st_mode):

@@ -1060,6 +1060,19 @@ class TestCache:
             p, reason = load_policy_file(bad)
             assert p is None and isinstance(reason, str) and reason
 
+    def test_an_int_path_is_never_treated_as_a_file_descriptor(self, tmp_path):
+        """Regression: load_policy_file(5) used to read and then CLOSE fd 5 (it killed pytest's event loop). No descriptor may be touched."""
+        f = tmp_path / "p.json"
+        self.write(f, BASE)
+        fd = os.open(str(f), os.O_RDONLY)
+        try:
+            p, reason = load_policy_file(fd)
+            assert p is None and "not int" in reason
+            os.fstat(fd)                      # still open: would raise OSError(EBADF) if the loader had closed it
+            assert os.read(fd, 1)             # and still readable at its original position
+        finally:
+            os.close(fd)
+
     def test_file_deleted_after_cache(self, tmp_path):
         f = tmp_path / "p.json"
         self.write(f, BASE)
