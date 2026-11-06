@@ -10,19 +10,11 @@ from mcp.server.stdio import stdio_server
 
 from sentinel_proxy.backend import BackendLink, log
 from sentinel_proxy.config import ConfigError, gate_timeout_s, load_config_file, with_token
-from sentinel_proxy.proxy import DownstreamStartError, Proxy
+from sentinel_proxy.proxy import DownstreamStartError, Proxy, SandboxRefused
 
 
 async def serve(cfg) -> int:
-    hello = {
-        "event": "proxy_hello",
-        "session_id": cfg.session_id,
-        "servers": list(cfg.servers),
-        "auto_approve": list(cfg.auto_approve),
-    }
-    url = with_token(cfg.backend, os.environ.get("SENTINEL_WS_TOKEN"))
-    link = BackendLink(url, hello, call_timeout_s=gate_timeout_s())
-    proxy = Proxy(cfg, link)
+    proxy = Proxy(cfg)
     code = 0
     async with AsyncExitStack() as stack:
         try:
@@ -30,9 +22,22 @@ async def serve(cfg) -> int:
         except ConfigError as e:
             print(f"sentinel-proxy: {e}", file=sys.stderr)
             return 2
+        except SandboxRefused as e:
+            print(f"sentinel-proxy: sandbox: {e}", file=sys.stderr)
+            return 4
         except DownstreamStartError as e:
             print(f"sentinel-proxy: {e}", file=sys.stderr)
             return 1
+        hello = {
+            "event": "proxy_hello",
+            "session_id": cfg.session_id,
+            "servers": list(cfg.servers),
+            "auto_approve": list(cfg.auto_approve),
+            "boundary": proxy.boundary(),
+        }
+        url = with_token(cfg.backend, os.environ.get("SENTINEL_WS_TOKEN"))
+        link = BackendLink(url, hello, call_timeout_s=gate_timeout_s())
+        proxy.link = link
         link_task = asyncio.create_task(link.run())
         try:
             try:

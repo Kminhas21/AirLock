@@ -13,7 +13,11 @@ _ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 _PREFIX_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 _AUTO_RE = re.compile(r"^([A-Za-z0-9._-]{1,40}):(\*|[^:*\s][^:\s]*)$")
 _TOP_KEYS = {"session_id", "backend", "servers", "auto_approve"}
-_SERVER_KEYS = {"command", "args", "env", "cwd", "prefix", "trust_read_only_hint"}
+_SERVER_KEYS = {"command", "args", "env", "cwd", "prefix", "trust_read_only_hint", "sandbox", "lifecycle", "secrets",
+                "call_timeout_s"}
+_SECRET_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
+_HOST_VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+LIFECYCLES = ("session", "per_call")
 
 
 class ConfigError(Exception):
@@ -29,6 +33,14 @@ class ServerConfig:
     cwd: str | None = None
     prefix: str = ""
     trust_read_only_hint: bool = False
+    sandbox: dict | None = None  # validated sandbox spec (sandbox.validate_spec) or None = unsandboxed
+    lifecycle: str = "session"
+    secrets: dict = field(default_factory=dict)  # {ENV_NAME: {"from_env": HOST_VAR, "tools": (tool, ...)}}
+    call_timeout_s: float = 60.0
+
+    def secrets_for(self, tool: str) -> list[str]:
+        """ENV_NAMEs a call to `tool` (ORIGINAL name) will receive, in config order."""
+        return [n for n, s in self.secrets.items() if tool in s["tools"]]
 
 
 @dataclass(frozen=True)
@@ -148,9 +160,66 @@ def _parse_server(name: str, s: Any, errors: list[str]) -> ServerConfig | None:
     trust = s.get("trust_read_only_hint", False)
     if not isinstance(trust, bool):
         errors.append(f"{where}.trust_read_only_hint: must be true or false")
+    sandbox_spec = None
+    if s.get("sandbox") is not None:
+        from sentinel_proxy.sandbox import SandboxSpecError, validate_spec
+
+        try:
+            sandbox_spec = validate_spec(s["sandbox"])
+        except SandboxSpecError as e:
+            errors.append(f"{where}.sandbox: {e}")
+    lifecycle = s.get("lifecycle", "session")
+    if not isinstance(lifecycle, str) or lifecycle not in LIFECYCLES:
+        errors.append(f"{where}.lifecycle: must be one of {', '.join(LIFECYCLES)}")
+        lifecycle = "session"
+    secrets = _parse_secrets(where, s.get("secrets", {}), errors)
+    if secrets:
+        if lifecycle != "per_call":
+            errors.append(f"{where}.secrets: require lifecycle \"per_call\" (a long-lived process would keep them)")
+        if sandbox_spec is None:
+            errors.append(f"{where}.secrets: require a \"sandbox\"")
+    timeout = s.get("call_timeout_s", 60)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not (1 <= timeout <= 600):
+        errors.append(f"{where}.call_timeout_s: must be a number between 1 and 600")
+        timeout = 60
     if len(errors) > n0:
         return None
-    return ServerConfig(name, command, tuple(args), dict(env), cwd, prefix, trust)
+    return ServerConfig(name, command, tuple(args), dict(env), cwd, prefix, trust, sandbox_spec, lifecycle, secrets,
+                        float(timeout))
+
+
+def _parse_secrets(where: str, raw: Any, errors: list[str]) -> dict:
+    if not isinstance(raw, dict):
+        errors.append(f"{where}.secrets: must be an object {{ENV_NAME: {{\"from_env\": HOST_VAR, \"tools\": [...]}}}}")
+        return {}
+    out: dict = {}
+    for name, spec in raw.items():
+        w = f"{where}.secrets.{str(name)[:64]}"
+        if not isinstance(name, str) or not _SECRET_NAME_RE.fullmatch(name):
+            errors.append(f"{w}: secret name must match ^[A-Z_][A-Z0-9_]{{0,63}}$")
+            continue
+        if not isinstance(spec, dict) or set(spec) - {"from_env", "tools"}:
+            errors.append(f"{w}: must be an object with exactly the keys from_env and tools")
+            continue
+        src, tools = spec.get("from_env"), spec.get("tools")
+        ok = True
+        if not isinstance(src, str) or not _HOST_VAR_RE.fullmatch(src):
+            errors.append(f"{w}.from_env: must be a host environment variable name")
+            ok = False
+        if (not isinstance(tools, list) or not tools
+                or not all(isinstance(t, str) and t.strip() for t in tools)):
+            errors.append(f"{w}.tools: must be a non-empty list of non-empty strings")
+            ok = False
+        if ok:
+            out[name] = {"from_env": src, "tools": tuple(dict.fromkeys(tools))}
+    return out
+
+
+def scrub(text: str, values) -> str:
+    """Replace every secret VALUE in `text` (longest first) so it can be logged / sent to the hub."""
+    for v in sorted((v for v in values if v), key=len, reverse=True):
+        text = text.replace(v, "[REDACTED]")
+    return text
 
 
 def load_config_file(path: str, **overrides: Any) -> ProxyConfig:
