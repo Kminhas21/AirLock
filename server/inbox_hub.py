@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import fnmatch
+import hashlib
 import json
 import logging
 import os
@@ -17,8 +19,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import escalation
 import eventlog
 import gate
+import identity as identity_mod
+import notify as notify_mod
 import policy as policy_mod
 import policy_writer
 import proposal_monitor
@@ -29,10 +34,10 @@ logger = logging.getLogger(__name__)
 _logged_policy_problems: set = set()
 
 
-def _resolve_policy():
+def _resolve_policy(path: str | None = None):
     """-> (policy_mode, Policy | None, registry | None). SENTINEL_POLICY unset => (False, None, None): legacy behaviour.
     Set but unusable => (True, None, ...): a BROKEN policy, every call is `ask`. Never raises."""
-    path = (os.environ.get("SENTINEL_POLICY") or "").strip()
+    path = (path or os.environ.get("SENTINEL_POLICY") or "").strip()        # a tenant's own policy file wins
     if not path:
         return False, None, None
     pol, reason = policy_mod.load_policy_file(path)
@@ -74,6 +79,9 @@ BOUNDARY_LAYERS = frozenset({"env", "rlimit", "no_new_privs", "netns", "landlock
 BOUNDARY_NETWORK = frozenset({"none", "loopback", "host"})
 BOUNDARY_LIFECYCLE = frozenset({"session", "per_call"})
 _BOUNDARY_KEYS = frozenset({"lifecycle", "layers", "missing", "network", "secrets"})
+NOTIFY_TIMEOUT_S = 30.0    # hard bound on one notification send (the notifier has its own, shorter, timeouts)
+AUTH_FRAME_TIMEOUT_S = 5.0
+AUTH_AUDIT_WINDOW_S = 60.0
 NOT_A_DECISION = frozenset({"cancelled", "disconnected", "restart", "log_unavailable"})
 
 
@@ -184,6 +192,7 @@ class _Peer:
         self._timeout = timeout
         self._lock = asyncio.Lock()
         self.dead = False
+        self.principal = None            # identity mode: who this UI is (tenant filtering, RBAC)
 
     async def send(self, payload: dict) -> bool:
         """Serialised, time-limited send (the timeout covers waiting for the lock too). A failed or timed-out send
@@ -234,6 +243,9 @@ class _Pending:
     history: list = field(default_factory=list)
     earlier_denied: list = field(default_factory=list)
     cancelled: bool = False       # resolved by the proxy's proxy_cancel (not a human decision)
+    since: float = 0.0            # hub clock when the call became pending (age_s, escalation)
+    escalation_level: int = 0
+    operator: str | None = None   # principal id of the human who decided (identity mode)
 
     def claim(self, decision: str, reason: str) -> bool:
         """Once-only: the first claim wins (sync, so there is no await between check and set)."""
@@ -264,6 +276,9 @@ class ProxySession:
     cancelled_early: set = field(default_factory=set)  # proxy_cancel arrived while in `starting`
     logged_hello: bool = False
     boundary: dict | None = None
+    agent_id: str = "agent"
+    tenant: str = "default"
+    identity_mode: bool = False
     ring: Any = field(default_factory=lambda: collections.deque(maxlen=RING_SIZE))
     counts: dict = field(default_factory=lambda: {"approved": 0, "denied": 0, "auto": 0, "policy": 0})
 
@@ -307,8 +322,17 @@ class ProxySession:
 
 class InboxHub:
     def __init__(self, gate_timeout: float | None = None, monitor_factory: Callable[[], Any] | None = None,
-                 store: Any = None):
+                 store: Any = None, identity: Any = None, notifier: Any = None, clock: Callable[[], float] | None = None,
+                 sleep: Callable[..., Any] | None = None):
         self._timeout = float(gate.GATE_TIMEOUT_S if gate_timeout is None else gate_timeout)
+        self.identity = identity           # identity.IdentityStore (identity mode) or None (legacy: SENTINEL_WS_TOKEN)
+        self.identity_broken = False       # SENTINEL_IDENTITY_FILE set but unusable: refuse everyone
+        self._notifier = notifier
+        self._clock = clock or time.monotonic
+        self._sleep = sleep or asyncio.sleep
+        self._auth_audit: dict = {}
+        self._channels: dict = {}
+        self._channel_problems: set = set()
         self._monitor_factory = monitor_factory
         self.sessions: dict[str, ProxySession] = {}
         self._uis: list[_Peer] = []
@@ -322,6 +346,36 @@ class InboxHub:
         self._log_events: int | None = None   # last known seq (cached for /health; never verify() there)
         if store is not None:
             self._log_events = 0
+
+    # ------------------------------------------------------------------ identity
+    @property
+    def identity_mode(self) -> bool:
+        return self.identity is not None or self.identity_broken
+
+    async def setup_identity_from_env(self, env: Any = None) -> None:
+        """SENTINEL_IDENTITY_FILE unset => nothing (legacy). Set but unusable => FAIL CLOSED: every connection is refused."""
+        env = os.environ if env is None else env
+        if not (env.get("SENTINEL_IDENTITY_FILE") or "").strip():
+            return
+        store, reason = await asyncio.to_thread(identity_mod.load_identity, env)
+        if store is None:
+            self.identity, self.identity_broken = None, True
+            logger.error("SENTINEL_IDENTITY_FILE is set but unusable (%s): EVERY inbox and proxy connection is refused",
+                         safe_text.clean_field(reason, 300))
+        else:
+            self.identity, self.identity_broken = store, False
+
+    def _tenant_cfg(self, tenant: str):
+        return self.identity.tenant(tenant) if self.identity is not None else None
+
+    def _timeout_for(self, session: "ProxySession") -> float:
+        cfg = self._tenant_cfg(session.tenant) if session.identity_mode else None
+        t = getattr(cfg, "gate_timeout_s", None)
+        return float(t) if t else self._timeout
+
+    @staticmethod
+    def _idf(session: "ProxySession", operator: str | None = None) -> dict:
+        return {"operator": operator} if session.identity_mode else {}
 
     # ------------------------------------------------------------------ durable log
     async def open_log_from_env(self, env: Any = None) -> None:
@@ -381,12 +435,15 @@ class InboxHub:
             return "fail"
 
     async def _log_decision(self, session: "ProxySession", call_id: str, decision: str, reason: str, actor: str,
-                            rule_id: str | None, digest: str | None, note: str | None = None):
+                            rule_id: str | None, digest: str | None, note: str | None = None,
+                            operator: str | None = None):
         """Write the decision record BEFORE anything is sent. -> (decision, reason, actor) EFFECTIVE, or None if the
         decision was already recorded (duplicate: ignore). An approve that cannot be recorded becomes deny/log_unavailable."""
         payload = {"decision": decision, "reason": reason, "actor": actor, "rule_id": rule_id, "policy_digest": digest}
         if note and decision == "deny" and reason == "human":
             payload["note"] = note
+        if session.identity_mode:
+            payload["operator"], payload["tenant"] = operator, session.tenant
         res = await self._append("decision", session.session_id, call_id, payload)
         if res == "dup":
             return None
@@ -423,22 +480,31 @@ class InboxHub:
     def pending_count(self) -> int:
         return sum(len(s.pending) for s in self.sessions.values())
 
-    @staticmethod
-    def _pending_payload(p: _Pending, deadline_s: float) -> dict:
+    def _pending_payload(self, p: _Pending, deadline_s: float | None = None) -> dict:
+        if deadline_s is None:
+            deadline_s = self._timeout_for(p.session)
         d = {"session_id": p.session.session_id, "call_id": p.call_id, "server": p.server, "tool": p.tool,
              "args": p.args, "auto": p.auto, "alerts": p.alerts, "deadline_s": deadline_s}
         if p.policy_mode:
             d["rule_id"], d["policy_digest"] = p.rule_id, p.policy_digest
         d["secrets_used"] = list(p.secrets_used)
         d["session_summary"], d["session_history"], d["earlier_denied"] = p.summary, p.history, p.earlier_denied
+        if p.session.identity_mode:
+            d["agent_id"], d["tenant"] = p.session.agent_id, p.session.tenant
+            d["escalation_level"] = p.escalation_level
+            d["age_s"] = max(0, int(self._clock() - p.since))
         return d
 
     @staticmethod
     def _policy_fields(p: _Pending) -> dict:
         return {"rule_id": p.rule_id, "policy_digest": p.policy_digest} if p.policy_mode else {}
 
-    async def _broadcast(self, payload: dict) -> None:
-        uis = list(self._uis)
+    async def _broadcast(self, payload: dict, tenant: str | None = None) -> None:
+        """Send to the UIs. Identity mode: ONLY the UIs of `tenant` (no tenant given => nobody: fail closed)."""
+        if self.identity_mode:
+            uis = [u for u in self._uis if u.principal is not None and tenant is not None and u.principal.tenant == tenant]
+        else:
+            uis = list(self._uis)
         if not uis:
             return
         results = await asyncio.gather(*(u.send(payload) for u in uis), return_exceptions=True)
@@ -447,7 +513,7 @@ class InboxHub:
                 self._uis.remove(u)
 
     # ------------------------------------------------------------------ proxy side
-    async def proxy_hello(self, peer: Any, frame: Any) -> ProxySession | None:
+    async def proxy_hello(self, peer: Any, frame: Any, principal: Any = None) -> ProxySession | None:
         """Validate the FIRST frame. Returns the session, or None after sending hello_reject (the caller closes)."""
         conn = _Peer(peer, PROXY_SEND_TIMEOUT_S)
 
@@ -465,6 +531,9 @@ class InboxHub:
         auto_approve = frame.get("auto_approve", [])
         if not _str_list(servers, MAX_SERVERS, MAX_SHORT) or not _str_list(auto_approve, MAX_AUTO_APPROVE, MAX_SHORT):
             return await reject("bad_hello")
+        if principal is not None and principal.servers is not None and not all(
+                any(fnmatch.fnmatchcase(sv, g) for g in principal.servers) for sv in servers):
+            return await reject("forbidden_server")             # the agent declares a server outside its allowlist
         if self.log_unusable:
             return await reject("log_unavailable")
         live = self.sessions.get(sid)
@@ -472,9 +541,15 @@ class InboxHub:
             return await reject("duplicate_session_id")
         session = ProxySession(sid, list(servers), list(auto_approve), conn)
         session.boundary = validate_boundary(frame.get("boundary"))
+        if self.identity_mode:
+            session.identity_mode = True
+            session.agent_id = principal.id if principal is not None else "agent"
+            session.tenant = principal.tenant if principal is not None else "default"
         self.sessions[sid] = session          # claimed before any await: a racing second hello sees it
         try:
-            session.policy_mode, session.policy, session.policy_registry = await asyncio.to_thread(_resolve_policy)
+            tcfg = self._tenant_cfg(session.tenant) if session.identity_mode else None
+            session.policy_mode, session.policy, session.policy_registry = await asyncio.to_thread(
+                _resolve_policy, getattr(tcfg, "policy_file", None))
         except Exception:
             logger.exception("inbox: policy resolution failed; treating the policy as broken")
             session.policy_mode, session.policy, session.policy_registry = True, None, None
@@ -497,7 +572,7 @@ class InboxHub:
         # a UI that is already open learns the servers and the boundary from this event (the snapshot only reaches UIs that connect later):
         # without them a sandboxed session would be displayed as unsandboxed
         self._spawn(self._broadcast({"event": "inbox_session", "session_id": sid, "state": "open",
-                                     "servers": session.servers, "boundary": session.boundary}))
+                                     "servers": session.servers, "boundary": session.boundary}, session.tenant))
         return session
 
     def _hello_payload(self, session: "ProxySession") -> dict:
@@ -518,7 +593,8 @@ class InboxHub:
         return {"session_id": session.session_id, "servers": session.servers, "auto_approve": session.auto_approve,
                 "monitor_mode": getattr(mon, "mode", None) if mon is not None else None,
                 "policy_digest": session.policy.digest() if session.policy is not None else None,
-                "registry_digest": reg_digest, "frozen_model_sha256": frozen, "boundary": session.boundary}
+                "registry_digest": reg_digest, "frozen_model_sha256": frozen, "boundary": session.boundary,
+                **({"agent_id": session.agent_id, "tenant": session.tenant} if session.identity_mode else {})}
 
     async def handle_proxy_frame(self, session: ProxySession, frame: Any) -> bool:
         """Process one parsed frame. Returns False when the connection must be closed (protocol violation)."""
@@ -700,7 +776,8 @@ class InboxHub:
             await self._register(session, tool, args, decision)
             await self._reply(session, call_id, decision, reason)
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                                   "decision": decision, "reason": reason, **pol_fields})
+                                   "decision": decision, "reason": reason, **pol_fields, **self._idf(session)},
+                                  session.tenant)
             return
 
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
@@ -710,11 +787,17 @@ class InboxHub:
         session.pending[call_id] = p
         session.starting.discard(call_id)
         # the decision timer starts NOW; the broadcast runs beside it and cannot delay it
-        announce = self._spawn(self._broadcast({"event": "inbox_pending", **self._pending_payload(p, self._timeout)}))
+        p.since = self._clock()
+        announce = self._spawn(self._broadcast({"event": "inbox_pending", **self._pending_payload(p)}, session.tenant))
+        esc = self._start_escalation(p)
         try:
-            await asyncio.wait_for(p.event.wait(), self._timeout)
+            await asyncio.wait_for(p.event.wait(), self._timeout_for(session))
         except asyncio.TimeoutError:
             p.claim("deny", "timeout")
+        finally:
+            if esc is not None:                      # no escalation, no notification after the call is resolved
+                esc.cancel()
+                await asyncio.gather(esc, return_exceptions=True)
         session.pending.pop(call_id, None)
         if p.cancelled:                  # proxy_cancel: no proxy_decision, no monitor registration
             eff = await self._log_decision(session, call_id, "deny", p.reason or "cancelled", "system", rule_id, digest)
@@ -723,12 +806,14 @@ class InboxHub:
                 return
             session.record(call_id, server, tool, args, "deny", "cancelled", rule_id, None)
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                                   "decision": "deny", "reason": p.reason, **self._policy_fields(p)})
+                                   "decision": "deny", "reason": p.reason, **self._policy_fields(p), **self._idf(session)},
+                                  session.tenant)
             return
         decision, reason = ("approve" if p.decision == "approve" else "deny"), p.reason or "invalid"
         actor = "human" if reason == "human" else "system"
         note = p.note if (decision == "deny" and reason == "human") else None      # never a note on an approve
-        eff = await self._log_decision(session, call_id, decision, reason, actor, rule_id, digest, note)
+        operator = p.operator if reason == "human" else None
+        eff = await self._log_decision(session, call_id, decision, reason, actor, rule_id, digest, note, operator)
         if eff is None:
             await asyncio.gather(announce, return_exceptions=True)
             return
@@ -741,7 +826,8 @@ class InboxHub:
         await asyncio.gather(announce, return_exceptions=True)       # pending before resolved on every UI
         extra_note = {"note": note} if note else {}
         await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                               "decision": decision, "reason": reason, **self._policy_fields(p), **extra_note})
+                               "decision": decision, "reason": reason, **self._policy_fields(p), **extra_note,
+                               **self._idf(session, operator if reason == "human" else None)}, session.tenant)
 
     async def _forward_result(self, session: ProxySession, frame: dict) -> None:
         call_id, status = frame.get("call_id"), frame.get("status")
@@ -758,7 +844,7 @@ class InboxHub:
                 rec["summary"] = eventlog.scrub(summary, session.secrets.get(call_id, frozenset()))
             await self._append("call_result", session.session_id, call_id, rec)
         await self._broadcast({"event": "inbox_result", "session_id": session.session_id, "call_id": call_id,
-                               "status": status, "summary": summary})
+                               "status": status, "summary": summary}, session.tenant)
 
     async def proxy_closed(self, session: ProxySession) -> None:
         """The proxy went away: every pending call of the session is a deny/disconnected."""
@@ -773,7 +859,88 @@ class InboxHub:
             del self.sessions[session.session_id]
         if session.logged_hello:
             await self._append("proxy_close", session.session_id, None, {"reason": "disconnected"})   # best effort
-        await self._broadcast({"event": "inbox_session", "session_id": session.session_id, "state": "closed"})
+        await self._broadcast({"event": "inbox_session", "session_id": session.session_id, "state": "closed"},
+                              session.tenant)
+
+    # ------------------------------------------------------------------ escalation
+    def _start_escalation(self, p: _Pending):
+        if not p.session.identity_mode:
+            return None
+        cfg = self._tenant_cfg(p.session.tenant)
+        levels = tuple(getattr(cfg, "levels", ()) or ())
+        if not levels:
+            return None
+        return asyncio.create_task(self._escalate(p, levels))
+
+    async def _escalate(self, p: _Pending, levels: tuple) -> None:
+        fired = 0
+        try:
+            while p.decision is None:
+                for idx, lvl in escalation.plan(levels, self._clock() - p.since, fired):
+                    if p.decision is not None:
+                        return
+                    fired = idx
+                    p.escalation_level = idx
+                    await self._broadcast({"event": "inbox_escalated", "session_id": p.session.session_id,
+                                           "call_id": p.call_id, "level": idx, "after_s": lvl.after_s}, p.session.tenant)
+                    for name in lvl.notify:
+                        self._notify(p, idx, name)
+                nxt = escalation.next_due_in(levels, self._clock() - p.since, fired)
+                if nxt is None:
+                    return
+                await self._sleep(nxt)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("inbox: escalation task failed")
+
+    def _channel(self, tenant: str, name: str):
+        key = (tenant, name)
+        if key in self._channels:
+            return self._channels[key]
+        ch = None
+        cfg = self._tenant_cfg(tenant)
+        raw = (getattr(cfg, "channels", None) or {}).get(name)
+        if raw is None:
+            if key not in self._channel_problems:
+                self._channel_problems.add(key)
+                logger.error("inbox: escalation names an unknown channel %r for tenant %r; skipping it", name, tenant)
+        else:
+            try:
+                ch = notify_mod.validate_channel(name, {
+                    "type": raw.type, "url": raw.url, "format": raw.format, "secret_env": raw.secret_env,
+                    "include_args": raw.include_args, "allow_private": raw.allow_private})
+            except Exception as exc:
+                logger.error("inbox: notification channel %r of tenant %r is invalid (%s); skipping it", name, tenant,
+                             safe_text.clean_field(str(exc), 200))
+        self._channels[key] = ch
+        return ch
+
+    def _notify(self, p: _Pending, level: int, name: str) -> None:
+        ch = self._channel(p.session.tenant, name)
+        if ch is None:
+            return
+        event = {"tenant": p.session.tenant, "agent_id": p.session.agent_id, "server": p.server, "tool": p.tool,
+                 "call_id": p.call_id, "age_s": max(0, int(self._clock() - p.since)), "level": level,
+                 "link": (os.environ.get("SENTINEL_PUBLIC_URL") or "") + "/#inbox"}
+        if ch.include_args:                              # arguments only when the channel opted in, and only the redacted preview
+            event["args_preview"] = args_preview(p.args)
+        self._spawn(self._send_notification(ch, event, p, level))
+
+    async def _send_notification(self, ch, event: dict, p: _Pending, level: int) -> None:
+        ok, status = False, None
+        try:
+            if self._notifier is None:
+                self._notifier = notify_mod.Notifier()
+            res = await asyncio.wait_for(self._notifier.send(ch, event), NOTIFY_TIMEOUT_S)
+            ok, status = bool(getattr(res, "ok", False)), getattr(res, "status", None)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("inbox: notification to channel %r failed or timed out", ch.name)
+        if self.store is not None:                       # best effort
+            await self._append("notification", p.session.session_id, p.call_id,
+                               {"channel": ch.name, "level": level, "ok": ok, "status": status})
 
     # ------------------------------------------------------------------ UI side
     def snapshot(self, recent: list | None = None, capabilities: dict | None = None) -> dict:
