@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import eventlog
 import gate
 import policy as policy_mod
 import proposal_monitor
@@ -169,6 +170,7 @@ class ProxySession:
     policy_registry: Any = None
     starting: set = field(default_factory=set)         # reserved, still inside the monitor (not yet pending)
     cancelled_early: set = field(default_factory=set)  # proxy_cancel arrived while in `starting`
+    logged_hello: bool = False
 
     def reserve(self, call_id: str) -> bool:
         """Synchronous duplicate check + registration (no await in between). False: already seen."""
@@ -182,12 +184,101 @@ class ProxySession:
 
 
 class InboxHub:
-    def __init__(self, gate_timeout: float | None = None, monitor_factory: Callable[[], Any] | None = None):
+    def __init__(self, gate_timeout: float | None = None, monitor_factory: Callable[[], Any] | None = None,
+                 store: Any = None):
         self._timeout = float(gate.GATE_TIMEOUT_S if gate_timeout is None else gate_timeout)
         self._monitor_factory = monitor_factory
         self.sessions: dict[str, ProxySession] = {}
         self._uis: list[_Peer] = []
         self._bg: set = set()
+        self.store = store                 # durable event log (eventlog.EventStore-like) or None: legacy behaviour
+        self.log_unusable = False          # a log was configured but could not be opened: refuse every session
+        self.log_path: str | None = None
+        self.log_keyed = False
+        self._log_events: int | None = None   # last known seq (cached for /health; never verify() there)
+        if store is not None:
+            self._log_events = 0
+
+    # ------------------------------------------------------------------ durable log
+    async def open_log_from_env(self, env: Any = None) -> None:
+        """SENTINEL_EVENT_LOG unset => nothing (legacy). Set but unusable => ERROR once and every session is refused."""
+        env = os.environ if env is None else env
+        path = (env.get("SENTINEL_EVENT_LOG") or "").strip()
+        if not path:
+            return
+        self.log_path = path
+
+        def _open():
+            key = eventlog.load_key(env)
+            store = eventlog.EventStore(path, key=key, anchor_path=(env.get("SENTINEL_LOG_ANCHOR") or None))
+            info = store.open()
+            return store, key is not None, info
+
+        try:
+            self.store, self.log_keyed, info = await asyncio.to_thread(_open)
+            self._log_events = int(info.get("seq", 0))
+            self.log_unusable = False
+        except Exception as exc:
+            self.store, self.log_unusable = None, True
+            logger.error("SENTINEL_EVENT_LOG is set but the log is unusable (%s): EVERY proxy session will be refused "
+                         "(log_unavailable)", safe_text.clean_field(f"{type(exc).__name__}: {exc}", 300))
+
+    async def close_log(self) -> None:
+        store, self.store = self.store, None
+        if store is not None:
+            try:
+                await asyncio.to_thread(store.close)
+            except Exception:
+                logger.exception("inbox: closing the event log failed")
+
+    def event_log_info(self) -> dict | None:
+        """For /health: None when no log is configured. Cheap: the last seq is cached, verify() is never run here."""
+        if self.log_path is None and self.store is None:
+            return None
+        return {"path": self.log_path, "events": self._log_events, "keyed": self.log_keyed,
+                "ok": self.store is not None and not self.log_unusable}
+
+    async def _append(self, kind: str, sid: str, cid: str | None, payload: dict) -> str:
+        """'ok' | 'dup' | 'fail'. With no store configured this is a no-op 'ok' (legacy). Runs in a thread."""
+        store = self.store
+        if store is None:
+            return "ok"
+        try:
+            ev = await asyncio.to_thread(lambda: store.append(kind, session_id=sid, call_id=cid, payload=payload))
+            seq = getattr(ev, "seq", None)
+            if isinstance(seq, int):
+                self._log_events = max(self._log_events or 0, seq)
+            return "ok"
+        except eventlog.DuplicateEvent:
+            return "dup"
+        except Exception as exc:
+            logger.error("inbox: event log append (%s) failed: %s", kind,
+                         safe_text.clean_field(f"{type(exc).__name__}: {exc}", 200))
+            return "fail"
+
+    async def _log_decision(self, session: "ProxySession", call_id: str, decision: str, reason: str, actor: str,
+                            rule_id: str | None, digest: str | None):
+        """Write the decision record BEFORE anything is sent. -> (decision, reason, actor) EFFECTIVE, or None if the
+        decision was already recorded (duplicate: ignore). An approve that cannot be recorded becomes deny/log_unavailable."""
+        payload = {"decision": decision, "reason": reason, "actor": actor, "rule_id": rule_id, "policy_digest": digest}
+        res = await self._append("decision", session.session_id, call_id, payload)
+        if res == "dup":
+            return None
+        if res == "fail":
+            if decision == "approve":
+                decision, reason, actor = "deny", "log_unavailable", "system"
+                await self._append("decision", session.session_id, call_id,
+                                   {**payload, "decision": decision, "reason": reason, "actor": actor})   # best effort
+        return decision, reason, actor
+
+    @staticmethod
+    def _alert_records(alerts: list) -> list:
+        out = []
+        for a in alerts:
+            if isinstance(a, dict):
+                out.append({"severity": a.get("severity"), "trigger": a.get("trigger"), "score": a.get("drift_score"),
+                            "threshold": a.get("threshold"), "message": a.get("message")})
+        return out
 
     # ------------------------------------------------------------------ helpers
     def _new_monitor(self):
@@ -245,6 +336,8 @@ class InboxHub:
         auto_approve = frame.get("auto_approve", [])
         if not _str_list(servers, MAX_SERVERS, MAX_SHORT) or not _str_list(auto_approve, MAX_AUTO_APPROVE, MAX_SHORT):
             return await reject("bad_hello")
+        if self.log_unusable:
+            return await reject("log_unavailable")
         live = self.sessions.get(sid)
         if live is not None and not live.closed:
             return await reject("duplicate_session_id")
@@ -260,11 +353,39 @@ class InboxHub:
         except Exception:
             logger.exception("inbox: could not build a monitor for session %s; auto calls will be held", sid)
             session.monitor = None
+        if self.store is not None:         # write-ahead: the hello is on disk before the ack
+            res = await self._append("proxy_hello", sid, None, self._hello_payload(session))
+            if res != "ok":
+                if self.sessions.get(sid) is session:
+                    del self.sessions[sid]
+                session.closed = True
+                return await reject("log_unavailable")
+            session.logged_hello = True
         if not await conn.send({"event": "hello_ack", "session_id": sid}):
             await self.proxy_closed(session)
             return None
         self._spawn(self._broadcast({"event": "inbox_session", "session_id": sid, "state": "open"}))
         return session
+
+    def _hello_payload(self, session: "ProxySession") -> dict:
+        mon = session.monitor
+        reg, frozen = session.policy_registry, None
+        try:
+            if reg is None:
+                reg = getattr(mon, "registry", None)
+            if self._monitor_factory is None:
+                fm = proposal_monitor.get_monitor_factory().frozen_model
+                frozen = fm.get("sha256") if isinstance(fm, dict) else None
+        except Exception:
+            pass
+        try:
+            reg_digest = reg.digest() if reg is not None else None
+        except Exception:
+            reg_digest = None
+        return {"session_id": session.session_id, "servers": session.servers, "auto_approve": session.auto_approve,
+                "monitor_mode": getattr(mon, "mode", None) if mon is not None else None,
+                "policy_digest": session.policy.digest() if session.policy is not None else None,
+                "registry_digest": reg_digest, "frozen_model_sha256": frozen}
 
     async def handle_proxy_frame(self, session: ProxySession, frame: Any) -> bool:
         """Process one parsed frame. Returns False when the connection must be closed (protocol violation)."""
@@ -375,6 +496,8 @@ class InboxHub:
 
         rule_id: str | None = None
         digest: str | None = None
+        verdict: str | None = None
+        policy_rec = None
         if session.policy_mode:
             # the proxy's `auto` flag is IGNORED in policy mode; a broken policy asks for everything
             auto = False
@@ -390,28 +513,47 @@ class InboxHub:
                 except Exception:
                     logger.exception("inbox: policy evaluation failed; asking the human")
                     verdict, rule_id = "ask", None
+            policy_rec = {"verdict": verdict, "rule_id": rule_id, "digest": digest}
             if call_id in session.cancelled_early:
                 return
-            extra = {"rule_id": rule_id, "policy_digest": digest}
-            if verdict == "deny":
-                await self._register(session, tool, args, "deny")
-                await self._reply(session, call_id, "deny", "policy")
-                await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                                       "decision": "deny", "reason": "policy", **extra})
-                return
-            if verdict == "allow" and working and not alerts:
-                await self._register(session, tool, args, "approve")
-                await self._reply(session, call_id, "approve", "policy")
-                await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                                       "decision": "approve", "reason": "policy", **extra})
-                return
-            # ask, or allow downgraded (alert / degraded monitor): fall through to the hold
 
-        if auto and working and not alerts:
-            await self._register(session, tool, args, "approve")
-            await self._reply(session, call_id, "approve", "auto")
+        # what happens next, decided BEFORE anything is logged or sent
+        immediate: tuple | None = None            # (decision, reason, actor)
+        if session.policy_mode:
+            if verdict == "deny":
+                immediate = ("deny", "policy", "policy")
+            elif verdict == "allow" and working and not alerts:
+                immediate = ("approve", "policy", "policy")
+        elif auto and working and not alerts:
+            immediate = ("approve", "auto", "auto")
+
+        # write-ahead: call_proposed is on disk before inbox_pending / any auto or policy reply
+        res = await self._append("call_proposed", sid, call_id,
+                                 {"server": server, "tool": tool, "args": args, "auto": auto,
+                                  "alerts": self._alert_records(alerts), "policy": policy_rec})
+        if res == "dup":
+            return
+        if res == "fail":
+            await self._reply(session, call_id, "deny", "log_unavailable")
+            return
+        if call_id in session.cancelled_early:
+            await self._log_decision(session, call_id, "deny", "cancelled", "system", rule_id, digest)
+            return
+        if session.closed:
+            await self._log_decision(session, call_id, "deny", "disconnected", "system", rule_id, digest)
+            await self._register(session, tool, args, "deny")
+            return
+
+        pol_fields = {"rule_id": rule_id, "policy_digest": digest} if session.policy_mode else {}
+        if immediate is not None:
+            eff = await self._log_decision(session, call_id, *immediate, rule_id, digest)
+            if eff is None:
+                return
+            decision, reason, _actor = eff
+            await self._register(session, tool, args, decision)
+            await self._reply(session, call_id, decision, reason)
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
-                                   "decision": "approve", "reason": "auto"})
+                                   "decision": decision, "reason": reason, **pol_fields})
             return
 
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
@@ -427,11 +569,20 @@ class InboxHub:
             p.claim("deny", "timeout")
         session.pending.pop(call_id, None)
         if p.cancelled:                  # proxy_cancel: no proxy_decision, no monitor registration
+            eff = await self._log_decision(session, call_id, "deny", p.reason or "cancelled", "system", rule_id, digest)
             await asyncio.gather(announce, return_exceptions=True)
+            if eff is None:
+                return
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
                                    "decision": "deny", "reason": p.reason, **self._policy_fields(p)})
             return
         decision, reason = ("approve" if p.decision == "approve" else "deny"), p.reason or "invalid"
+        actor = "human" if reason == "human" else "system"
+        eff = await self._log_decision(session, call_id, decision, reason, actor, rule_id, digest)
+        if eff is None:
+            await asyncio.gather(announce, return_exceptions=True)
+            return
+        decision, reason, _actor = eff
         await self._register(session, tool, args, decision)
         await self._reply(session, call_id, decision, reason)
         await asyncio.gather(announce, return_exceptions=True)       # pending before resolved on every UI
@@ -445,6 +596,8 @@ class InboxHub:
             return
         summary = safe_text.clean_field(frame.get("summary", "") if isinstance(frame.get("summary"), str) else "",
                                         SUMMARY_LIMIT)
+        if self.store is not None:         # best effort: never raises into the call path
+            await self._append("call_result", session.session_id, call_id, {"status": status, "summary": summary})
         await self._broadcast({"event": "inbox_result", "session_id": session.session_id, "call_id": call_id,
                                "status": status, "summary": summary})
 
@@ -459,10 +612,12 @@ class InboxHub:
             await asyncio.gather(*list(session.tasks), return_exceptions=True)
         if self.sessions.get(session.session_id) is session:
             del self.sessions[session.session_id]
+        if session.logged_hello:
+            await self._append("proxy_close", session.session_id, None, {"reason": "disconnected"})   # best effort
         await self._broadcast({"event": "inbox_session", "session_id": session.session_id, "state": "closed"})
 
     # ------------------------------------------------------------------ UI side
-    def snapshot(self) -> dict:
+    def snapshot(self, recent: list | None = None) -> dict:
         sessions = []
         for s in self.sessions.values():
             pend = []
@@ -470,12 +625,18 @@ class InboxHub:
                 d = self._pending_payload(p, self._timeout)
                 pend.append(d)
             sessions.append({"session_id": s.session_id, "servers": s.servers, "pending": pend})
-        return {"event": "inbox_snapshot", "sessions": sessions}
+        return {"event": "inbox_snapshot", "sessions": sessions, "recent": list(recent or [])}
 
     async def ui_connected(self, peer: Any) -> _Peer:
         ui = _Peer(peer, UI_SEND_TIMEOUT_S)
         self._uis.append(ui)
-        if not await ui.send(self.snapshot()) and ui in self._uis:
+        recent: list = []
+        if self.store is not None:
+            try:
+                recent = await asyncio.to_thread(self.store.recent_resolved, 50)
+            except Exception:
+                logger.exception("inbox: could not read the recent history from the event log")
+        if not await ui.send(self.snapshot(recent)) and ui in self._uis:
             self._uis.remove(ui)
         return ui
 

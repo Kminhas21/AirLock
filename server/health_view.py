@@ -59,3 +59,11 @@ def policy_view(path: str, policy: object, detail: bool) -> dict:
     if detail:
         out = {"path": path, **out}
     return out
+
+
+def event_log_view(info: dict, detail: bool) -> dict:
+    """/health `event_log` entry (only present when SENTINEL_EVENT_LOG is set). Public: {events, keyed, ok}; detail adds path."""
+    out = {"events": info.get("events"), "keyed": bool(info.get("keyed")), "ok": bool(info.get("ok"))}
+    if detail:
+        out = {"path": info.get("path"), **out}
+    return out

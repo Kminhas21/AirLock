@@ -35,7 +35,7 @@ def client(monkeypatch):
 
 def open_pair(client, ws_ui, ws_proxy):
     snap = ws_ui.receive_json()
-    assert snap == {"event": "inbox_snapshot", "sessions": []}
+    assert snap == {"event": "inbox_snapshot", "sessions": [], "recent": []}
     ws_proxy.send_json(HELLO)
     assert ws_proxy.receive_json() == {"event": "hello_ack", "session_id": "e2e"}
     assert ws_ui.receive_json() == {"event": "inbox_session", "session_id": "e2e", "state": "open"}

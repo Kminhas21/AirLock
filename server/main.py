@@ -41,7 +41,11 @@ SCENARIOS = ("aligned", "adversarial")
 async def lifespan(_app: FastAPI):
     # Load MiniLM (Seismograph + proposal monitor) in the background so the first session does not pay for it.
     proposal_monitor.warm_up_in_background()
-    yield
+    await inbox_hub.open_log_from_env()      # SENTINEL_EVENT_LOG unset => nothing; unusable => sessions are refused
+    try:
+        yield
+    finally:
+        await inbox_hub.close_log()
 
 
 app = FastAPI(title="SENTINEL Backend", lifespan=lifespan)
@@ -67,6 +71,9 @@ async def health(request: Request):
     detail = health_view.detail_allowed(request.query_params.get("token"), request.headers.get("authorization"))
     if not detail:
         info = health_view.public_view(info)
+    log_info = inbox_hub.event_log_info()
+    if log_info is not None:
+        info = {**info, "event_log": health_view.event_log_view(log_info, detail)}
     policy_path = (os.environ.get("SENTINEL_POLICY") or "").strip()
     if policy_path:
         import policy as policy_mod

@@ -111,7 +111,7 @@ class Rig:
 async def test_hello_ack_and_snapshot_and_session_event():
     r = await Rig().start()
     assert r.proxy.sent[0] == {"event": "hello_ack", "session_id": "s1"}
-    assert r.ui.sent[0] == {"event": "inbox_snapshot", "sessions": []}
+    assert r.ui.sent[0] == {"event": "inbox_snapshot", "sessions": [], "recent": []}
     assert r.ui.events("inbox_session")[0]["state"] == "open"
     late = FakePeer()
     await r.hub.ui_connected(late)
