@@ -74,6 +74,7 @@ MUTANTS = [
     ("Z4 hub: runs unlogged when the log is unusable", "server/inbox_hub.py", "        if self.log_unusable:\n            return await reject(\"log_unavailable\")", "        if False:\n            return await reject(\"log_unavailable\")", 1),
     ("Z5 hub: alert messages are logged unscrubbed", "server/inbox_hub.py", '"message": eventlog.scrub(a.get("message"), secrets)', '"message": a.get("message")', 1),
     ("Z6 hub: tool output is stored by default", "server/inbox_hub.py", 'if os.environ.get("SENTINEL_LOG_RESULTS") == "1":', "if True:", 1),
+    ("Z7 a UI is registered for broadcasts before its snapshot is sent", "server/inbox_hub.py", "        async with ui._lock:\n            self._uis.append(ui)\n            recent: list = []", "        self._uis.append(ui)\n        async with asyncio.Lock():\n            recent: list = []", 1),
     ("X6 proxy forwards a denied call", "sentinel_proxy/proxy.py", "if not decision.approved:", "if False:", 1),
     ("R4 denied-party match ignored when choosing the earlier denied proposal for the alert text", "server/proposal_monitor.py",
      'pool = [d for d in self._denied_props if party in d[2].reaches] or list(self._denied_props)',

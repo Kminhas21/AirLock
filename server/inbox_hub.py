@@ -640,16 +640,27 @@ class InboxHub:
         return {"event": "inbox_snapshot", "sessions": sessions, "recent": list(recent or [])}
 
     async def ui_connected(self, peer: Any) -> _Peer:
+        """Register a UI and send its snapshot. The UI's send lock is held from registration until the snapshot is out, so any broadcast that
+        happens meanwhile (e.g. a proxy closing) queues BEHIND the snapshot: the snapshot is always the first frame a UI receives. The snapshot is
+        built after the history read, so it already contains every state change made before it; a later duplicate broadcast is harmless (items are keyed)."""
         ui = _Peer(peer, UI_SEND_TIMEOUT_S)
-        self._uis.append(ui)
-        recent: list = []
-        if self.store is not None:
+        async with ui._lock:
+            self._uis.append(ui)
+            recent: list = []
+            if self.store is not None:
+                try:
+                    recent = await asyncio.to_thread(self.store.recent_resolved, 50)
+                except Exception:
+                    logger.exception("inbox: could not read the recent history from the event log")
             try:
-                recent = await asyncio.to_thread(self.store.recent_resolved, 50)
+                await asyncio.wait_for(ui.peer.send_json(self.snapshot(recent)), UI_SEND_TIMEOUT_S)
             except Exception:
-                logger.exception("inbox: could not read the recent history from the event log")
-        if not await ui.send(self.snapshot(recent)) and ui in self._uis:
-            self._uis.remove(ui)
+                logger.warning("inbox: could not send the snapshot to a UI; closing it")
+                ui.dead = True
+                if ui in self._uis:
+                    self._uis.remove(ui)
+        if ui.dead:
+            await ui.close()
         return ui
 
     def ui_disconnected(self, ui: _Peer) -> None:

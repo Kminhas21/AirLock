@@ -299,3 +299,6 @@ not stored by default (status + length), `SENTINEL_LOG_RESULTS=1` stores a summa
 of the file, not on the fields you meant to redact.
 Evidence: 242 store+CLI tests (6 mutation sanity checks by the author), 23 hub-log tests, kill -9 / restart / tamper / unkeyed end-to-end tests over the real backend, proxy and CLI, 6 new mutants (Z1-Z6).
 Not built: Postgres, retention/rotation/pruning, external transparency log, monitor replay of logged sessions, encryption at rest, a Playwright stage for the history badge (covered by reducer/static-render tests and the snapshot end-to-end test).
+Gate follow-up (D19): the first full gate after the event log was RED on two things. (1) `test_call_result_logged...` asserted the old call_result shape that D19 deliberately changed (fixed; plus a test for the opt-in scrubbed summary).
+(2) A ~50% flaky hub test turned out to be a real race: `ui_connected` registered the UI for broadcasts BEFORE awaiting the history read, so a broadcast (e.g. the previous proxy closing) could reach a UI ahead of its snapshot.
+Fixed by holding the UI's send lock from registration to the end of the snapshot send; regression test `tests/server/test_inbox_snapshot_first.py` (fails on the old order) and mutant Z7. Flaky-looking == race until proven otherwise.

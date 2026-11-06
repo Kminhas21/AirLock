@@ -265,7 +265,22 @@ async def test_call_result_logged_and_failure_never_raises():
     assert r.ui.events("inbox_result")                       # still forwarded
     st.fail.clear()
     await r.send({"event": "proxy_result", "call_id": "c1", "status": "error", "summary": "x"})
-    assert logged(st, "call_result")[0][3] == {"status": "error", "summary": "x"}
+    # tool OUTPUT is free text that often echoes the arguments: by default only status + length are stored (D19)
+    assert logged(st, "call_result")[0][3] == {"status": "error", "summary_len": 1}
+
+
+async def test_call_result_summary_is_stored_scrubbed_only_when_opted_in(monkeypatch):
+    monkeypatch.setenv("SENTINEL_LOG_RESULTS", "1")
+    tl = Timeline()
+    st = FakeStore(tl)
+    r = await make(tl, st).start()
+    await r.send(call(args={"path": "/tmp/a", "password": "hunter2-SECRET"}))
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    await r.decide("c1", "approve")
+    await wait_for(lambda: r.decisions())
+    await r.send({"event": "proxy_result", "call_id": "c1", "status": "ok", "summary": "wrote {'password': 'hunter2-SECRET'} ok"})
+    rec = logged(st, "call_result")[0][3]
+    assert rec["summary"] == "wrote {'password': '[REDACTED]'} ok" and rec["summary_len"] == len("wrote {'password': 'hunter2-SECRET'} ok")
 
 
 async def test_policy_and_log_together(monkeypatch, tmp_path):
