@@ -50,7 +50,7 @@ MUTANTS = [
     ("H4 /health leaks the fallback message", "server/health_view.py", 'out["last_session_fallback"] = _fallback_head(out["last_session_fallback"])', 'pass', 1),
     ("U1 union ignores the action-similarity member", "server/proposal_monitor.py", 'return act_alerts[:1]', 'return []', 1),
     # MCP proxy + inbox (DECISIONS.md D16)
-    ("X1 inbox auto-approves without a working monitor", "server/inbox_hub.py", "if auto and working and not alerts:", "if auto and not alerts:", 1),
+    ("X1 inbox auto-approves without a working monitor", "server/inbox_hub.py", "elif auto and working and not alerts and not secrets_used:", "elif auto and not alerts and not secrets_used:", 1),
     ("X2 inbox ignores the monitor error counter", "server/inbox_hub.py", "if proposal_monitor.error_count() > errors_before:", "if False:", 1),
     ("X3 inbox sockets work without a token", "server/main.py", 'if not os.environ.get("SENTINEL_WS_TOKEN"):', "if False:", 1),
     ("X4 inbox accepts any decision value", "server/inbox_hub.py", 'or decision not in ("approve", "deny")):', "or False):", 1),
