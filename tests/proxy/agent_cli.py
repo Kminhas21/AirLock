@@ -19,7 +19,9 @@ ROOT = Path(__file__).resolve().parents[2]
 def _params(cfg: str) -> StdioServerParameters:
     return StdioServerParameters(command=sys.executable, args=["-m", "sentinel_proxy", "--config", cfg], cwd=str(ROOT),
                                  env={"SENTINEL_PROXY_CONNECT_WAIT_S": "2", "PYTHONUNBUFFERED": "1",
-                                      **({"SENTINEL_WS_TOKEN": os.environ["SENTINEL_WS_TOKEN"]} if os.environ.get("SENTINEL_WS_TOKEN") else {})})
+                                      **({"SENTINEL_WS_TOKEN": os.environ["SENTINEL_WS_TOKEN"]} if os.environ.get("SENTINEL_WS_TOKEN") else {}),
+                                      # host variables the proxy may read secrets from (config `secrets.*.from_env`), named by the test harness
+                                      **{n: os.environ[n] for n in filter(None, os.environ.get("SENTINEL_AGENT_PASSTHROUGH", "").split(",")) if n in os.environ}})
 
 
 def _out(res) -> str:

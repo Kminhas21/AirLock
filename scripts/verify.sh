@@ -66,6 +66,8 @@ if [ -d frontend/node_modules ]; then
     # operator UI (DECISIONS.md D20): deny with a reason, why/what-so-far evidence, standing rule through the two-step confirm, in a real browser
     OPPOL="$TMPD/operator_policy.json"
     run "browser operator UI (reason reaches the agent, evidence panels, standing rule applies to a new session)" bash -c "echo '{\"version\":1,\"default\":\"ask\",\"rules\":[]}' > $OPPOL && cd frontend && OPERATOR_STAGE=1 INBOX_TOKEN=gate-inbox-token SENTINEL_MONITOR=action_sim SENTINEL_POLICY=$OPPOL SENTINEL_POLICY_WRITABLE=1 npx playwright test operator"
+    # enforcement boundary (DECISIONS.md D21): Landlock + network-namespace sandboxed per-call downstream with a just-in-time secret, boundary chips and the credentials warning in a real browser
+    run "browser boundary (sandbox chips, credentials warning, unsandboxed flagged)" bash -c "cd frontend && BOUNDARY_STAGE=1 INBOX_TOKEN=gate-inbox-token SENTINEL_MONITOR=action_sim npx playwright test boundary"
   else
     echo "--- FAIL: no Chromium at \${CHROMIUM_PATH:-/opt/pw-browsers/chromium}; set CHROMIUM_PATH"; fail=1
   fi

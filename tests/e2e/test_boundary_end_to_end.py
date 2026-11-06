@@ -140,21 +140,15 @@ async def test_boundary_secrets_and_enforcement_end_to_end(tmp_path, backend):
             assert "E2E_HOST_SECRET" not in r["env_names"], "the host variable the secret came from is not forwarded"
             assert set(r["env_names"]) - {"LC_CTYPE"} == {"API_TOKEN", "HOME", "LANG", "PATH", "TMPDIR"}, r["env_names"]   # nothing else of the proxy's environment
 
-            # ...but no other tool ever sees it, and the sandbox refuses writes outside and any network
-            t = asyncio.create_task(a.call_tool("try_write", {"path": str(tmp_path / "outside.txt")}))
-            p = await next_event(u, "inbox_pending", session_id="bnd-1")
-            assert p["secrets_used"] == [] and p["tool"] == "try_write"
-            await decide(u, p, "approve")
-            assert out(await asyncio.wait_for(t, 60))["write"].startswith("err:")
-            assert not (tmp_path / "outside.txt").exists()
-            t = asyncio.create_task(a.call_tool("try_write", {"path": str(allowed / "inside.txt")}))
-            p = await next_event(u, "inbox_pending", session_id="bnd-1")
-            await decide(u, p, "approve")
-            assert out(await asyncio.wait_for(t, 60))["write"] == "ok" and (allowed / "inside.txt").exists()
-            t = asyncio.create_task(a.call_tool("try_net", {"port": lport}))
-            p = await next_event(u, "inbox_pending", session_id="bnd-1")
-            await decide(u, p, "approve")
-            assert out(await asyncio.wait_for(t, 60))["net"].startswith("err:")
+            # ...but no other tool ever sees it. These tools carry no credentials, so the proxy's auto_approve (and a working monitor) lets them run without a click
+            res = out(await asyncio.wait_for(a.call_tool("try_write", {"path": str(tmp_path / "outside.txt")}), 60))
+            assert res["write"].startswith("err:") and not (tmp_path / "outside.txt").exists()      # the sandbox refuses a write outside its folder
+            r1 = await next_event(u, "inbox_resolved", session_id="bnd-1", reason="auto")
+            assert r1["decision"] == "approve"
+            res = out(await asyncio.wait_for(a.call_tool("try_write", {"path": str(allowed / "inside.txt")}), 60))
+            assert res["write"] == "ok" and (allowed / "inside.txt").exists()                        # ...and allows the one folder it was given
+            res = out(await asyncio.wait_for(a.call_tool("try_net", {"port": lport}), 60))
+            assert res["net"].startswith("err:")                                                     # no network at all, not even loopback
             listener.close()
             t = asyncio.create_task(a.call_tool("whoami_env", {"secret_var": "API_TOKEN"}))
             p = await next_event(u, "inbox_pending", session_id="bnd-1")

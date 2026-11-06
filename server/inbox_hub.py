@@ -494,7 +494,10 @@ class InboxHub:
         if not await conn.send({"event": "hello_ack", "session_id": sid}):
             await self.proxy_closed(session)
             return None
-        self._spawn(self._broadcast({"event": "inbox_session", "session_id": sid, "state": "open"}))
+        # a UI that is already open learns the servers and the boundary from this event (the snapshot only reaches UIs that connect later):
+        # without them a sandboxed session would be displayed as unsandboxed
+        self._spawn(self._broadcast({"event": "inbox_session", "session_id": sid, "state": "open",
+                                     "servers": session.servers, "boundary": session.boundary}))
         return session
 
     def _hello_payload(self, session: "ProxySession") -> dict:
