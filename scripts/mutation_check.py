@@ -89,7 +89,8 @@ MUTANTS = [
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.
 FRONTEND_MUTANTS = [
     ("F1 drawer shows the raw (multi-line) tool name", "frontend/src/components/NodeDetail.tsx", "singleLine(data.toolName)", "String(data.toolName)", 1),
-    ("F2 drawer colours drift against the old 2.5", "frontend/src/components/NodeDetail.tsx", "driftPoint.mahalanobisDistance > DRIFT_THRESHOLD", "driftPoint.mahalanobisDistance > 2.5", 1),
+    ("F2 drawer colours drift against the old 2.5", "frontend/src/components/NodeDetail.tsx", "driftPoint.mahalanobisDistance > pointThreshold(driftPoint.threshold)", "driftPoint.mahalanobisDistance > 2.5", 1),
+    ("F7 the UI ignores the threshold carried by the event", "frontend/src/lib/drift.ts", "threshold > 0 ? threshold : DRIFT_THRESHOLD", "threshold > 0 ? DRIFT_THRESHOLD : DRIFT_THRESHOLD", 1),
     ("F3 sanitiser removes nothing", "frontend/src/lib/safeText.ts", '.replace(UNSAFE, "")', '.replace(UNSAFE, "$&")', 1),
     ("F5 the standing-rule frame is built without confirm=true semantics (unknown verdicts are offered)", "frontend/src/lib/inboxView.ts", "confirm: true as const", "confirm: false as unknown as true", 1),
     ("F6 the UI offers standing rules although the hub says it is not writable", "frontend/src/lib/inboxRoute.ts", "policy_writable: isRec(event.capabilities) && event.capabilities.policy_writable === true,", "policy_writable: true,", 1),
