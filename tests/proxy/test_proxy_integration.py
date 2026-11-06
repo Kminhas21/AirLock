@@ -521,3 +521,35 @@ async def test_unknown_reason_still_maps_to_invalid(tmp_path, backend):
     async with agent(cfg) as s:
         res = await s.call_tool("echo", {})
     assert text(res) == "Denied by SENTINEL: invalid"
+
+
+async def test_log_unavailable_deny_text(tmp_path, backend):
+    async def d(ws, f):
+        await backend.reply(ws, f, "deny", "log_unavailable")
+    backend.on_call = d
+    cfg, log = make_config(tmp_path, backend.url)
+    async with agent(cfg) as s:
+        res = await s.call_tool("write_file", {})
+    assert res.is_error and text(res) == "Denied by SENTINEL: log_unavailable" and downstream_calls(log) == []
+
+
+async def test_hello_reject_log_unavailable_first_connect_exits_3(tmp_path, backend):
+    backend.hello_reply = "reject:log_unavailable"
+    cfg, _ = make_config(tmp_path, backend.url)
+    code, err, out = await run_proxy_exit(cfg)
+    assert code == 3 and "log_unavailable" in err and out == ""
+
+
+async def test_hello_reject_log_unavailable_after_connect_retries(tmp_path, backend):
+    cfg, log = make_config(tmp_path, backend.url)
+    async with agent(cfg) as s:
+        await backend.wait_for("proxy_hello")
+        backend.hello_reply = "reject:log_unavailable"
+        await backend.kick()
+        await backend.wait_for("proxy_hello", n=2, timeout=15)  # rejected reconnect attempt
+        res = await s.call_tool("echo", {})
+        assert res.is_error  # fail closed while the hub has no log
+        backend.hello_reply = "ack"
+        await backend.wait_for("proxy_hello", n=3, timeout=20)
+        res = await s.call_tool("echo", {"x": 1})
+        assert not res.is_error  # proxy survived and recovered

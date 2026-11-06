@@ -131,7 +131,11 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
   const cls = approved ? "approve" : cancelled ? "cancelled" : "deny";
   const text = policy
     ? `${approved ? "auto-allowed" : "denied"} by ${rule ? `rule ${rule}` : "policy"}`
-    : approved
+    : !approved && item.reason === "restart"
+      ? "DENIED (backend restarted)"
+      : !approved && item.reason === "log_unavailable"
+        ? "DENIED (log unavailable)"
+        : approved
       ? "APPROVED"
       : cancelled
         ? "CANCELLED"
@@ -144,6 +148,11 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
       data-rule-id={policy && rule ? rule : undefined}
     >
       <span className={`inbox-decision ${policy ? "policy " : ""}${cls}`}>{text}</span>
+      {item.history && (
+        <span className="inbox-history" data-testid="inbox-history">
+          history
+        </span>
+      )}
       <span className="inbox-tool">{singleLine(item.tool, MAX_TOOL_NAME) || "(unknown tool)"}</span>
       {item.reason && <span className="inbox-reason">{singleLine(item.reason)}</span>}
       {item.result && (

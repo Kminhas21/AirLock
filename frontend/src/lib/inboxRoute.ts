@@ -51,6 +51,10 @@ export interface PendingCall {
 }
 
 export interface ResolvedCall {
+  /** True for items loaded from the durable event log (inbox_snapshot.recent), not resolved during this page's life. */
+  history: boolean;
+  /** Unix seconds from the log (history items only). */
+  ts: number | null;
   rule_id: string | null;
   policy_digest: string | null;
   session_id: string;
@@ -83,6 +87,51 @@ const num = (v: unknown): number | null => (typeof v === "number" && Number.isFi
 function label(v: unknown, max: number): string | null {
   if (typeof v !== "string") return null;
   return singleLine(v, max) || null;
+}
+
+/** One entry of inbox_snapshot.recent (durable log). Every string is hostile: single line, capped. */
+function parseRecent(v: unknown): ResolvedCall | null {
+  if (!isRec(v)) return null;
+  const session_id = id(v.session_id);
+  const call_id = id(v.call_id);
+  if (session_id === null || call_id === null) return null;
+  const reason = typeof v.reason === "string" ? singleLine(v.reason, 40) : "";
+  // only the exact string "approve" approves; restart / log_unavailable are always denials
+  const approved = v.decision === "approve" && reason !== "restart" && reason !== "log_unavailable";
+  return {
+    history: true,
+    ts: num(v.ts),
+    rule_id: label(v.rule_id, MAX_RULE_ID),
+    policy_digest: null,
+    session_id,
+    call_id,
+    server: typeof v.server === "string" ? singleLine(v.server, 120) : "",
+    tool: typeof v.tool === "string" ? singleLine(v.tool, 200) : "",
+    decision: approved ? "approve" : "deny",
+    reason,
+    result: null,
+  };
+}
+
+/** Live items first (newest first), then the log's history (newest first), de-duplicated by session_id+call_id, capped. */
+function mergeHistory(known: ResolvedCall[], recent: unknown): ResolvedCall[] {
+  if (!Array.isArray(recent)) return known;
+  const live = known.filter((r) => !r.history);
+  const seen = new Set(live.map((r) => callKey(r.session_id, r.call_id)));
+  const out = [...live];
+  const add = (r: ResolvedCall) => {
+    const k = callKey(r.session_id, r.call_id);
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(r);
+  };
+  for (const e of recent.slice(0, MAX_RESOLVED)) {
+    const r = parseRecent(e);
+    if (r) add(r);
+  }
+  // history loaded by an earlier snapshot that this one no longer lists is still history
+  for (const r of known) if (r.history) add(r);
+  return out.slice(0, MAX_RESOLVED);
 }
 
 function parseAlert(v: unknown): InboxAlert | null {
@@ -168,7 +217,7 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
         }
       }
       // snapshot order is oldest first; show newest first
-      return { sessions, pending: pending.reverse().slice(0, MAX_PENDING), resolved: state.resolved };
+      return { sessions, pending: pending.reverse().slice(0, MAX_PENDING), resolved: mergeHistory(state.resolved, event.recent) };
     }
     case "inbox_pending": {
       const c = parsePending(event, now);
@@ -199,6 +248,8 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
       if (session_id === null || call_id === null) return state;
       const prior = state.pending.find((p) => sameCall(p, session_id, call_id));
       const item: ResolvedCall = {
+        history: false,
+        ts: null,
         rule_id: label(event.rule_id, MAX_RULE_ID) ?? prior?.rule_id ?? null,
         policy_digest: label(event.policy_digest, MAX_DIGEST) ?? prior?.policy_digest ?? null,
         session_id,

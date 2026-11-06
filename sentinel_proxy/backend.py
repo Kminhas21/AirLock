@@ -12,7 +12,7 @@ from websockets.asyncio.client import connect
 
 from sentinel_proxy.config import strip_query
 
-_KNOWN_REASONS = {"human", "auto", "policy", "timeout", "invalid", "disconnected", "duplicate"}
+_KNOWN_REASONS = {"human", "auto", "policy", "log_unavailable", "timeout", "invalid", "disconnected", "duplicate"}
 UNREACHABLE = "SENTINEL backend unreachable"
 LOST = "SENTINEL backend connection lost"
 
@@ -60,9 +60,9 @@ class BackendLink:
                     ev = first.get("event") if first else None
                     if ev == "hello_reject":
                         reason = str(first.get("reason", "unknown"))[:80]
-                        if reason == "duplicate_session_id" and self._ever_connected:
-                            log("hello rejected (duplicate_session_id) after a reconnect; retrying")
-                            raise ConnectionError("duplicate session on reconnect")
+                        if reason in ("duplicate_session_id", "log_unavailable") and self._ever_connected:
+                            log(f"hello rejected ({reason}) after a reconnect; retrying")
+                            raise ConnectionError(f"hello rejected on reconnect: {reason}")
                         self.fatal_reason = f"backend rejected hello: {reason}"
                         self.fatal.set()
                         return

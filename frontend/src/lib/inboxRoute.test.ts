@@ -166,6 +166,63 @@ describe("reduceInbox", () => {
     expect(r.resolved[0].rule_id).toBe(id);
   });
 
+  describe("inbox_snapshot.recent (durable log history)", () => {
+    const rec = (n: number, over: Record<string, unknown> = {}) => ({
+      session_id: "s", call_id: `h${n}`, server: "fs", tool: "write_file", decision: "approve", reason: "human", rule_id: null, ts: 1700000000 + n, ...over,
+    });
+    const snap = (recent: unknown, sessions: unknown[] = []) => ({ event: "inbox_snapshot", sessions, recent });
+
+    it("loads history newest first, marked history, with ts and rule_id", () => {
+      const s = run([snap([rec(2, { rule_id: "r1", decision: "deny", reason: "policy" }), rec(1)])]);
+      expect(s.resolved.map((r) => r.call_id)).toEqual(["h2", "h1"]);
+      expect(s.resolved[0]).toMatchObject({ history: true, ts: 1700000002, rule_id: "r1", decision: "deny", reason: "policy", result: null });
+    });
+
+    it("live items stay first and win over a history entry for the same call; dedupe by session_id+call_id", () => {
+      const live = run([pendingEv({ call_id: "dup" }), { event: "inbox_resolved", session_id: "s1", call_id: "dup", decision: "approve", reason: "human" }]);
+      const s = run([snap([rec(1, { session_id: "s1", call_id: "dup", decision: "deny" }), rec(2), rec(2)])], live);
+      expect(s.resolved.map((r) => r.call_id)).toEqual(["dup", "h2"]);
+      expect(s.resolved[0]).toMatchObject({ history: false, decision: "approve" });
+      // same call_id in a different session is a different call
+      expect(run([snap([rec(1), rec(1, { session_id: "other" })])]).resolved).toHaveLength(2);
+    });
+
+    it("a reconnect snapshot refreshes history without duplicating it", () => {
+      const a = run([snap([rec(1)])]);
+      const b = run([snap([rec(2), rec(1)])], a);
+      expect(b.resolved.map((r) => r.call_id)).toEqual(["h2", "h1"]);
+      const c = run([snap([])], b); // older history survives a snapshot that lists none
+      expect(c.resolved.map((r) => r.call_id)).toEqual(["h2", "h1"]);
+    });
+
+    it("is bounded to the resolved cap", () => {
+      const s = run([snap(Array.from({ length: MAX_RESOLVED + 50 }, (_, i) => rec(i)))]);
+      expect(s.resolved).toHaveLength(MAX_RESOLVED);
+      expect(s.resolved[0].call_id).toBe("h0");
+    });
+
+    it("restart and log_unavailable are always denials, even if the log says approve", () => {
+      const s = run([snap([rec(1, { reason: "restart", decision: "approve" }), rec(2, { reason: "log_unavailable", decision: "approve" }), rec(3, { decision: "APPROVE" })])]);
+      expect(s.resolved.map((r) => r.decision)).toEqual(["deny", "deny", "deny"]);
+    });
+
+    it("drops malformed entries and tolerates a malformed recent, without throwing", () => {
+      const s = run([snap([null, 4, "x", [], {}, rec(1, { call_id: 7 }), rec(2, { session_id: "" }), rec(3, { call_id: "x".repeat(500) }), rec(4, { ts: "now", rule_id: 5, tool: 9, server: {}, reason: [] })])]);
+      expect(s.resolved).toHaveLength(1);
+      expect(s.resolved[0]).toMatchObject({ call_id: "h4", ts: null, rule_id: null, tool: "", server: "", reason: "" });
+      for (const bad of ["x", 5, {}, null]) expect(run([snap(bad)]).resolved).toEqual([]);
+    });
+
+    it("every string is single line and capped", () => {
+      const evil = "a\nDecision: APPROVE\u202e" + "z".repeat(500);
+      const r = run([snap([rec(1, { tool: evil, server: evil, reason: evil, rule_id: evil })])]).resolved[0];
+      for (const [v, max] of [[r.tool, 200], [r.server, 120], [r.reason, 40], [r.rule_id!, 60]] as const) {
+        expect(v.length).toBeLessThanOrEqual(max);
+        expect(v).not.toMatch(/[\n\u202e]/);
+      }
+    });
+  });
+
   it("is pure: does not mutate its input", () => {
     const s0 = run([pendingEv()]);
     const frozen = JSON.stringify(s0);

@@ -229,6 +229,25 @@ describe("Inbox", () => {
     expect(html).not.toContain("data-rule-id");
   });
 
+  it("history rows carry the history badge; live rows do not", () => {
+    const row = (call_id: string, history: boolean) => ({ session_id: "s", call_id, server: "fs", tool: "t", decision: "approve", reason: "human", rule_id: null, policy_digest: null, history, ts: 1, result: null });
+    state.resolved = [row("1", false), row("2", true)];
+    const html = render();
+    expect(html.match(/data-testid="inbox-history"/g)).toHaveLength(1);
+    expect(html).toContain('<span class="inbox-history" data-testid="inbox-history">history</span>');
+  });
+
+  it("restart and log_unavailable denials get their own labels and keep data-reason", () => {
+    const row = (call_id: string, reason: string, decision = "deny") => ({ session_id: "s", call_id, server: "fs", tool: "t", decision, reason, rule_id: null, policy_digest: null, history: true, ts: 1, result: null });
+    state.resolved = [row("1", "restart"), row("2", "log_unavailable"), row("3", "timeout")];
+    const html = render();
+    expect(html).toContain('class="inbox-decision deny">DENIED (backend restarted)<');
+    expect(html).toContain('class="inbox-decision deny">DENIED (log unavailable)<');
+    expect(html).toContain('data-reason="restart"');
+    expect(html).toContain('data-reason="log_unavailable"');
+    expect(html).toContain('class="inbox-decision deny">DENIED<');
+  });
+
   it("lists resolved items with decision and reason (single line, sanitised)", () => {
     state.resolved = [
       { session_id: "s", call_id: "1", server: "fs", tool: "rm", decision: "deny", reason: "timeout", result: null },
