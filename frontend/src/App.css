@@ -709,3 +709,14 @@
 .inbox-boundary-chip.unsandboxed { color: #fecaca; border-color: #ef4444; background: rgba(239, 68, 68, 0.2); }
 .inbox-boundary-chip.weak { color: #fde68a; border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); }
 .inbox-secrets { margin-bottom: 8px; padding: 10px 12px; border: 2px solid #f59e0b; border-radius: 6px; background: rgba(245, 158, 11, 0.18); color: #fde68a; font-weight: 700; font-size: 13px; overflow-wrap: anywhere; }
+
+/* ===== IDENTITY ===== */
+.inbox-identity { margin-left: auto; font-size: 12px; font-family: ui-monospace, monospace; color: #9ca3af; overflow-wrap: anywhere; }
+.inbox-signout { background: transparent; border: 1px solid #4b5563; border-radius: 4px; color: #e5e7eb; font-size: 11px; padding: 3px 8px; cursor: pointer; }
+.inbox-readonly { margin: 8px 0; padding: 8px 12px; border: 1px solid #6b7280; border-radius: 6px; background: rgba(107, 114, 128, 0.2); font-size: 13px; font-weight: 600; }
+.inbox-forbidden { margin: 8px 0; padding: 8px 12px; border: 1px solid #ef4444; border-radius: 6px; background: rgba(239, 68, 68, 0.12); font-size: 13px; }
+.inbox-escalated { font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 10px; background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid #f59e0b; }
+.inbox-age { font-family: ui-monospace, monospace; color: #f59e0b; }
+.inbox-operator { font-size: 12px; color: #9ca3af; overflow-wrap: anywhere; }
+.inbox-signin { display: flex; flex-direction: column; gap: 8px; max-width: 420px; margin-top: 16px; }
+.inbox-signin-error { font-size: 13px; color: #fca5a5; }

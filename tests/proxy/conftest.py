@@ -22,6 +22,7 @@ class FakeBackend:
         self.hello_reply = "ack"  # "ack" | "reject:<reason>" | "silent"
         self.on_call = self.approve
         self.conns: list = []
+        self.handshakes: list[dict] = []  # {'path':..., 'auth':...} per connection
         self.url = ""
         self._server = None
 
@@ -36,6 +37,7 @@ class FakeBackend:
 
     async def handler(self, ws):
         self.conns.append(ws)
+        self.handshakes.append({"path": ws.request.path, "auth": ws.request.headers.get("Authorization")})
         try:
             async for raw in ws:
                 f = json.loads(raw)

@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from websockets.asyncio.client import connect
+from websockets.exceptions import ConnectionClosed, InvalidStatus
 
 from sentinel_proxy.config import clean_note, strip_query
 
@@ -17,8 +18,23 @@ UNREACHABLE = "SENTINEL backend unreachable"
 LOST = "SENTINEL backend connection lost"
 
 
+_SECRETS: set[str] = set()
+
+
+def register_secret(value: str | None) -> None:
+    """Values that must never appear on stderr / in exceptions we print (credentials)."""
+    if value:
+        _SECRETS.add(value)
+
+
+def redact(text: str) -> str:
+    for v in sorted(_SECRETS, key=len, reverse=True):
+        text = text.replace(v, "[REDACTED]")
+    return text
+
+
 def log(msg: str) -> None:
-    print(f"[sentinel-proxy] {msg}", file=sys.stderr, flush=True)
+    print(f"[sentinel-proxy] {redact(msg)}", file=sys.stderr, flush=True)
 
 
 @dataclass(frozen=True)
@@ -29,7 +45,13 @@ class Decision:
 
 
 class BackendLink:
-    def __init__(self, url: str, hello: dict[str, Any], *, call_timeout_s: float = 330.0):
+    def __init__(self, url: str, hello: dict[str, Any], *, call_timeout_s: float = 330.0, token: str | None = None):
+        self._headers = {"Authorization": f"Bearer {token}"} if token else None
+        register_secret(token)
+        if "?" in url:  # a legacy ?token= in the URL is a credential too
+            from urllib.parse import parse_qs
+            for v in parse_qs(url.split("?", 1)[1]).get("token", []):
+                register_secret(v)
         self._url = url
         self._hello = hello
         self._call_timeout = call_timeout_s
@@ -55,12 +77,12 @@ class BackendLink:
         delay = 0.5
         while not self.fatal.is_set():
             try:
-                async with connect(self._url, open_timeout=5, max_size=1 << 20) as ws:
+                async with connect(self._url, open_timeout=5, max_size=1 << 20, additional_headers=self._headers) as ws:
                     await ws.send(json.dumps(self._hello))
                     first = _parse(await asyncio.wait_for(ws.recv(), 10))
                     ev = first.get("event") if first else None
                     if ev == "hello_reject":
-                        reason = str(first.get("reason", "unknown"))[:80]
+                        reason = redact(str(first.get("reason", "unknown")))[:80]
                         if reason in ("duplicate_session_id", "log_unavailable") and self._ever_connected:
                             log(f"hello rejected ({reason}) after a reconnect; retrying")
                             raise ConnectionError(f"hello rejected on reconnect: {reason}")
@@ -78,11 +100,25 @@ class BackendLink:
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # connection refused, dropped, timeout, bad frame...
+                if not self._ever_connected and self._is_auth_failure(e):
+                    self.fatal_reason = ("backend refused the connection (unauthorized: close code 1008 / HTTP 401-403); "
+                                         "check SENTINEL_AGENT_TOKEN and the proxy's allowed origin")
+                    self.fatal.set()
+                    return
                 log(f"backend link down: {type(e).__name__}: {e}")
             finally:
                 self._drop()
             await asyncio.sleep(delay)
             delay = min(delay * 2, 10.0)
+
+    @staticmethod
+    def _is_auth_failure(e: BaseException) -> bool:
+        if isinstance(e, ConnectionClosed):
+            rcvd = e.rcvd
+            return rcvd is not None and rcvd.code == 1008
+        if isinstance(e, InvalidStatus):
+            return e.response.status_code in (401, 403)
+        return False
 
     def _drop(self) -> None:
         self._connected = False

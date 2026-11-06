@@ -35,8 +35,11 @@ async def serve(cfg) -> int:
             "auto_approve": list(cfg.auto_approve),
             "boundary": proxy.boundary(),
         }
-        url = with_token(cfg.backend, os.environ.get("SENTINEL_WS_TOKEN"))
-        link = BackendLink(url, hello, call_timeout_s=gate_timeout_s())
+        agent_token = os.environ.get("SENTINEL_AGENT_TOKEN") or None
+        legacy_token = os.environ.get("SENTINEL_WS_TOKEN") or None
+        # Credentials travel in the Authorization header; the legacy ?token= is used ONLY when just the legacy token is set.
+        url = cfg.backend if agent_token else with_token(cfg.backend, legacy_token)
+        link = BackendLink(url, hello, call_timeout_s=gate_timeout_s(), token=agent_token or legacy_token)
         proxy.link = link
         link_task = asyncio.create_task(link.run())
         try:
@@ -57,8 +60,13 @@ async def serve(cfg) -> int:
                 done, _ = await asyncio.wait({srv_task, fatal_task}, return_when=asyncio.FIRST_COMPLETED)
                 if fatal_task in done:
                     print(f"sentinel-proxy: {link.fatal_reason}", file=sys.stderr)
-                    code = 3
-                    srv_task.cancel()
+                    # The stdio reader thread may be blocked on stdin forever: stop the children cleanly, then leave hard.
+                    try:
+                        await asyncio.wait_for(stack.aclose(), 15)
+                    except Exception as e:  # noqa: BLE001 - leaving anyway
+                        log(f"downstream shutdown incomplete: {type(e).__name__}")
+                    sys.stderr.flush()
+                    os._exit(3)
                 else:
                     fatal_task.cancel()
                 try:

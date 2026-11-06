@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import { useInboxStore } from "./inboxStore";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { FORBIDDEN_TTL_MS, useInboxStore } from "./inboxStore";
 
 const pending = { event: "inbox_pending", session_id: "s1", call_id: "c1", server: "fs", tool: "t", args: {}, auto: false, alerts: [], deadline_s: 30 };
 
@@ -66,7 +66,37 @@ describe("inboxStore", () => {
     expect(st().ruleResult).toBeNull();
     st().setConnection("disconnected");
     expect(st().capabilities.policy_writable).toBe(false);
-    expect(useInboxStore.getState().capabilities).toEqual({ policy_writable: false });
+    expect(useInboxStore.getState().capabilities).toEqual({ policy_writable: false, can_decide: true });
+  });
+
+  it("inbox_forbidden shows a notice that auto-clears; a newer notice restarts the timer", () => {
+    vi.useFakeTimers();
+    try {
+      const st = () => useInboxStore.getState();
+      st().handleEvent({ event: "inbox_forbidden", action: "decide", reason: "role" });
+      expect(st().forbidden).toEqual({ action: "decide", reason: "role" });
+      vi.advanceTimersByTime(FORBIDDEN_TTL_MS - 100);
+      st().handleEvent({ event: "inbox_forbidden", action: "rules", reason: "server" });
+      vi.advanceTimersByTime(200);
+      expect(st().forbidden).toEqual({ action: "rules", reason: "server" });
+      vi.advanceTimersByTime(FORBIDDEN_TTL_MS);
+      expect(st().forbidden).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("auth: setAuthRequired, auth_ok stores the principal, a connection change clears the principal but not the sign-in requirement", () => {
+    const st = () => useInboxStore.getState();
+    st().handleEvent({ event: "auth_ok", principal: { id: "alice", tenant: "acme", role: "admin" } });
+    expect(st().principal?.id).toBe("alice");
+    st().setConnection("disconnected");
+    expect(st().principal).toBeNull();
+    st().setAuthRequired("throttled");
+    st().setConnection("disconnected");
+    expect(st().auth).toEqual({ status: "required", reason: "throttled" });
+    st().reset();
+    expect(st().auth.status).toBe("none");
   });
 
   it("setConnection and reset", () => {

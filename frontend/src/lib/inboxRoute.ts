@@ -94,12 +94,44 @@ export interface RuleResult {
 
 export interface InboxCapabilities {
   policy_writable: boolean;
+  /** Role >= approver. A snapshot WITHOUT the key (legacy hub) means true; present means exactly true. */
+  can_decide: boolean;
 }
+
+export type Role = "viewer" | "approver" | "admin";
+
+export interface Principal {
+  id: string;
+  tenant: string | null;
+  role: Role | null;
+}
+
+export interface AuthState {
+  /** "required" = the hub wants a credential (sign-in panel); "ok" = authenticated or no auth in use. */
+  status: "none" | "required" | "ok";
+  reason: "unauthorized" | "throttled" | null;
+}
+
+export interface Forbidden {
+  action: "decide" | "rules" | "action";
+  reason: "role" | "server" | null;
+}
+
+export const DEFAULT_CAPABILITIES: InboxCapabilities = { policy_writable: false, can_decide: true };
+export const MAX_ESCALATION_LEVEL = 10;
 
 export const MAX_HISTORY = 10;
 export const MAX_EARLIER_DENIED = 5;
 
 export interface PendingCall {
+  agent_id: string | null;
+  tenant: string | null;
+  /** 0 = not escalated. */
+  escalation_level: number;
+  /** Age (seconds) the hub reported when it sent the event; null if absent. Live age = age_s + (now - received_at). */
+  age_s: number | null;
+  /** Local ms timestamp when this event was received. */
+  received_at: number;
   /** Credential names (env vars) this call will receive; shown as a warning before approving. */
   secrets_used: string[];
   session_summary: SessionSummary | null;
@@ -123,6 +155,8 @@ export interface PendingCall {
 }
 
 export interface ResolvedCall {
+  /** Operator id who decided (null for non-human resolutions). */
+  operator: string | null;
   /** The operator's note on a human denial (plain text, one line, <= 200). */
   note: string | null;
   /** True for items loaded from the durable event log (inbox_snapshot.recent), not resolved during this page's life. */
@@ -151,14 +185,21 @@ export interface InboxState {
   capabilities: InboxCapabilities;
   /** The last inbox_rule_result (global toast), or null. */
   ruleResult: RuleResult | null;
+  principal: Principal | null;
+  auth: AuthState;
+  /** The last inbox_forbidden notice (auto-cleared by the store), or null. */
+  forbidden: Forbidden | null;
 }
 
 export const initialInboxState: InboxState = {
   sessions: {},
   pending: [],
   resolved: [],
-  capabilities: { policy_writable: false },
+  capabilities: DEFAULT_CAPABILITIES,
   ruleResult: null,
+  principal: null,
+  auth: { status: "none", reason: null },
+  forbidden: null,
 };
 
 type Rec = Record<string, unknown>;
@@ -183,6 +224,7 @@ function parseRecent(v: unknown): ResolvedCall | null {
   // only the exact string "approve" approves; restart / log_unavailable are always denials
   const approved = v.decision === "approve" && reason !== "restart" && reason !== "log_unavailable";
   return {
+    operator: ident(v.operator),
     note: label(v.note, 200),
     history: true,
     ts: num(v.ts),
@@ -295,6 +337,21 @@ function parseBoundary(v: unknown): ServerBoundary[] | null {
   return out.length > 0 ? out : null;
 }
 
+const IDENT = /^[A-Za-z0-9._@-]{1,64}$/;
+const ident = (v: unknown): string | null => (typeof v === "string" && IDENT.test(v) ? v : null);
+const ROLES: ReadonlySet<string> = new Set(["viewer", "approver", "admin"]);
+
+function parsePrincipal(v: unknown): Principal | null {
+  if (!isRec(v)) return null;
+  const pid = ident(v.id);
+  if (pid === null) return null;
+  return { id: pid, tenant: ident(v.tenant), role: typeof v.role === "string" && ROLES.has(v.role) ? (v.role as Role) : null };
+}
+
+function level(v: unknown): number | null {
+  return typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_ESCALATION_LEVEL ? v : null;
+}
+
 function parseAlert(v: unknown): InboxAlert | null {
   if (!isRec(v)) return null;
   const message = str(v.message);
@@ -330,7 +387,13 @@ function parsePending(v: unknown, now: number, sessionFallback?: string): Pendin
   if (session_id === null || call_id === null || tool === null) return null;
   const d = num(v.deadline_s);
   const deadline_s = d !== null && d > 0 ? Math.min(d, MAX_DEADLINE_S) : DEFAULT_DEADLINE_S;
+  const age = num(v.age_s);
   return {
+    agent_id: ident(v.agent_id),
+    tenant: ident(v.tenant),
+    escalation_level: level(v.escalation_level) ?? 0,
+    age_s: age !== null && age >= 0 && age <= 10_000_000 ? age : null,
+    received_at: now,
     secrets_used: parseSecretNames(v.secrets_used),
     session_summary: parseSummary(v.session_summary),
     session_history: parseHistory(v.session_history, MAX_HISTORY),
@@ -388,8 +451,12 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
         resolved: mergeHistory(state.resolved, event.recent),
         capabilities: {
           policy_writable: isRec(event.capabilities) && event.capabilities.policy_writable === true,
+          can_decide: !isRec(event.capabilities) || !("can_decide" in event.capabilities) || event.capabilities.can_decide === true,
         },
         ruleResult: state.ruleResult,
+        principal: parsePrincipal(event.principal) ?? state.principal,
+        auth: { status: "ok", reason: null },
+        forbidden: state.forbidden,
       };
     }
     case "inbox_pending": {
@@ -421,6 +488,7 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
       if (session_id === null || call_id === null) return state;
       const prior = state.pending.find((p) => sameCall(p, session_id, call_id));
       const item: ResolvedCall = {
+        operator: ident(event.operator),
         note: label(event.note, 200),
         history: false,
         ts: null,
@@ -459,6 +527,29 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
       const ok = event.ok === true;
       const reason = typeof event.reason === "string" && RULE_REASONS.has(event.reason) ? (event.reason as RuleFailReason) : "unknown";
       return { ...state, ruleResult: { ok, rule_id: label(event.rule_id, MAX_RULE_ID), reason: ok ? "ok" : reason } };
+    }
+    case "auth_ok":
+      return { ...state, principal: parsePrincipal(event.principal), auth: { status: "ok", reason: null } };
+    case "auth_error":
+      return { ...state, principal: null, auth: { status: "required", reason: event.reason === "throttled" ? "throttled" : "unauthorized" } };
+    case "inbox_forbidden":
+      return {
+        ...state,
+        forbidden: {
+          action: event.action === "decide" || event.action === "rules" ? event.action : "action",
+          reason: event.reason === "role" || event.reason === "server" ? event.reason : null,
+        },
+      };
+    case "inbox_escalated": {
+      const session_id = id(event.session_id);
+      const call_id = id(event.call_id);
+      const lvl = level(event.level);
+      if (session_id === null || call_id === null || lvl === null) return state;
+      if (!state.pending.some((p) => sameCall(p, session_id, call_id))) return state;
+      return {
+        ...state,
+        pending: state.pending.map((p) => (sameCall(p, session_id, call_id) ? { ...p, escalation_level: Math.max(p.escalation_level, lvl) } : p)),
+      };
     }
     case "inbox_session": {
       const session_id = id(event.session_id);

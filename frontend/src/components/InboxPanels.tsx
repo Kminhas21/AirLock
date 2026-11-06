@@ -3,6 +3,7 @@
 // Class names are constants; the only dynamic style is a numeric percentage computed by lib/inboxView.scoreBar.
 
 import { useId, useState } from "react";
+import { signInErrorText } from "../lib/inboxView";
 import type { HistoryItem, InboxAlert, InboxSession, SessionSummary } from "../lib/inboxRoute";
 import { outcomeLabel, ruleRequestFrame, SCOPE_LABEL, scopesFor, scopeWords, scoreBar, type Scope, type Verdict } from "../lib/inboxView";
 import { singleLine, stripUnsafe } from "../lib/safeText";
@@ -233,5 +234,40 @@ export function BoundaryChips({ session }: { session: InboxSession }) {
         </span>
       ))}
     </div>
+  );
+}
+
+// ---------- Sign in ----------
+
+/** Shown when the hub wants a credential. The credential is handed to onSignIn (sent as the first WebSocket frame), never put in a URL. */
+export function SignInPanel({ reason, onSignIn }: { reason: "unauthorized" | "throttled" | null; onSignIn: (credential: string) => void }) {
+  const [token, setToken] = useState("");
+  const id = useId();
+  const error = signInErrorText(reason);
+  return (
+    <form
+      className="inbox-signin"
+      data-testid="inbox-signin"
+      onSubmit={(e) => {
+        e.preventDefault();
+        const t = token.trim();
+        if (!t) return;
+        setToken("");
+        onSignIn(t);
+      }}
+    >
+      <label htmlFor={id} className="detail-label">
+        Operator token or JWT
+      </label>
+      <input id={id} className="inbox-note-input" data-testid="inbox-signin-input" type="password" autoComplete="off" spellCheck={false} value={token} onChange={(e) => setToken(e.target.value)} />
+      {error && (
+        <div className="inbox-signin-error" data-testid="inbox-signin-error" role="alert">
+          {error}
+        </div>
+      )}
+      <button className="inbox-rule-btn confirm" data-testid="inbox-signin-submit" type="submit">
+        Sign in
+      </button>
+    </form>
   );
 }

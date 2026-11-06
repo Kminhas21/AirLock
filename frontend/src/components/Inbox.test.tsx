@@ -20,6 +20,11 @@ const call = (over: Record<string, unknown> = {}) => ({
   auto: false,
   alerts: [],
   secrets_used: [],
+  agent_id: null,
+  tenant: null,
+  escalation_level: 0,
+  age_s: null,
+  received_at: NOW,
   session_summary: null,
   session_history: [],
   earlier_denied: [],
@@ -39,7 +44,10 @@ beforeEach(() => {
   state.connection = "connected";
   state.snapshotReceived = true;
   state.notSent = {};
-  state.capabilities = { policy_writable: false };
+  state.capabilities = { policy_writable: false, can_decide: true };
+  state.principal = null;
+  state.auth = { status: "none", reason: null };
+  state.forbidden = null;
   state.ruleResult = null;
   state.clearRuleResult = () => {};
   marks.length = 0;
@@ -409,7 +417,7 @@ describe("Inbox", () => {
     it("standing-rule buttons are hidden unless policy_writable, shown (and enabled) when it is", () => {
       state.pending = [call()];
       expect(render()).not.toContain("inbox-standing");
-      state.capabilities = { policy_writable: true };
+      state.capabilities = { policy_writable: true, can_decide: true };
       const html = render();
       for (const v of ["allow", "deny", "ask"]) expect(html).toContain(`data-testid="inbox-rule-${v}"`);
       expect(html).toContain("Always allow like this");
@@ -430,6 +438,94 @@ describe("Inbox", () => {
       expect(html).toContain("Rule not added: a rule cannot be built");
       state.ruleResult = null;
       expect(render()).not.toContain("inbox-rule-toast");
+    });
+  });
+
+  describe("identity", () => {
+    const render2 = (props: Record<string, unknown> = {}) => renderToStaticMarkup(<Inbox onDecision={() => true} onRuleRequest={() => true} nowMs={NOW} {...props} />);
+
+    it("identity chip and Sign out (only with onSignOut)", () => {
+      state.principal = { id: "alice", tenant: "acme", role: "admin" };
+      let html = render2({ onSignOut: () => {} });
+      expect(html).toContain('<span class="inbox-identity" data-testid="inbox-identity">alice · acme · admin</span>');
+      expect(html).toContain('data-testid="inbox-signout"');
+      html = render2();
+      expect(html).toContain("inbox-identity");
+      expect(html).not.toContain("inbox-signout");
+      state.principal = null;
+      expect(render2({ onSignOut: () => {} })).not.toContain("inbox-identity");
+      expect(render2({ onSignOut: () => {} })).not.toContain("inbox-signout");
+    });
+
+    it("hostile / partial principal values are plain text", () => {
+      state.principal = { id: "bob", tenant: null, role: null };
+      expect(render2()).toContain("bob · - · unknown role");
+    });
+
+    it("sign-in panel appears when auth is required and sign-in is possible; password input, no cards", () => {
+      state.auth = { status: "required", reason: null };
+      state.pending = [call()];
+      const html = render2({ onSignIn: () => {} });
+      expect(html).toContain('data-testid="inbox-signin"');
+      expect(html).toContain("Operator token or JWT");
+      expect(html).toMatch(/<input[^>]*type="password"[^>]*data-testid="inbox-signin-input"|<input[^>]*data-testid="inbox-signin-input"[^>]*type="password"/);
+      expect(html).toContain('data-testid="inbox-signin-submit"');
+      expect(html).toContain(">Sign in<");
+      expect(html).not.toContain("inbox-signin-error");
+      expect(html).not.toContain("inbox-pending");
+      // legacy mode (no onSignIn): never shown
+      expect(render2()).not.toContain("inbox-signin");
+    });
+
+    it("sign-in error texts for unauthorized and throttled", () => {
+      state.auth = { status: "required", reason: "unauthorized" };
+      expect(render2({ onSignIn: () => {} })).toContain("Sign-in failed: the token was not accepted.");
+      state.auth = { status: "required", reason: "throttled" };
+      expect(render2({ onSignIn: () => {} })).toContain("Too many attempts");
+    });
+
+    it("viewer: read-only notice, cards stay visible, Approve/Deny disabled", () => {
+      state.capabilities = { policy_writable: false, can_decide: false };
+      state.pending = [call()];
+      const html = render2();
+      expect(html).toContain('data-testid="inbox-readonly"');
+      expect(html).toContain("Read-only: your role is viewer");
+      expect(html).toContain('data-testid="inbox-pending"');
+      expect(html.match(/disabled=""/g)).toHaveLength(2);
+      state.capabilities = { policy_writable: false, can_decide: true };
+      expect(render2()).not.toContain("inbox-readonly");
+      state.capabilities = { policy_writable: false, can_decide: false };
+      state.snapshotReceived = false;
+      expect(render2()).not.toContain("inbox-readonly");
+    });
+
+    it("forbidden notice texts: closed vocabulary, otherwise generic", () => {
+      state.forbidden = { action: "decide", reason: "role" };
+      expect(render2()).toContain("Not allowed: approve/deny (your role does not permit it)");
+      state.forbidden = { action: "rules", reason: "server" };
+      expect(render2()).toContain("Not allowed: standing rules (this server is outside your allowlist)");
+      state.forbidden = { action: "action", reason: null };
+      expect(render2()).toContain(">Not allowed: this action<");
+    });
+
+    it("pending card: agent, age counter from age_s plus elapsed, escalation badge", () => {
+      state.pending = [call({ agent_id: "ci-bot", age_s: 55, received_at: NOW - 10_000, escalation_level: 2 })];
+      const html = render2();
+      expect(html).toContain('data-testid="inbox-agent"');
+      expect(html).toContain("ci-bot");
+      expect(html).toContain('<span class="inbox-age" data-testid="inbox-age">waiting 1m 05s</span>');
+      expect(html).toContain('<span class="inbox-escalated" data-testid="inbox-escalated">Escalated (level 2)</span>');
+      state.pending = [call()];
+      const plain = render2();
+      for (const t of ["inbox-agent", "inbox-age", "inbox-escalated"]) expect(plain).not.toContain(t);
+    });
+
+    it("resolved rows show who decided", () => {
+      const row = (call_id: string, operator: string | null) => ({ session_id: "s", call_id, server: "", tool: "t", decision: "approve", reason: "human", operator, note: null, rule_id: null, policy_digest: null, history: false, ts: null, result: null });
+      state.resolved = [row("1", "alice"), row("2", null)];
+      const html = render2();
+      expect(html.match(/data-testid="inbox-operator"/g)).toHaveLength(1);
+      expect(html).toContain('<span class="inbox-operator" data-testid="inbox-operator">by alice</span>');
     });
   });
 });

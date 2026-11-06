@@ -9,9 +9,10 @@ import { useEffect, useId, useState } from "react";
 import { useInboxStore } from "../stores/inboxStore";
 import { callKey, MAX_PENDING_RENDERED, type InboxDecision, type PendingCall, type ResolvedCall } from "../lib/inboxRoute";
 import { panelView, singleLine } from "../lib/safeText";
-import { ruleToast, type Scope, type Verdict } from "../lib/inboxView";
+import { forbiddenText, ruleToast, type Scope, type Verdict } from "../lib/inboxView";
+import { formatAge, pendingAge } from "../lib/inboxAge";
 import { AgentText } from "./AgentText";
-import { BoundaryChips, SessionSoFar, StandingRules, WhyFlagged } from "./InboxPanels";
+import { BoundaryChips, SessionSoFar, SignInPanel, StandingRules, WhyFlagged } from "./InboxPanels";
 
 export interface InboxProps {
   /** Returns false when the decision could not be sent (socket not open). */
@@ -20,6 +21,10 @@ export interface InboxProps {
   onRuleRequest: (sessionId: string, callId: string, verdict: Verdict, scope: Scope) => boolean;
   /** Fixed clock for tests; the live view ticks once a second. */
   nowMs?: number;
+  /** Present only when sign-in is possible (identity mode): enables the Sign in panel. */
+  onSignIn?: (credential: string) => void;
+  /** Present only when signing out is possible (identity mode). */
+  onSignOut?: () => void;
 }
 
 /** Arguments are shown up to this many characters; beyond it Approve is disabled (a human must not approve unseen content). */
@@ -55,6 +60,7 @@ function PendingCard({
   const noteId = useId();
   const argsText = prettyArgs(call.args);
   const hiddenChars = panelView(argsText, MAX_ARGS_PANEL).hiddenChars;
+  const age = pendingAge(call.age_s, call.received_at, now);
   const left = Math.max(0, Math.ceil((call.deadline_at - now) / 1000));
   return (
     <li className="inbox-card" data-testid="inbox-pending">
@@ -63,6 +69,11 @@ function PendingCard({
           {singleLine(call.tool, MAX_TOOL_NAME)}
         </span>
         {call.auto && <span className="inbox-auto">auto</span>}
+        {call.escalation_level > 0 && (
+          <span className="inbox-escalated" data-testid="inbox-escalated">
+            Escalated (level {call.escalation_level})
+          </span>
+        )}
         {call.rule_id && (
           <span className="inbox-rule" data-testid="inbox-rule">
             held by rule {singleLine(call.rule_id, 60)}
@@ -75,6 +86,16 @@ function PendingCard({
       <div className="inbox-meta">
         <span className="detail-label">Server</span> <span>{singleLine(call.server) || "-"}</span>
         <span className="detail-label">Session</span> <span>{singleLine(call.session_id)}</span>
+        {call.agent_id && (
+          <span data-testid="inbox-agent">
+            <span className="detail-label">Agent:</span> {call.agent_id}
+          </span>
+        )}
+        {age !== null && (
+          <span className="inbox-age" data-testid="inbox-age">
+            waiting {formatAge(age)}
+          </span>
+        )}
       </div>
       {hiddenChars > 0 && (
         <div className="inbox-truncated" data-testid="inbox-truncated" role="alert">
@@ -169,6 +190,11 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
       data-rule-id={policy && rule ? rule : undefined}
     >
       <span className={`inbox-decision ${policy ? "policy " : ""}${cls}`}>{text}</span>
+      {item.operator && (
+        <span className="inbox-operator" data-testid="inbox-operator">
+          by {item.operator}
+        </span>
+      )}
       {item.history && (
         <span className="inbox-history" data-testid="inbox-history">
           history
@@ -190,7 +216,7 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
   );
 }
 
-export function Inbox({ onDecision, onRuleRequest, nowMs }: InboxProps) {
+export function Inbox({ onDecision, onRuleRequest, nowMs, onSignIn, onSignOut }: InboxProps) {
   const sessions = useInboxStore((s) => s.sessions);
   const pending = useInboxStore((s) => s.pending);
   const resolved = useInboxStore((s) => s.resolved);
@@ -199,6 +225,10 @@ export function Inbox({ onDecision, onRuleRequest, nowMs }: InboxProps) {
   const notSent = useInboxStore((s) => s.notSent);
   const markNotSent = useInboxStore((s) => s.markNotSent);
   const policyWritable = useInboxStore((s) => s.capabilities.policy_writable);
+  const canDecideRole = useInboxStore((s) => s.capabilities.can_decide);
+  const principal = useInboxStore((s) => s.principal);
+  const auth = useInboxStore((s) => s.auth);
+  const forbidden = useInboxStore((s) => s.forbidden);
   const ruleResult = useInboxStore((s) => s.ruleResult);
   const clearRuleResult = useInboxStore((s) => s.clearRuleResult);
 
@@ -209,6 +239,7 @@ export function Inbox({ onDecision, onRuleRequest, nowMs }: InboxProps) {
     return () => clearInterval(t);
   }, [nowMs]);
   const now = nowMs ?? tick;
+  const signInRequired = auth.status === "required" && onSignIn !== undefined;
 
   const sessionList = Object.values(sessions);
   const connLabel =
@@ -221,7 +252,33 @@ export function Inbox({ onDecision, onRuleRequest, nowMs }: InboxProps) {
         <span className="inbox-conn" data-testid="inbox-connection" data-state={connection}>
           {connLabel}
         </span>
+        {principal && (
+          <span className="inbox-identity" data-testid="inbox-identity">
+            {principal.id} · {principal.tenant ?? "-"} · {principal.role ?? "unknown role"}
+          </span>
+        )}
+        {principal && onSignOut && (
+          <button className="inbox-signout" data-testid="inbox-signout" onClick={onSignOut}>
+            Sign out
+          </button>
+        )}
       </div>
+
+      {signInRequired ? (
+        <SignInPanel reason={auth.reason} onSignIn={onSignIn!} />
+      ) : (
+        <>
+      {snapshotReceived && !canDecideRole && (
+        <div className="inbox-readonly" data-testid="inbox-readonly" role="status">
+          Read-only: your role is viewer
+        </div>
+      )}
+
+      {forbidden && (
+        <div className="inbox-forbidden" data-testid="inbox-forbidden" role="status">
+          {forbiddenText(forbidden)}
+        </div>
+      )}
 
       {ruleResult && (
         <div className={`inbox-toast ${ruleResult.ok ? "ok" : "err"}`} data-testid="inbox-rule-toast" role="status">
@@ -266,7 +323,7 @@ export function Inbox({ onDecision, onRuleRequest, nowMs }: InboxProps) {
                 <PendingCard
                   call={c}
                   now={now}
-                  canDecide={connection === "connected" && snapshotReceived}
+                  canDecide={connection === "connected" && snapshotReceived && canDecideRole}
                   notSent={key in notSent}
                   policyWritable={policyWritable}
                   onDecision={(d, n) => markNotSent(key, !onDecision(c.session_id, c.call_id, d, n))}
@@ -296,6 +353,8 @@ export function Inbox({ onDecision, onRuleRequest, nowMs }: InboxProps) {
           </ul>
         )}
       </section>
+        </>
+      )}
     </div>
   );
 }

@@ -337,6 +337,72 @@ describe("reduceInbox", () => {
     });
   });
 
+  describe("identity fields", () => {
+    it("pending agent_id/tenant must match the id pattern; escalation_level int 0..10; age_s finite >= 0", () => {
+      const p = run([pendingEv({ agent_id: "ci-bot", tenant: "acme", escalation_level: 2, age_s: 12.5 })]).pending[0];
+      expect(p).toMatchObject({ agent_id: "ci-bot", tenant: "acme", escalation_level: 2, age_s: 12.5, received_at: NOW });
+      for (const bad of ["a b", "x\ny", "", "a".repeat(65), "<b>", 5, null, {}, "\u202e"]) {
+        const q = run([pendingEv({ agent_id: bad, tenant: bad })]).pending[0];
+        expect([q.agent_id, q.tenant], String(bad)).toEqual([null, null]);
+      }
+      for (const bad of [-1, 11, 1.5, NaN, "2", null, undefined]) expect(run([pendingEv({ escalation_level: bad })]).pending[0].escalation_level).toBe(0);
+      for (const bad of [-1, NaN, Infinity, "3", null, 1e12]) expect(run([pendingEv({ age_s: bad })]).pending[0].age_s).toBeNull();
+    });
+
+    it("inbox_escalated raises the level of the matching pending call only; invalid events are ignored", () => {
+      const s0 = run([pendingEv(), pendingEv({ call_id: "c2" })]);
+      const s = run([{ event: "inbox_escalated", session_id: "s1", call_id: "c1", level: 2, after_s: 60 }], s0);
+      expect(s.pending.find((p) => p.call_id === "c1")!.escalation_level).toBe(2);
+      expect(s.pending.find((p) => p.call_id === "c2")!.escalation_level).toBe(0);
+      // never lowered
+      expect(run([{ event: "inbox_escalated", session_id: "s1", call_id: "c1", level: 1 }], s).pending.find((p) => p.call_id === "c1")!.escalation_level).toBe(2);
+      for (const bad of [{ level: 99 }, { level: -1 }, { level: 1.5 }, { level: "2" }, {}, { call_id: "nope", level: 1 }, { session_id: 5, level: 1 }])
+        expect(reduceInbox(s, { event: "inbox_escalated", session_id: "s1", call_id: "c1", ...bad }, NOW), JSON.stringify(bad)).toBe(s);
+    });
+
+    it("auth_ok and snapshot principal: id pattern, role closed vocabulary", () => {
+      const ok = run([{ event: "auth_ok", principal: { id: "alice@acme.io", tenant: "acme", role: "approver" } }]);
+      expect(ok.principal).toEqual({ id: "alice@acme.io", tenant: "acme", role: "approver" });
+      expect(ok.auth).toEqual({ status: "ok", reason: null });
+      expect(run([{ event: "auth_ok", principal: { id: "a", tenant: "t t", role: "root" } }]).principal).toEqual({ id: "a", tenant: null, role: null });
+      for (const bad of [undefined, null, 5, "x", [], {}, { id: "bad id" }, { id: "x\n" }, { id: 5 }]) expect(run([{ event: "auth_ok", principal: bad }]).principal, JSON.stringify(bad)).toBeNull();
+      const snap = run([{ event: "inbox_snapshot", sessions: [], principal: { id: "bob", tenant: "acme", role: "viewer" } }]);
+      expect(snap.principal).toEqual({ id: "bob", tenant: "acme", role: "viewer" });
+      // a snapshot without a principal keeps the one from auth_ok
+      expect(run([{ event: "inbox_snapshot", sessions: [] }], ok).principal?.id).toBe("alice@acme.io");
+    });
+
+    it("auth_error requires sign-in with a closed reason", () => {
+      expect(run([{ event: "auth_error", reason: "throttled" }]).auth).toEqual({ status: "required", reason: "throttled" });
+      expect(run([{ event: "auth_error", reason: "<script>" }]).auth).toEqual({ status: "required", reason: "unauthorized" });
+      expect(run([{ event: "auth_error" }]).auth.reason).toBe("unauthorized");
+    });
+
+    it("can_decide: missing key (or missing capabilities) is true; present means exactly true", () => {
+      const cd = (caps: unknown) => run([{ event: "inbox_snapshot", sessions: [], capabilities: caps }]).capabilities.can_decide;
+      expect(cd(undefined)).toBe(true);
+      expect(cd({ policy_writable: true })).toBe(true);
+      expect(cd({ can_decide: true })).toBe(true);
+      for (const bad of [false, "true", 1, null, 0, {}]) expect(cd({ can_decide: bad }), String(bad)).toBe(false);
+    });
+
+    it("inbox_forbidden keeps only closed-vocabulary action and reason", () => {
+      const f = (e: Record<string, unknown>) => run([{ event: "inbox_forbidden", ...e }]).forbidden;
+      expect(f({ action: "decide", reason: "role" })).toEqual({ action: "decide", reason: "role" });
+      expect(f({ action: "rules", reason: "server" })).toEqual({ action: "rules", reason: "server" });
+      expect(f({ action: "<img>", reason: "because" })).toEqual({ action: "action", reason: null });
+      expect(f({})).toEqual({ action: "action", reason: null });
+    });
+
+    it("operator on resolved rows and history: id pattern, else null", () => {
+      const r = (operator: unknown) => run([{ event: "inbox_resolved", session_id: "s", call_id: "c", decision: "approve", operator }]).resolved[0].operator;
+      expect(r("alice")).toBe("alice");
+      for (const bad of ["a b", "x\ny\u202e", "", "a".repeat(65), 5, null, undefined, {}]) expect(r(bad), String(bad)).toBeNull();
+      const h = run([{ event: "inbox_snapshot", sessions: [], recent: [{ session_id: "s", call_id: "h", decision: "approve", reason: "human", operator: "bob" }, { session_id: "s", call_id: "h2", operator: "bad id" }] }]).resolved;
+      expect(h.map((x) => x.operator)).toEqual(["bob", null]);
+    });
+  });
+
   it("is pure: does not mutate its input", () => {
     const s0 = run([pendingEv()]);
     const frozen = JSON.stringify(s0);

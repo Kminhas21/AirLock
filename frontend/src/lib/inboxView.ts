@@ -1,7 +1,7 @@
 // inboxView.ts — pure helpers for the Inbox cards: the score bar, outcome words, outgoing frames and toast texts.
 // The UI never composes a policy rule: it only asks the hub for a (verdict, scope) on a call the hub has seen.
 
-import type { RuleResult } from "./inboxRoute";
+import type { Forbidden, RuleResult } from "./inboxRoute";
 import { singleLine } from "./safeText";
 
 export const MAX_NOTE = 200;
@@ -102,4 +102,20 @@ export function ruleToast(r: RuleResult): string {
   // a reason outside the closed set is never shown raw
   const words = Object.prototype.hasOwnProperty.call(FAIL_WORDS, r.reason) ? FAIL_WORDS[r.reason] : null;
   return words ? `Rule not added: ${words}` : "Rule not added";
+}
+
+// ---------- identity notices ----------
+
+
+/** "Not allowed: <action>" plus a closed-vocabulary reason in words; anything unexpected is generic. */
+export function forbiddenText(f: Forbidden): string {
+  const action = f.action === "action" ? "this action" : f.action === "rules" ? "standing rules" : "approve/deny";
+  const why = f.reason === "role" ? " (your role does not permit it)" : f.reason === "server" ? " (this server is outside your allowlist)" : "";
+  return `Not allowed: ${action}${why}`;
+}
+
+export function signInErrorText(reason: "unauthorized" | "throttled" | null): string | null {
+  if (reason === "throttled") return "Too many attempts. Wait a minute and try again.";
+  if (reason === "unauthorized") return "Sign-in failed: the token was not accepted.";
+  return null;
 }
