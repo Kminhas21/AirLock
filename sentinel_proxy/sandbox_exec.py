@@ -41,7 +41,7 @@ def _resolve(cmd: str):
 
 
 def _child_env(spec: dict, home: str) -> dict:
-    env = {}
+    env = dict(os.environ)
     for name in spec["env_allow"]:
         if name in os.environ and "\x00" not in os.environ[name]:
             env[name] = os.environ[name]
