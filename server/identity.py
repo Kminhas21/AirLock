@@ -67,7 +67,7 @@ _ENV_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,127}")
 _LOOPBACK = ("127.0.0.1", "::1", "localhost")
 _TOP_KEYS = {"version", "tenants", "operators", "agents", "jwt"}
 _TENANT_KEYS = {"name", "policy_file", "gate_timeout_s", "escalation", "channels"}
-_CHANNEL_KEYS = {"type", "url", "format", "secret_env", "include_args", "allow_private"}
+_CHANNEL_KEYS = {"type", "url", "format", "secret_env", "include_args", "allow_private", "allow_http_loopback"}
 _OPERATOR_KEYS = {"id", "tenant", "role", "token_sha256", "jwt_sub", "servers"}
 _AGENT_KEYS = {"id", "tenant", "token_sha256", "servers"}
 _JWT_KEYS = {"issuer", "audience", "algorithms", "public_key_file", "jwks_file", "leeway_s"}
@@ -106,6 +106,7 @@ class Channel:
     secret_env: "str | None" = None
     include_args: bool = False
     allow_private: bool = False
+    allow_http_loopback: bool = False       # plain http is accepted ONLY for loopback hosts AND only when this is set explicitly (tests, local relays)
 
 
 @dataclass(frozen=True)
@@ -179,7 +180,7 @@ def _check_id(v, where: str, errs: list):
     return v
 
 
-def _check_url(url, where: str, errs: list) -> bool:
+def _check_url(url, where: str, errs: list, allow_http_loopback: bool = False) -> bool:
     if not isinstance(url, str) or not url or len(url) > 2048 or any(ord(c) < 33 or ord(c) == 127 for c in url):
         errs.append(f"{where}: must be a URL string without spaces or control characters (<= 2048)")
         return False
@@ -192,9 +193,9 @@ def _check_url(url, where: str, errs: list) -> bool:
     if not host or u.username is not None or u.password is not None:
         errs.append(f"{where}: needs a host and must not carry credentials")
         return False
-    if u.scheme == "https" or (u.scheme == "http" and host in _LOOPBACK):
+    if u.scheme == "https" or (u.scheme == "http" and host in _LOOPBACK and allow_http_loopback):
         return True
-    errs.append(f"{where}: must be https (http is accepted only for loopback hosts)")
+    errs.append(f"{where}: must be https (http is accepted only for loopback hosts with allow_http_loopback: true)")
     return False
 
 
@@ -235,18 +236,19 @@ def _check_tenant(tid: str, t: Any, errs: list):
                 errs.append(f"{cw}: unknown key {_show(k)}")
         if c.get("type") != "webhook":
             errs.append(f"{cw}.type: must be 'webhook'")
-        _check_url(c.get("url"), f"{cw}.url", errs)
+        _check_url(c.get("url"), f"{cw}.url", errs, c.get("allow_http_loopback") is True)
         fmt = c.get("format", "json")
         if fmt not in ("json", "slack"):
             errs.append(f"{cw}.format: must be 'json' or 'slack'")
         se = c.get("secret_env")
         if "secret_env" in c and (not isinstance(se, str) or not _ENV_NAME.fullmatch(se)):
             errs.append(f"{cw}.secret_env: must be an environment variable NAME")
-        for flag in ("include_args", "allow_private"):
+        for flag in ("include_args", "allow_private", "allow_http_loopback"):
             if flag in c and not isinstance(c[flag], bool):
                 errs.append(f"{cw}.{flag}: must be true or false")
         if len(errs) == m0:
-            channels[cname] = Channel(cname, "webhook", c["url"], fmt, se, bool(c.get("include_args", False)), bool(c.get("allow_private", False)))
+            channels[cname] = Channel(cname, "webhook", c["url"], fmt, se, bool(c.get("include_args", False)), bool(c.get("allow_private", False)),
+                                      bool(c.get("allow_http_loopback", False)))
     levels: list = []
     esc = t.get("escalation", {})
     if not isinstance(esc, dict):

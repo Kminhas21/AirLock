@@ -135,7 +135,7 @@ class TestSchema:
                                      "escalation": {"levels": [{"after_s": 60, "notify": ["oncall"]}, {"after_s": 180, "notify": ["oncall", "mgr"]}]},
                                      "channels": {"oncall": {"type": "webhook", "url": "https://hooks.example.com/x", "format": "slack",
                                                              "secret_env": "ONCALL_HMAC", "include_args": False},
-                                                  "mgr": {"type": "webhook", "url": "http://127.0.0.1:9/y"}}})
+                                                  "mgr": {"type": "webhook", "url": "http://127.0.0.1:9/y", "allow_http_loopback": True}}})
         s = IdentityStore(d)
         t = s.tenant("acme")
         assert t.name == "Acme" and t.policy_file == "/etc/s/acme.json" and t.gate_timeout_s == 300.0
@@ -215,11 +215,28 @@ class TestSchema:
         d["tenants"]["acme"]["channels"] = {"c": ch}
         assert "channels.c" in joined(d)
 
-    @pytest.mark.parametrize("url", ["https://hooks.example.com/x", "http://localhost:8080/x", "http://127.0.0.1/x", "http://[::1]:9/x"])
-    def test_good_urls(self, url):
+    def test_good_https_url(self):
+        d = base_data()
+        d["tenants"]["acme"]["channels"] = {"c": {"type": "webhook", "url": "https://hooks.example.com/x"}}
+        IdentityStore(d)
+
+    @pytest.mark.parametrize("url", ["http://localhost:8080/x", "http://127.0.0.1/x", "http://[::1]:9/x"])
+    def test_plain_http_loopback_needs_the_explicit_flag(self, url):
         d = base_data()
         d["tenants"]["acme"]["channels"] = {"c": {"type": "webhook", "url": url}}
+        assert "allow_http_loopback" in joined(d)                                   # not accepted by default: the notifier would refuse it anyway
+        d["tenants"]["acme"]["channels"] = {"c": {"type": "webhook", "url": url, "allow_http_loopback": True}}
         IdentityStore(d)
+
+    def test_the_loopback_flag_never_makes_a_non_loopback_http_url_valid(self):
+        d = base_data()
+        d["tenants"]["acme"]["channels"] = {"c": {"type": "webhook", "url": "http://hooks.example.com/x", "allow_http_loopback": True}}
+        assert "must be https" in joined(d)
+
+    def test_the_loopback_flag_must_be_a_boolean(self):
+        d = base_data()
+        d["tenants"]["acme"]["channels"] = {"c": {"type": "webhook", "url": "http://127.0.0.1/x", "allow_http_loopback": "yes"}}
+        assert "allow_http_loopback" in joined(d)
 
     def test_channel_name_and_count(self):
         d = base_data()
