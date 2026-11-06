@@ -309,6 +309,12 @@ class ProxySession:
                   if i["decision"] == "deny" and i["reason"] not in NOT_A_DECISION][:EARLIER_DENIED_SHOWN]
         return dict(self.counts), history, denied
 
+    @property
+    def log_sid(self) -> str:
+        """session_id as written to the event log: identity mode stores '<tenant>/<session_id>' so two tenants that share BOTH a
+        session id and a call id cannot collide on the log's unique (session_id, call_id) indexes; the UI never sees the prefix."""
+        return f"{self.tenant}/{self.session_id}" if self.identity_mode else self.session_id
+
     def reserve(self, call_id: str) -> bool:
         """Synchronous duplicate check + registration (no await in between). False: already seen."""
         if call_id in self.seen:
@@ -318,6 +324,33 @@ class ProxySession:
         while len(self.seen_order) > MAX_SEEN:
             self.seen.discard(self.seen_order.popleft())
         return True
+
+
+class _SessionMap(dict):
+    """Live sessions keyed by (tenant, session_id): two tenants may use the same session id at the same time. A bare string key
+    means tenant 'default' (legacy mode: one implicit tenant, behaviour unchanged)."""
+
+    @staticmethod
+    def _k(key):
+        return ("default", key) if isinstance(key, str) else key
+
+    def __getitem__(self, key):
+        return super().__getitem__(self._k(key))
+
+    def __setitem__(self, key, value):
+        super().__setitem__(self._k(key), value)
+
+    def __delitem__(self, key):
+        super().__delitem__(self._k(key))
+
+    def __contains__(self, key):
+        return super().__contains__(self._k(key))
+
+    def get(self, key, default=None):
+        return super().get(self._k(key), default)
+
+    def pop(self, key, *default):
+        return super().pop(self._k(key), *default)
 
 
 class InboxHub:
@@ -334,7 +367,7 @@ class InboxHub:
         self._channels: dict = {}
         self._channel_problems: set = set()
         self._monitor_factory = monitor_factory
-        self.sessions: dict[str, ProxySession] = {}
+        self.sessions: _SessionMap = _SessionMap()
         self._uis: list[_Peer] = []
         self._bg: set = set()
         self._rule_times: collections.deque = collections.deque()
@@ -444,14 +477,14 @@ class InboxHub:
             payload["note"] = note
         if session.identity_mode:
             payload["operator"], payload["tenant"] = operator, session.tenant
-        res = await self._append("decision", session.session_id, call_id, payload)
+        res = await self._append("decision", session.log_sid, call_id, payload)
         if res == "dup":
             return None
         if res == "fail":
             if decision == "approve":
                 decision, reason, actor = "deny", "log_unavailable", "system"
                 payload.pop("note", None)
-                await self._append("decision", session.session_id, call_id,
+                await self._append("decision", session.log_sid, call_id,
                                    {**payload, "decision": decision, "reason": reason, "actor": actor})   # best effort
         return decision, reason, actor
 
@@ -536,16 +569,17 @@ class InboxHub:
             return await reject("forbidden_server")             # the agent declares a server outside its allowlist
         if self.log_unusable:
             return await reject("log_unavailable")
-        live = self.sessions.get(sid)
+        tenant = principal.tenant if (self.identity_mode and principal is not None) else "default"
+        live = self.sessions.get((tenant, sid))
         if live is not None and not live.closed:
-            return await reject("duplicate_session_id")
+            return await reject("duplicate_session_id")                # only inside ONE tenant
         session = ProxySession(sid, list(servers), list(auto_approve), conn)
         session.boundary = validate_boundary(frame.get("boundary"))
         if self.identity_mode:
             session.identity_mode = True
             session.agent_id = principal.id if principal is not None else "agent"
             session.tenant = principal.tenant if principal is not None else "default"
-        self.sessions[sid] = session          # claimed before any await: a racing second hello sees it
+        self.sessions[(session.tenant, sid)] = session          # claimed before any await: a racing second hello sees it
         try:
             tcfg = self._tenant_cfg(session.tenant) if session.identity_mode else None
             session.policy_mode, session.policy, session.policy_registry = await asyncio.to_thread(
@@ -559,10 +593,10 @@ class InboxHub:
             logger.exception("inbox: could not build a monitor for session %s; auto calls will be held", sid)
             session.monitor = None
         if self.store is not None:         # write-ahead: the hello is on disk before the ack
-            res = await self._append("proxy_hello", sid, None, self._hello_payload(session))
+            res = await self._append("proxy_hello", session.log_sid, None, self._hello_payload(session))
             if res != "ok":
-                if self.sessions.get(sid) is session:
-                    del self.sessions[sid]
+                if self.sessions.get((session.tenant, sid)) is session:
+                    del self.sessions[(session.tenant, sid)]
                 session.closed = True
                 return await reject("log_unavailable")
             session.logged_hello = True
@@ -749,7 +783,7 @@ class InboxHub:
             while len(session.secrets) > 200:
                 session.secrets.pop(next(iter(session.secrets)))
         # write-ahead: call_proposed is on disk before inbox_pending / any auto or policy reply
-        res = await self._append("call_proposed", sid, call_id,
+        res = await self._append("call_proposed", session.log_sid, call_id,
                                  {"server": server, "tool": tool, "args": args, "auto": auto,
                                   "alerts": self._alert_records(alerts, call_secrets), "policy": policy_rec,
                                   "secrets_used": secrets_used})
@@ -842,7 +876,7 @@ class InboxHub:
             rec = {"status": status, "summary_len": len(summary)}
             if os.environ.get("SENTINEL_LOG_RESULTS") == "1":
                 rec["summary"] = eventlog.scrub(summary, session.secrets.get(call_id, frozenset()))
-            await self._append("call_result", session.session_id, call_id, rec)
+            await self._append("call_result", session.log_sid, call_id, rec)
         await self._broadcast({"event": "inbox_result", "session_id": session.session_id, "call_id": call_id,
                                "status": status, "summary": summary}, session.tenant)
 
@@ -855,10 +889,10 @@ class InboxHub:
             p.claim("deny", "disconnected")
         if session.tasks:
             await asyncio.gather(*list(session.tasks), return_exceptions=True)
-        if self.sessions.get(session.session_id) is session:
-            del self.sessions[session.session_id]
+        if self.sessions.get((session.tenant, session.session_id)) is session:
+            del self.sessions[(session.tenant, session.session_id)]
         if session.logged_hello:
-            await self._append("proxy_close", session.session_id, None, {"reason": "disconnected"})   # best effort
+            await self._append("proxy_close", session.log_sid, None, {"reason": "disconnected"})   # best effort
         await self._broadcast({"event": "inbox_session", "session_id": session.session_id, "state": "closed"},
                               session.tenant)
 
@@ -955,7 +989,7 @@ class InboxHub:
         except Exception:
             logger.warning("inbox: notification to channel %r failed or timed out", ch.name)
         if self.store is not None:                       # best effort
-            await self._append("notification", p.session.session_id, p.call_id,
+            await self._append("notification", p.session.log_sid, p.call_id,
                                {"channel": ch.name, "level": level, "ok": ok, "status": status})
 
     # ------------------------------------------------------------------ UI side
@@ -1009,6 +1043,10 @@ class InboxHub:
                     if self.identity_mode:
                         recent = await asyncio.to_thread(self.store.recent_resolved, 50,
                                                          principal.tenant if principal is not None else "\0")
+                        prefix = (principal.tenant + "/") if principal is not None else "\0"
+                        recent = [{**r, "session_id": r["session_id"][len(prefix):]}
+                                  if isinstance(r.get("session_id"), str) and r["session_id"].startswith(prefix) else r
+                                  for r in recent]
                     else:
                         recent = await asyncio.to_thread(self.store.recent_resolved, 50)
                 except Exception:
@@ -1035,8 +1073,8 @@ class InboxHub:
         """(server, tool, args) of a call this hub saw in THAT session (pending or the in-memory ring), else None."""
         if not isinstance(sid, str) or not isinstance(call_id, str):
             return None
-        s = self.sessions.get(sid)
-        if s is None or (tenant is not None and s.tenant != tenant):      # another tenant's call is simply unknown
+        s = self.sessions.get((tenant or "default", sid))             # another tenant's session is simply unknown
+        if s is None:
             return None
         p = s.pending.get(call_id)
         if p is not None:
@@ -1103,7 +1141,7 @@ class InboxHub:
                 return await rr(False, reason)
             # write-ahead: the event is on disk BEFORE the policy file changes; no log, no change
             if self.store is not None:
-                res = await self._append("policy_rule_added", sid, call_id,
+                res = await self._append("policy_rule_added", (f"{tenant}/{sid}" if principal is not None else sid), call_id,
                                          {"rule": rule, "digest_before": digest_before, "session_id": sid, "call_id": call_id})
                 if res != "ok":
                     return await rr(False, "log_unavailable")
@@ -1138,16 +1176,14 @@ class InboxHub:
         if not isinstance(frame, dict) or frame.get("event") != "inbox_decision":
             logger.warning("inbox: ignoring a UI frame that is not an inbox_decision")
             return
-        if principal is not None and False:
+        if principal is not None and principal.role not in ("approver", "admin"):
             return await self._forbidden(ui, "decide", "role")
         sid, call_id, decision = frame.get("session_id"), frame.get("call_id"), frame.get("decision")
         if (not isinstance(sid, str) or not isinstance(call_id, str) or not isinstance(decision, str)
                 or decision not in ("approve", "deny")):
             logger.warning("inbox: ignoring an invalid inbox_decision")
             return
-        s = self.sessions.get(sid)
-        if s is not None and principal is not None and s.tenant != principal.tenant:
-            s = None                                  # another tenant's call: silently unknown
+        s = self.sessions.get((principal.tenant if principal is not None else "default", sid))    # other tenants: unknown
         p = s.pending.get(call_id) if s is not None else None
         if p is None:
             logger.info("inbox: decision for an unknown or already resolved call ignored")
