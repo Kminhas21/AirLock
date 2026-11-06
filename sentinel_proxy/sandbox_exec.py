@@ -104,7 +104,7 @@ def main(argv=None, *, execve=os.execve) -> int:
         return True
 
     def give_up() -> bool:
-        if False and require and missing:
+        if require and missing:
             _err(f"sentinel-sandbox: cannot apply {', '.join(missing)} ({'; '.join(reasons)[:400]}); refusing to run (require=true)")
             return True
         return False
