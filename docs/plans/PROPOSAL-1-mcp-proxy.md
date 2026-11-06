@@ -73,5 +73,16 @@ HTTP/SSE downstream, OpenTelemetry observe-only, multi-user, hosted deployment, 
    (Deny stays enabled); tool names are shown up to 200 chars (the hub's limit).
 5. A failed/slow UI peer is closed (so the browser reconnects and gets a fresh snapshot), sends are concurrent with a per-peer timeout, and a dead
    proxy peer is closed. `seen` call ids are bounded.
-6. Known and accepted for v1: no `proxy_cancel` frame (if the agent cancels, a stale card can sit until its timeout and a late approve is logged
-   although nothing ran; the proxy forwards nothing).
+
+## proxy_cancel (second iteration)
+Problem: when the agent cancels a request (MCP `notifications/cancelled`) or the proxy gives up on its own (its safety-net timeout), the hub still holds
+the card until its own timeout, and a late human Approve is logged as APPROVED although the proxy forwarded nothing.
+- Proxy -> backend: `{"event":"proxy_cancel","call_id":C,"reason":"cancelled"|"timeout"}` sent (best effort, never blocking the cancel) whenever the proxy
+  drops a call it is still waiting on. The proxy NEVER forwards a call after it sent a cancel for it.
+- Hub: for a pending (session_id, call_id) of THAT session: resolve it as `deny` with reason `cancelled` (or `timeout` if the frame says so), remove it from
+  pending, send `inbox_resolved` (decision `deny`, reason `cancelled`) to the UIs, NOT register anything with the monitor (a cancelled call is not a
+  human denial and must not teach the monitor a denied effect), and send NO proxy_decision (the proxy already dropped the call). A later
+  `inbox_decision` for it is ignored (once-only). Cancel for an unknown, already resolved or other session's call is ignored; a cancel never approves.
+  Races: a cancel that arrives after the hub already approved is a no-op (the UI shows approved; the proxy forwards nothing if it already dropped the call).
+  Reason strings are a closed set; anything else is treated as `cancelled`.
+- UI: a resolved item with reason `cancelled` is labelled CANCELLED (not DENIED) and the pending card disappears.
