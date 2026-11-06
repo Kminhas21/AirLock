@@ -146,6 +146,22 @@ async def recv_until(ws, name, timeout=20, **where):
     return await asyncio.wait_for(go(), timeout)
 
 
+async def expect_rejected(ws, timeout=15):
+    """The connection must end CLOSED with 1008 and must never deliver a snapshot or an auth_ok; an auth_error frame may come first
+    (a connection that never presents a credential is simply closed after the 5 s first-frame window)."""
+    seen = []
+    try:
+        while True:
+            e = json.loads(await asyncio.wait_for(ws.recv(), timeout))
+            seen.append(e)
+            assert e.get("event") not in ("auth_ok", "inbox_snapshot"), e
+            if e.get("event") == "auth_error":
+                assert e["reason"] in ("unauthorized", "throttled"), e
+    except websockets.ConnectionClosed as c:
+        assert c.rcvd is not None and c.rcvd.code == 1008, c
+        return seen
+
+
 async def no_event(ws, name, seconds=2.0):
     """Assert NO event called `name` arrives within `seconds` (other events are skipped)."""
     async def go():
@@ -192,16 +208,14 @@ async def test_authentication_matrix(world):
                {"token": mint(world.priv, exp_in=-5), "header": False, "frame": True}, {"token": mint(world.priv, aud="other"), "header": False, "frame": True},
                {"token": mint(world.priv, sub="mallory@evil.test"), "header": False, "frame": True}):
         ws = await operator(world.port, **kw)
-        err = await recv_until(ws, "auth_error", timeout=10)
-        assert err["reason"] in ("unauthorized", "throttled")
-        with pytest.raises(websockets.ConnectionClosed):
-            await asyncio.wait_for(ws.recv(), 10)
+        await expect_rejected(ws)
     # throttle: repeated failures from one address are refused for a while, even with a valid credential afterwards
     for _ in range(6):
         ws = await operator(world.port, "nope")
-        await recv_until(ws, "auth_error", timeout=10)
+        await expect_rejected(ws)
     ws = await operator(world.port, TOK["bob"])
-    assert (await recv_until(ws, "auth_error", timeout=10))["reason"] == "throttled"
+    seen = await expect_rejected(ws)
+    assert [e for e in seen if e.get("event") == "auth_error"] and seen[0]["reason"] == "throttled"
 
 
 async def test_agents_authenticate_and_cannot_declare_servers_outside_their_allowlist(world):

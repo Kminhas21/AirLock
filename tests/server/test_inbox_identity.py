@@ -846,3 +846,21 @@ async def test_shared_ids_in_the_event_log_history_and_restart_recovery(tmp_path
     assert sorted(r["session_id"] for r in info["recovered"]) == ["acme/s", "globex/s"]
     st2.close()
     assert eventlog.verify_file(db, key=b"k" * 20).ok
+
+
+
+def test_the_hub_builds_the_notifier_channel_with_the_loopback_flag():
+    """Regression (found by the full-stack escalation test): the channel handed to the notifier dropped allow_http_loopback, so a loopback webhook was
+    rejected as invalid and silently skipped. This exercises the hub's own channel construction."""
+    from types import SimpleNamespace as NS
+
+    raw = NS(name="hook", type="webhook", url="http://127.0.0.1:9/h", format="json", secret_env=None, include_args=False, allow_private=False,
+             allow_http_loopback=True)
+    hub = InboxHub(gate_timeout=5)
+    hub._tenant_cfg = lambda tenant: NS(channels={"hook": raw})
+    ch = hub._channel("acme", "hook")
+    assert ch is not None and ch.allow_http_loopback is True and ch.url == "http://127.0.0.1:9/h"
+    raw_no_flag = NS(**{**raw.__dict__, "allow_http_loopback": False})
+    hub2 = InboxHub(gate_timeout=5)
+    hub2._tenant_cfg = lambda tenant: NS(channels={"hook": raw_no_flag})
+    assert hub2._channel("acme", "hook") is None          # without the flag the notifier correctly refuses plain http, and the hub skips the channel

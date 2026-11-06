@@ -959,7 +959,8 @@ class InboxHub:
             try:
                 ch = notify_mod.validate_channel(name, {
                     "type": raw.type, "url": raw.url, "format": raw.format, "secret_env": raw.secret_env,
-                    "include_args": raw.include_args, "allow_private": raw.allow_private})
+                    "include_args": raw.include_args, "allow_private": raw.allow_private,
+                    "allow_http_loopback": bool(getattr(raw, "allow_http_loopback", False))})
             except Exception as exc:
                 logger.error("inbox: notification channel %r of tenant %r is invalid (%s); skipping it", name, tenant,
                              safe_text.clean_field(str(exc), 200))
