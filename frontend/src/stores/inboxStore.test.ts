@@ -56,6 +56,19 @@ describe("inboxStore", () => {
     expect(st().notSent).toEqual({});
   });
 
+  it("capabilities and the rule toast: stored from events, capabilities reset on any connection change, toast dismissable", () => {
+    const st = () => useInboxStore.getState();
+    st().handleEvent({ event: "inbox_snapshot", sessions: [], capabilities: { policy_writable: true } });
+    expect(st().capabilities.policy_writable).toBe(true);
+    st().handleEvent({ event: "inbox_rule_result", ok: true, rule_id: "r", reason: "ok" });
+    expect(st().ruleResult).toMatchObject({ ok: true, rule_id: "r" });
+    st().clearRuleResult();
+    expect(st().ruleResult).toBeNull();
+    st().setConnection("disconnected");
+    expect(st().capabilities.policy_writable).toBe(false);
+    expect(useInboxStore.getState().capabilities).toEqual({ policy_writable: false });
+  });
+
   it("setConnection and reset", () => {
     useInboxStore.getState().setConnection("connected");
     expect(useInboxStore.getState().connection).toBe("connected");

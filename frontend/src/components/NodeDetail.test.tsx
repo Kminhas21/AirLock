@@ -41,6 +41,19 @@ describe("NodeDetail shows agent-controlled text safely", () => {
     state.driftPoints = [];
   });
 
+  it("uses the point's own threshold when it is valid, else the constant", () => {
+    const metrics = { compliance_score: 1, goal_persistence: 0, hedging_density: 0, response_length: 1 };
+    const colourOf = (d: number, threshold?: unknown) => {
+      state.driftPoints = [{ nodeId: "n1", mahalanobisDistance: d, threshold, metrics }];
+      return render({ toolName: "t" }).match(new RegExp(`style="color:([^"]+)"[^>]*>${d.toFixed(3)}<`))?.[1];
+    };
+    expect(colourOf(3.0, 2.0), "own threshold 2.0: breach").toBe("#ef4444");
+    expect(colourOf(3.5, 5.0), "own threshold 5.0: fine").toBe("#22c55e");
+    expect(colourOf(3.5, NaN), "invalid: constant 3.368").toBe("#ef4444");
+    expect(colourOf(3.0, 0), "invalid: constant").toBe("#22c55e");
+    state.driftPoints = [];
+  });
+
   it("an enormous result is bounded", () => {
     const html = render({ result: "x".repeat(200_000) });
     expect(html.length).toBeLessThan(40_000);

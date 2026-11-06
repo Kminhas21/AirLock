@@ -186,6 +186,7 @@ async def test_timeout_denies_and_tells_monitor_deny():
     await wait_for(lambda: r.decisions())
     assert r.decisions() == [{"event": "proxy_decision", "call_id": "c1", "decision": "deny", "reason": "timeout"}]
     assert r.monitor.decisions[-1][2] == "deny"
+    await wait_for(lambda: r.ui.events("inbox_resolved"))      # the broadcast follows the proxy reply
     assert r.ui.events("inbox_resolved")[0]["reason"] == "timeout"
     assert r.hub.pending_count() == 0
 

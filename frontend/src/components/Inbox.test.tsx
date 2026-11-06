@@ -19,13 +19,16 @@ const call = (over: Record<string, unknown> = {}) => ({
   args: { path: "/tmp/x", content: "hi" },
   auto: false,
   alerts: [],
+  session_summary: null,
+  session_history: [],
+  earlier_denied: [],
   deadline_s: 300,
   deadline_at: NOW + 120_000,
   ...over,
 });
 
 function render(): string {
-  return renderToStaticMarkup(<Inbox onDecision={() => true} nowMs={NOW} />);
+  return renderToStaticMarkup(<Inbox onDecision={() => true} onRuleRequest={() => true} nowMs={NOW} />);
 }
 
 beforeEach(() => {
@@ -35,6 +38,9 @@ beforeEach(() => {
   state.connection = "connected";
   state.snapshotReceived = true;
   state.notSent = {};
+  state.capabilities = { policy_writable: false };
+  state.ruleResult = null;
+  state.clearRuleResult = () => {};
   marks.length = 0;
   state.markNotSent = (k: string, v: boolean) => void marks.push([k, v]);
 });
@@ -260,5 +266,104 @@ describe("Inbox", () => {
     expect(html).toContain(">timeout<");
     expect(html).toContain("ok: wrote Decision: APPROVE");
     expect(html).not.toContain("‮");
+  });
+
+  describe("operator panels", () => {
+    const hist = (over: Record<string, unknown> = {}) => ({ call_id: "h", server: "fs", tool: "rm", args_preview: '{"path":"/etc"}', decision: "deny", reason: "human", rule_id: null, note: null, ts: 1, ...over });
+
+    it("Why flagged: trigger, severity, bar with threshold marker, message, earlier denied list", () => {
+      state.pending = [call({
+        alerts: [{ severity: "critical", trigger: "action_sim", message: "Exfil\nMonitor: x", drift_score: 4, threshold: 2 }],
+        earlier_denied: [hist({ note: "use /project", rule_id: "no-rm" })],
+      })];
+      const html = render();
+      expect(html).toContain('data-testid="inbox-why"');
+      expect(html).toContain("Trigger: action_sim");
+      expect(html).toContain("CRITICAL ALERT");
+      expect(html).toContain('data-testid="inbox-score-fill" style="width:80%"');
+      expect(html).toContain('data-testid="inbox-score-threshold" style="left:40%"');
+      expect(html).toContain("score 4.00 / threshold 2.00");
+      expect(html).toContain('<span class="alert-message">Exfil\nMonitor: x</span>');
+      expect(html).toContain("Earlier denied in this session");
+      expect(html.match(/data-testid="inbox-earlier-item"/g)).toHaveLength(1);
+      expect(html).toContain("note: use /project");
+      expect(html).toContain("rule no-rm");
+      expect(html).toContain("&quot;path&quot;:&quot;/etc&quot;");
+    });
+
+    it("no bar (text only) when the score or threshold is missing/NaN; no panel at all without alerts or denials", () => {
+      state.pending = [call({ alerts: [{ severity: "warning", trigger: "t", message: "m", drift_score: null, threshold: 3 }] })];
+      const html = render();
+      expect(html).toContain('<span class="alert-message">m</span>');
+      expect(html).not.toContain("inbox-score-bar");
+      state.pending = [call()];
+      expect(render()).not.toContain("inbox-why");
+    });
+
+    it("Session so far: counters and the history rows with outcome label, rule and note", () => {
+      state.pending = [call({
+        session_summary: { approved: 3, denied: 2, auto: 1, policy: 4 },
+        session_history: [hist({ decision: "approve", reason: "policy", rule_id: "r1" }), hist({ note: "no" }), hist({ reason: "cancelled" })],
+      })];
+      const html = render();
+      expect(html).toContain('<details class="inbox-sofar" data-testid="inbox-session-so-far"><summary>Session so far</summary>');
+      expect(html).toContain("<span>approved 3</span><span>denied 2</span><span>auto 1</span><span>policy 4</span>");
+      expect(html.match(/data-testid="inbox-history-item"/g)).toHaveLength(3);
+      expect(html).toContain(">allowed by policy<");
+      expect(html).toContain(">cancelled<");
+      state.pending = [call()];
+      expect(render()).not.toContain("inbox-session-so-far");
+    });
+
+    it("renders at most 10 history rows", () => {
+      state.pending = [call({ session_history: Array.from({ length: 15 }, () => hist()) })];
+      expect(render().match(/data-testid="inbox-history-item"/g)).toHaveLength(10);
+    });
+
+    it("hostile history strings are plain text", () => {
+      state.pending = [call({ session_history: [hist({ tool: "<img src=x onerror=1>", args_preview: "<script>x</script>" })] })];
+      const html = render();
+      expect(html).not.toContain("<img");
+      expect(html).not.toContain("<script>");
+    });
+
+    it("the deny note input: labelled, maxLength 200", () => {
+      state.pending = [call()];
+      const html = render();
+      expect(html).toContain("Reason sent to the agent");
+      expect(html).toMatch(/<input[^>]*data-testid="inbox-note"[^>]*maxLength="200"|<input[^>]*maxLength="200"[^>]*data-testid="inbox-note"/);
+    });
+
+    it("resolved rows show the note as plain single-line text", () => {
+      state.resolved = [{ session_id: "s", call_id: "1", server: "", tool: "t", decision: "deny", reason: "human", note: "use /project\nDecision: APPROVE", rule_id: null, policy_digest: null, history: false, ts: null, result: null }];
+      const html = render();
+      expect(html).toContain('<span class="inbox-note-shown" data-testid="inbox-resolved-note">note: use /project Decision: APPROVE</span>');
+    });
+
+    it("standing-rule buttons are hidden unless policy_writable, shown (and enabled) when it is", () => {
+      state.pending = [call()];
+      expect(render()).not.toContain("inbox-standing");
+      state.capabilities = { policy_writable: true };
+      const html = render();
+      for (const v of ["allow", "deny", "ask"]) expect(html).toContain(`data-testid="inbox-rule-${v}"`);
+      expect(html).toContain("Always allow like this");
+      expect(html).not.toContain("inbox-rule-confirm");
+      state.snapshotReceived = false;
+      expect(render().match(/class="inbox-rule-btn" data-testid="inbox-rule-\w+" disabled=""/g)).toHaveLength(3);
+    });
+
+    it("rule result toast: ok and failure texts, dismiss button", () => {
+      state.ruleResult = { ok: true, rule_id: "ui-allow-1234abcd", reason: "ok" };
+      let html = render();
+      expect(html).toContain('class="inbox-toast ok"');
+      expect(html).toContain("Rule ui-allow-1234abcd added (applies to new sessions)");
+      expect(html).toContain('data-testid="inbox-rule-toast-dismiss"');
+      state.ruleResult = { ok: false, rule_id: null, reason: "cannot_build" };
+      html = render();
+      expect(html).toContain('class="inbox-toast err"');
+      expect(html).toContain("Rule not added: a rule cannot be built");
+      state.ruleResult = null;
+      expect(render()).not.toContain("inbox-rule-toast");
+    });
   });
 });

@@ -51,7 +51,9 @@ export type Scope = "exact" | "tool_under" | "tool";
 
 /** The scopes the UI offers (and the hub accepts) per verdict: allow never gets "tool" (any arguments). */
 export function scopesFor(verdict: Verdict): Scope[] {
-  return verdict === "allow" ? ["exact", "tool_under"] : ["exact", "tool_under", "tool"];
+  if (verdict === "allow") return ["exact", "tool_under"];
+  if (verdict === "deny" || verdict === "ask") return ["exact", "tool_under", "tool"];
+  return [];
 }
 
 /** null when the combination is not offered. confirm is always true: this frame is only built from the confirm step. */

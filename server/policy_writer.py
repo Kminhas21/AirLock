@@ -252,6 +252,8 @@ def _append(p: str, rule: Any) -> dict:
         raise _fail("invalid_policy", "rule is not plain JSON") from None
     if not isinstance(rule, dict) or not isinstance(rule.get("id"), str):
         raise _fail("invalid_policy", "rule must be an object with an id")
+    if not os.path.lexists(p):
+        raise _fail("not_found", p)
     with _LOCK:
         lock_fd = None
         try:
