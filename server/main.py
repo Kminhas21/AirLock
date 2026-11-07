@@ -5,19 +5,51 @@ This is the entry point. Run with:
     uvicorn main:app --reload --port 8080
 
 Endpoints:
-    GET  /health  — Returns {"status": "ok"}
+    GET  /health  — Returns {"status": "ok", "monitor": <ACTIVE monitor>, "embedder": "minilm"|"stub"|"none",
+                             "monitor_errors": <count>}
     GET  /models  — Returns list of available models for the frontend dropdown
     WS   /ws      — WebSocket endpoint for the full agent session
+    WS   /proxy/ws, /inbox/ws — MCP proxy side / approval-inbox UI side (server/inbox_hub.py)
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+import events
+from auth import check_ws_access
+import health_view
 from providers import get_client, list_models, DEFAULT_MODEL
-from agent_loop import run_agent_loop, run_replay
+from agent_loop import run_agent_loop
+from live_drift import monitor_info
+import proposal_monitor
+from inbox_hub import InboxHub, serve_proxy, serve_ui
+from replay import run_replay
 from mock_environment import reset_environment
 
-app = FastAPI(title="SENTINEL Backend")
+logger = logging.getLogger(__name__)
+
+inbox_hub = InboxHub()      # approval inbox for external MCP proxy sessions (docs/plans/PROPOSAL-1-mcp-proxy.md)
+
+SCENARIOS = ("aligned", "adversarial")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Load MiniLM (Seismograph + proposal monitor) in the background so the first session does not pay for it.
+    proposal_monitor.warm_up_in_background()
+    await inbox_hub.setup_identity_from_env()   # SENTINEL_IDENTITY_FILE unset => legacy token mode; unusable => refuse everyone
+    await inbox_hub.open_log_from_env()      # SENTINEL_EVENT_LOG unset => nothing; unusable => sessions are refused
+    try:
+        yield
+    finally:
+        await inbox_hub.close_log()
+
+
+app = FastAPI(title="SENTINEL Backend", lifespan=lifespan)
 
 # Allow the Vite dev server (frontend) to connect.
 # Without this, the browser blocks WebSocket connections from localhost:5173
@@ -32,9 +64,27 @@ app.add_middleware(
 
 
 @app.get("/health")
-async def health():
-    """Simple health check — hit this to verify the server is running."""
-    return {"status": "ok"}
+async def health(request: Request):
+    """Health check; also says which proposal monitor and embedder are ACTIVE (a stub fallback is visible here).
+    File paths and fallback messages are shown only to a caller allowed to see them (server/health_view.py)."""
+    # monitor_info() may load the embedding model on first use, so keep it off the event loop
+    info = await asyncio.to_thread(monitor_info)
+    detail = health_view.detail_allowed(request.query_params.get("token"), request.headers.get("authorization"))
+    if not detail:
+        info = health_view.public_view(info)
+    if inbox_hub.identity is not None:
+        info = {**info, "identity": health_view.identity_view(inbox_hub.identity, detail)}
+    elif inbox_hub.identity_broken:
+        info = {**info, "identity": {"legacy": False, "usable": False}}
+    log_info = inbox_hub.event_log_info()
+    if log_info is not None:
+        info = {**info, "event_log": health_view.event_log_view(log_info, detail)}
+    policy_path = (os.environ.get("SENTINEL_POLICY") or "").strip()
+    if policy_path:
+        import policy as policy_mod
+        pol, _why = await asyncio.to_thread(policy_mod.load_policy_file, policy_path)
+        info = {**info, "policy": health_view.policy_view(policy_path, pol, detail)}
+    return {"status": "ok", **info}
 
 
 @app.get("/models")
@@ -67,62 +117,69 @@ async def websocket_endpoint(websocket: WebSocket):
     """
     Main WebSocket endpoint. Handles a full agent session:
 
+    0. Origin / token are checked BEFORE the handshake is accepted
     1. Client connects
     2. Client sends a single start_task message with:
        - task: the user's instruction (e.g. "Summarize the project files")
        - scenario: "aligned" or "adversarial" (which system prompt to use)
-       - model: model key from /models endpoint (e.g. "claude-sonnet")
-       - mode: "live" (real agent) or "replay" (cached demo run)
-    3. Server calls run_agent_loop() which takes over the WebSocket:
-       - Sends reasoning events (agent thinking)
-       - Sends tool_pending events (agent wants to use a tool)
-       - Waits for tool_decision messages (human approve/deny)
-       - Sends tool_resolved events (tool executed or denied)
-       - Sends session_complete when done
-    4. Connection closes after session_complete or on error
+       - model: model key from /models endpoint (live mode only)
+       - mode: "live" (real agent) or "replay" (cached demo run, needs no API key)
+    3. The agent loop (or replay) takes over the WebSocket and ends with exactly
+       one terminal event (session_complete) or an error event
+    4. The connection is closed afterwards
     """
+    access = check_ws_access(
+        websocket.headers.get("origin"),
+        websocket.query_params.get("token"),
+    )
+    if not access.allowed:
+        logger.warning("rejected /ws connection: %s", access.reason)
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     try:
-        # Wait for the start_task message
         data = await websocket.receive_json()
 
-        if data.get("event") != "start_task":
-            await websocket.send_json({
-                "event": "error",
-                "message": f"Expected 'start_task' event, got '{data.get('event')}'",
-            })
+        if not isinstance(data, dict) or data.get("event") != "start_task":
+            got = data.get("event") if isinstance(data, dict) else type(data).__name__
+            await websocket.send_json(events.error(f"Expected 'start_task' event, got '{got}'"))
             await websocket.close(code=1008, reason="Expected start_task event")
             return
 
-        # Extract session parameters from start_task
         task = data.get("task", "")
         scenario = data.get("scenario", "aligned")
         model_key = data.get("model", DEFAULT_MODEL)
         mode = data.get("mode", "live")
 
-        # Validate the model key
-        try:
-            client, model_id = get_client(model_key)
-        except KeyError:
-            await websocket.send_json({
-                "event": "error",
-                "message": (
-                    f"Unknown model '{model_key}'. "
-                    f"Available: {[m['key'] for m in list_models()]}"
-                ),
-            })
+        if scenario not in SCENARIOS:
+            await websocket.send_json(events.error(f"Unknown scenario. Available: {list(SCENARIOS)}"))
+            return
+        if mode not in ("live", "replay"):
+            await websocket.send_json(events.error("Unknown mode. Available: ['live', 'replay']"))
             return
 
-        # Reset mock environment for this session (fresh state)
+        # Fresh mock environment for THIS session (per-task ContextVar, so
+        # concurrent sessions cannot clobber each other)
         reset_environment()
 
         if mode == "replay":
+            # Replay never touches a model, so it must not require a valid key
             await run_replay(websocket, scenario=scenario)
             return
 
-        # Hand off to the agent loop — it owns the WebSocket from here.
-        # run_agent_loop sends reasoning/tool_pending/tool_resolved events
-        # and reads tool_decision messages directly from the WebSocket.
+        try:
+            client, model_id = get_client(model_key)
+        except KeyError:
+            await websocket.send_json(events.error(
+                f"Unknown model '{model_key}'. Available: {[m['key'] for m in list_models()]}"
+            ))
+            return
+
+        if not isinstance(task, str) or not task.strip():
+            await websocket.send_json(events.error("start_task requires a non-empty 'task'"))
+            return
+
         await run_agent_loop(
             websocket=websocket,
             client=client,
@@ -132,15 +189,69 @@ async def websocket_endpoint(websocket: WebSocket):
         )
 
     except WebSocketDisconnect:
-        # Client disconnected mid-session (closed browser tab, etc.)
-        # This is normal — nothing to do.
-        pass
-    except Exception as e:
-        # Unexpected error — try to notify the client before closing
+        # Client went away mid-session; in-memory state is dropped (known limitation)
+        logger.info("client disconnected mid-session")
+    except Exception:
+        # Details go to the server log only; never echo exception text to the client
+        logger.exception("unexpected server error in /ws session")
         try:
-            await websocket.send_json({
-                "event": "error",
-                "message": f"Server error: {str(e)}",
-            })
+            await websocket.send_json(events.error("Internal server error."))
         except Exception:
-            pass  # Client already disconnected, can't send
+            pass  # Client already disconnected
+    finally:
+        try:
+            await websocket.close()
+        except Exception:
+            pass  # Already closed
+
+
+_warned_no_token = False
+_warned_query_token = False
+
+
+async def _guarded_accept(websocket: WebSocket, name: str) -> bool:
+    """The inbox sockets can approve tool calls, so they REQUIRE SENTINEL_WS_TOKEN (fail closed when it is unset)."""
+    global _warned_no_token, _warned_query_token
+    if inbox_hub.identity_mode:
+        # identity mode: credentials never travel in the URL (header or first frame, checked by the hub); the browser Origin
+        # allow-list still applies. A ?token= is ignored (and said so once).
+        if websocket.query_params.get("token") is not None and not _warned_query_token:
+            _warned_query_token = True
+            logger.warning("ignoring ?token= on %s: with SENTINEL_IDENTITY_FILE credentials go in the Authorization header "
+                           "or an auth first frame", name)
+        origin_env = {k: os.environ[k] for k in ("SENTINEL_ALLOWED_ORIGINS",) if k in os.environ}
+        access = check_ws_access(websocket.headers.get("origin"), None, origin_env)
+        if not access.allowed:
+            logger.warning("rejected %s connection: %s", name, access.reason)
+            await websocket.close(code=1008)
+            return False
+        await websocket.accept()
+        return True
+    if not os.environ.get("SENTINEL_WS_TOKEN"):
+        if not _warned_no_token:
+            _warned_no_token = True
+            logger.error("refusing /proxy/ws and /inbox/ws connections: SENTINEL_WS_TOKEN is not set "
+                         "(set SENTINEL_WS_TOKEN to enable the approval inbox)")
+        await websocket.close(code=1008)
+        return False
+    access = check_ws_access(websocket.headers.get("origin"), websocket.query_params.get("token"))
+    if not access.allowed:
+        logger.warning("rejected %s connection: %s", name, access.reason)
+        await websocket.close(code=1008)
+        return False
+    await websocket.accept()
+    return True
+
+
+@app.websocket("/proxy/ws")
+async def proxy_ws(websocket: WebSocket):
+    """Proxy side of the approval inbox (first frame must be proxy_hello)."""
+    if await _guarded_accept(websocket, "/proxy/ws"):
+        await serve_proxy(inbox_hub, websocket)
+
+
+@app.websocket("/inbox/ws")
+async def inbox_ws(websocket: WebSocket):
+    """UI side of the approval inbox."""
+    if await _guarded_accept(websocket, "/inbox/ws"):
+        await serve_ui(inbox_hub, websocket)

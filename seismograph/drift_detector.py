@@ -15,11 +15,22 @@ behavioral pattern.
 
 import numpy as np
 
+# sqrt(chi2.ppf(0.99, df=3)) ~= 3.368: for a 3D Gaussian, a squared Mahalanobis
+# distance follows chi-square with 3 degrees of freedom, so 99% of in-distribution
+# points fall within this distance. Replaces the old magic 2.5.
+CHI2_99_DF3 = 3.368
+
+# Floor on the shrinkage target scale so identical baseline points (zero
+# covariance) still give a non-zero, invertible matrix.
+_SCALE_FLOOR = 1e-9
+
 
 class DriftDetector:
-    def __init__(self, baseline_size: int = 3, threshold: float = 2.5):
+    def __init__(self, baseline_size: int = 3, threshold: float = CHI2_99_DF3,
+                 shrinkage: float = 0.1):
         self.baseline_size = baseline_size
         self.threshold = threshold
+        self.shrinkage = shrinkage
         self.points: list[np.ndarray] = []
         self.baseline_mean: np.ndarray | None = None
         self.baseline_cov_inv: np.ndarray | None = None
@@ -43,7 +54,7 @@ class DriftDetector:
         if self.baseline_mean is not None and self.baseline_cov_inv is not None:
             diff = point - self.baseline_mean
             # Mahalanobis: sqrt(diff^T @ cov_inv @ diff)
-            distance = float(np.sqrt(diff @ self.baseline_cov_inv @ diff))
+            distance = float(np.sqrt(max(diff @ self.baseline_cov_inv @ diff, 0.0)))
             breached = distance > self.threshold
             return round(distance, 3), breached
 
@@ -53,22 +64,25 @@ class DriftDetector:
         """Compute baseline mean and inverse covariance from accumulated points.
 
         The covariance matrix describes the "shape" of the baseline cluster.
-        We add a small regularization term (1e-4 * I) to prevent the matrix
-        from being singular (non-invertible), which happens when points are
-        nearly coplanar — common with only 3 points in 3D.
+        A 3-point baseline has rank-2 covariance (nearly coplanar in 3D), so
+        the raw matrix is singular. We apply scale-aware shrinkage toward a
+        spherical target instead of a fixed epsilon:
+
+            cov_s = (1 - a) * cov + a * (trace(cov) / d) * I
+
+        The target scales with the data, so the distance is invariant to
+        uniform scaling of the coordinates. pinv means no LinAlgError.
         """
-        baseline = np.array(self.points[:self.baseline_size])
+        baseline = np.array(self.points[:self.baseline_size], dtype=float)
         self.baseline_mean = baseline.mean(axis=0)
 
-        # np.cov expects each row to be a variable, each column an observation
-        # With baseline.T, we get a 3x3 covariance matrix
-        cov = np.cov(baseline.T)
-
-        # Regularize: add small identity to prevent singular matrix.
-        # 1e-4 is large enough to stabilize but small enough not to distort.
-        # (The plan used 1e-6 which is too small for 3-point baselines.)
-        cov += np.eye(3) * 1e-4
-        self.baseline_cov_inv = np.linalg.inv(cov)
+        d = baseline.shape[1]
+        cov = np.atleast_2d(np.cov(baseline.T))
+        cov = np.nan_to_num(cov)
+        a = self.shrinkage
+        scale = max(float(np.trace(cov)) / d, _SCALE_FLOOR)
+        cov_s = (1.0 - a) * cov + a * scale * np.eye(d)
+        self.baseline_cov_inv = np.linalg.pinv(cov_s)
 
     def reset(self):
         """Clear all state for a new session."""

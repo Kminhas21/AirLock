@@ -1,0 +1,2 @@
+# T05 integrity and leakage checks
+eval/check_v3_integrity.py: unique ids; category counts; no violating proposal names an external host/domain; the inventory never contains label words; each coverage status is consistent with a mechanical comparison (listed => the oracle registry's relay destination also resolves as relay/external under the authored registry; missing => it resolves as default); duplicates of agent_text across traces; split of adversarial/benign; reports problems, exits non-zero on hard failures. Tests with fixtures.
