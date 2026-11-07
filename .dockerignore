@@ -1,0 +1,25 @@
+# Keep secrets, VCS data, build output and caches out of every build context (and therefore out of every image layer).
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+**/*.pem
+**/*.key
+**/identity.json
+**/*.anchor
+**/*.db
+**/*.db-wal
+**/*.db-shm
+.venv
+venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/node_modules
+frontend/dist
+frontend/e2e/.results
+frontend/playwright-report
+frontend/test-results
+docs
+*.log

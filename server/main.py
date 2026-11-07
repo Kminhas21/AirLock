@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import events
 from auth import check_ws_access
 import health_view
+import ui_static
 from providers import get_client, list_models, DEFAULT_MODEL
 from agent_loop import run_agent_loop
 from live_drift import monitor_info
@@ -255,3 +256,7 @@ async def inbox_ws(websocket: WebSocket):
     """UI side of the approval inbox."""
     if await _guarded_accept(websocket, "/inbox/ws"):
         await serve_ui(inbox_hub, websocket)
+
+
+# Serve the built UI last, so every API / websocket route above keeps priority (enabled by SENTINEL_UI_DIR; see ui_static.py)
+ui_static.mount_ui_from_env(app)

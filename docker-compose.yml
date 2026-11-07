@@ -1,0 +1,63 @@
+# docker compose up -d --build                       build (tests gate the image), start, then open http://localhost:8080
+# docker compose --profile demo run --rm demo-agent   a fake agent asks to write a file; approve or deny it in the Inbox
+# Needs a .env file (copy .env.example). ONE sentinel container only: the hub keeps its state in memory.
+name: sentinel
+
+services:
+  sentinel:
+    build:
+      context: .
+      target: final
+      args:
+        TEST_LEVEL: ${TEST_LEVEL:-fast}          # fast | full | none; the image is not built if its tests fail
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL-https://download.pytorch.org/whl/cpu}
+    image: sentinel:local
+    ports:
+      - "${SENTINEL_BIND:-127.0.0.1}:${SENTINEL_HOST_PORT:-8080}:8080"        # loopback only by default; put TLS in front before exposing it
+    environment:
+      SENTINEL_BOOTSTRAP_ADMIN_TOKEN: ${SENTINEL_BOOTSTRAP_ADMIN_TOKEN:-}
+      SENTINEL_BOOTSTRAP_AGENT_TOKEN: ${SENTINEL_BOOTSTRAP_AGENT_TOKEN:-}
+      SENTINEL_IDENTITY_FILE: ${SENTINEL_IDENTITY_FILE:-}
+      SENTINEL_ALLOWED_ORIGINS: ${SENTINEL_ALLOWED_ORIGINS:-http://localhost:8080}
+      SENTINEL_MONITOR: ${SENTINEL_MONITOR:-action_sim}
+      SENTINEL_EVENT_LOG: /var/lib/sentinel/events.db
+      SENTINEL_LOG_KEY: ${SENTINEL_LOG_KEY:-}
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
+    volumes:
+      - sentinel-data:/var/lib/sentinel
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 3g
+    restart: unless-stopped
+    stop_grace_period: 20s            # lets the event log write its final checkpoint
+
+  # A fake agent + fake MCP server behind the real proxy, to see the whole flow without any LLM. Not started by `up`.
+  demo-agent:
+    profiles: [demo]
+    build:
+      context: .
+      target: demo
+      args:
+        TEST_LEVEL: ${TEST_LEVEL:-fast}
+        TORCH_INDEX_URL: ${TORCH_INDEX_URL-https://download.pytorch.org/whl/cpu}
+    image: sentinel:demo
+    depends_on:
+      sentinel:
+        condition: service_healthy
+    environment:
+      SENTINEL_AGENT_TOKEN: ${SENTINEL_BOOTSTRAP_AGENT_TOKEN:-}
+      SENTINEL_AGENT_PASSTHROUGH: SENTINEL_AGENT_TOKEN
+    entrypoint: ["python", "/app/demo_agent/agent_cli.py"]
+    command: ["/etc/sentinel/demo-proxy.json", "write_file", "{\"path\": \"/tmp/report.txt\", \"content\": \"quarterly numbers\"}"]
+    read_only: true
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  sentinel-data:

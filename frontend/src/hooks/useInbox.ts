@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useInboxStore } from "../stores/inboxStore";
 import { buildInboxUrl } from "../lib/inboxUrl";
+import { sameOriginWsUrl } from "../lib/wsUrl";
 import { createBackoff } from "../lib/backoff";
 import { planReconnect } from "../lib/reconnect";
 import { decisionFrame, ruleRequestFrame, type Scope, type Verdict } from "../lib/inboxView";
@@ -20,7 +21,7 @@ const LEGACY_TOKEN = import.meta.env.VITE_SENTINEL_WS_TOKEN;
 export const LEGACY_MODE = Boolean(LEGACY_TOKEN);
 
 const INBOX_URL = buildInboxUrl({
-  url: import.meta.env.VITE_SENTINEL_INBOX_WS_URL,
+  url: import.meta.env.VITE_SENTINEL_INBOX_WS_URL || sameOriginWsUrl("/inbox/ws", import.meta.env.PROD, typeof window !== "undefined" ? window.location : null) || undefined,
   token: LEGACY_TOKEN,
 });
 

@@ -9,13 +9,14 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useSessionStore } from "../stores/sessionStore";
 import type { ClientMessage } from "../types/contracts";
-import { buildWsUrl } from "../lib/wsUrl";
+import { buildWsUrl, sameOriginWsUrl } from "../lib/wsUrl";
 import { createBackoff } from "../lib/backoff";
 import { planReconnect, type ConnectionStatus } from "../lib/reconnect";
 import { routeEvent, type EventHandlers } from "../lib/routeEvent";
 
 const WS_URL = buildWsUrl({
-  url: import.meta.env.VITE_SENTINEL_WS_URL,
+  // explicit build-time URL wins; a production build served by the backend itself uses the page's own origin; dev falls back to localhost:8080
+  url: import.meta.env.VITE_SENTINEL_WS_URL || sameOriginWsUrl("/ws", import.meta.env.PROD, typeof window !== "undefined" ? window.location : null) || undefined,
   token: import.meta.env.VITE_SENTINEL_WS_TOKEN,
 });
 
