@@ -9,6 +9,7 @@ run() { # name, command...
   echo "=== GATE: $name"
   if "$@"; then echo "--- PASS: $name"; else echo "--- FAIL: $name"; fail=1; fi
 }
+run "mutation targets are current (fast: stale mutants fail here, not at the end)" python scripts/mutation_check.py --check-targets
 run "backend pytest (server + seismograph + contract + e2e)" python -m pytest
 run "seismograph legacy pipeline script" python -m seismograph.test_pipeline --stub-only
 if [ -d frontend/node_modules ]; then

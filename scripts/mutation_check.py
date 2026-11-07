@@ -79,13 +79,13 @@ MUTANTS = [
     ("O1 hub: a standing rule is written without the explicit confirm", "server/inbox_hub.py", '            if frame.get("confirm") is not True:', "            if False:", 1),
     ("O2 hub: the operator note is attached to approvals too", "server/inbox_hub.py", 'note = p.note if (decision == "deny" and reason == "human") else None      # never a note on an approve', "note = p.note      # never a note on an approve", 1),
     ("O3 drift_update no longer carries the active threshold", "server/events.py", '        out["threshold"] = float(threshold)', "        pass", 1),
-    ("O4 hub: standing rules are offered although the policy is not writable", "server/inbox_hub.py", 'return {"policy_writable": writable, "event_log": self.store is not None}', 'return {"policy_writable": True, "event_log": self.store is not None}', 1),
+    ("O4 hub: standing rules are offered although the policy is not writable", "server/inbox_hub.py", '        caps = {"policy_writable": writable, "event_log": self.store is not None}', '        caps = {"policy_writable": True, "event_log": self.store is not None}', 1),
     # enforcement boundary (DECISIONS.md D21)
     ("B1 sandbox: Landlock is built but never applied", "sentinel_proxy/sandbox.py", "        if libc.syscall(SYS_LANDLOCK_RESTRICT_SELF, ctypes.c_int(rfd), ctypes.c_uint32(0)) != 0:", "        if False:", 1),
     ("B2 proxy: every secret goes to every tool of the worker", "sentinel_proxy/config.py", "return [n for n, s in self.secrets.items() if tool in s[\"tools\"]]", "return [n for n, s in self.secrets.items()]", 1),
     ("B3 proxy: secret values are no longer scrubbed", "sentinel_proxy/config.py", '        text = text.replace(v, "[REDACTED]")', "        text = text", 1),
     ("B4 hub: a call that receives credentials may be auto-approved by the legacy flag", "server/inbox_hub.py", "elif auto and working and not alerts and not secrets_used:", "elif auto and working and not alerts:", 1),
-    ("B5 hub: the live session-open event hides the sandbox boundary", "server/inbox_hub.py", '"servers": session.servers, "boundary": session.boundary}))', '"servers": session.servers}))', 1),
+    ("B5 hub: the live session-open event hides the sandbox boundary", "server/inbox_hub.py", '"servers": session.servers, "boundary": session.boundary}, session.tenant))', '"servers": session.servers}, session.tenant))', 1),
     # identity, tenancy, escalation (DECISIONS.md D22)
     ("I1 identity: JWT audience is no longer verified", "server/identity.py", '"verify_iss": True, "verify_aud": True})', '"verify_iss": True, "verify_aud": False})', 1),
     ("I2 identity: token digests compared with == (timing)", "server/identity.py", "hmac.compare_digest(rec.digest, digest)", "(rec.digest == digest)", 1),
@@ -116,7 +116,27 @@ def run_suite(tree: Path) -> int:
     return p.returncode
 
 
+def check_targets() -> int:
+    """Fast check (no test is run): every mutant's target text occurs exactly the expected number of times in its file. A STALE mutant
+    means a refactor moved the code it guards; this catches it in a second instead of at the end of a 45-minute gate."""
+    stale = []
+    for name, rel, old, new, count in MUTANTS + FRONTEND_MUTANTS:
+        try:
+            n = (ROOT / rel).read_text().count(old)
+        except OSError as e:
+            stale.append(f"{name}: cannot read {rel} ({e})")
+            continue
+        if n != count:
+            stale.append(f"{name}: expected {count} occurrence(s) of the target in {rel}, found {n}")
+    for s_ in stale:
+        print("STALE   ", s_)
+    print(f"mutation targets: {len(MUTANTS) + len(FRONTEND_MUTANTS) - len(stale)} current, {len(stale)} stale")
+    return 1 if stale else 0
+
+
 def main() -> int:
+    if "--check-targets" in sys.argv[1:]:
+        return check_targets()
     survivors, stale = [], []
     for name, rel, old, new, count in MUTANTS:
         with tempfile.TemporaryDirectory() as tmp:
