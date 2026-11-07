@@ -81,13 +81,13 @@ def test_the_python_and_node_base_images_are_pinned_to_a_major_version_not_lates
 
 # ------------------------------------------------------------------------------------------------------------------------------------ build context
 
-@pytest.mark.parametrize("must_ignore", [".git", ".env", "**/node_modules", "**/__pycache__", "**/identity.json", "**/*.db", "**/*.pem", "frontend/dist"])
+@pytest.mark.parametrize("must_ignore", [".git", "**/.env", "**/.env.*", "**/node_modules", "**/__pycache__", "**/identity.json", "**/*.db", "**/*.pem", "frontend/dist"])
 def test_dockerignore_keeps_secrets_and_junk_out_of_the_build_context(must_ignore):
     assert must_ignore in IGNORE
 
 
 def test_the_example_env_file_is_trackable_and_holds_no_secret_values():
-    assert "!.env.example" in IGNORE
+    assert "!**/.env.example" in IGNORE
     gi = (ROOT / ".gitignore").read_text().splitlines()
     assert "!.env.example" in gi and "!.dockerignore" in gi, ".gitignore's `.*` rule would otherwise hide the Docker support files from git"
     for line in (ROOT / ".env.example").read_text().splitlines():

@@ -60,8 +60,8 @@ COPY eval eval
 COPY sentinel_proxy sentinel_proxy
 COPY demo demo
 COPY tests tests
-COPY frontend/src/types/contracts.ts frontend/src/types/contracts.ts
-COPY frontend/src/lib/drift.ts frontend/src/lib/drift.ts
+COPY frontend/src frontend/src
+COPY docs/examples docs/examples
 COPY scripts/docker/backend_tests.sh /usr/local/bin/backend_tests.sh
 RUN sh /usr/local/bin/backend_tests.sh "$TEST_LEVEL" && mkdir -p /gate && echo "backend tests ($TEST_LEVEL) passed" > /gate/backend
 

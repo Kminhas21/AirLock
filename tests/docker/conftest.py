@@ -26,9 +26,11 @@ def pytest_collection_modifyitems(config, items):
         reason = "docker is not available"
     elif subprocess.run(["docker", "image", "inspect", IMAGE], capture_output=True).returncode != 0:
         reason = f"image {IMAGE} not built (run scripts/docker_test.sh)"
+    if not reason:
+        return
     for item in items:
-        if "docker" in item.keywords:
-            item.add_marker(pytest.mark.skip(reason=reason)) if reason else None
+        if item.get_closest_marker("docker") is not None:        # the MARKER, not the keyword: the directory is called `docker` too
+            item.add_marker(pytest.mark.skip(reason=reason))
 
 
 def sh(*args, check=True, timeout=120):
