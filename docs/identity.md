@@ -5,10 +5,12 @@ Without `SENTINEL_IDENTITY_FILE` nothing changes: one shared `SENTINEL_WS_TOKEN`
 ## Set up
 ```
 cd server
-python -m identity_cli --file /etc/sentinel/identity.json add-operator alice --tenant acme --role admin --create-tenant   # prints alice's token ONCE
-python -m identity_cli --file /etc/sentinel/identity.json add-operator bob --tenant acme --role approver --servers 'fs,git*'
-python -m identity_cli --file /etc/sentinel/identity.json add-operator vera --tenant acme --role viewer
-python -m identity_cli --file /etc/sentinel/identity.json add-agent ci-bot --tenant acme --servers fs                        # prints the agent token ONCE
+export SENTINEL_IDENTITY_FILE=/etc/sentinel/identity.json        # or pass --file <path> AFTER the subcommand
+python -m identity_cli add-operator alice --tenant acme --role admin --create-tenant      # prints alice's token ONCE
+python -m identity_cli add-operator bob --tenant acme --role approver --servers 'fs,git*'
+python -m identity_cli add-operator vera --tenant acme --role viewer
+python -m identity_cli add-agent ci-bot --tenant acme --servers fs                        # prints the agent token ONCE
+python -m identity_cli list; python -m identity_cli lint
 SENTINEL_IDENTITY_FILE=/etc/sentinel/identity.json uvicorn main:app --port 8080
 ```
 The file stores only SHA-256 digests of tokens (0600, atomic writes, `.bak`). Lose a token => `rotate <id>`; leaver => `revoke <id>`; `lint` checks the file. Full schema: `docs/plans/IDENTITY.md`.
