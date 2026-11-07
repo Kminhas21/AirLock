@@ -15,6 +15,7 @@ import pytest
 
 IMAGE = os.environ.get("SENTINEL_TEST_IMAGE", "sentinel:local")
 DEMO_IMAGE = os.environ.get("SENTINEL_TEST_DEMO_IMAGE", "sentinel:demo")
+EMBEDDINGS = os.environ.get("SENTINEL_TEST_EMBEDDINGS", "1") == "1"      # was the image built with PyTorch and the baked-in model?
 ADMIN, AGENT = secrets.token_hex(16), secrets.token_hex(16)        # fresh per run; they only ever exist in the test process and the containers' environment
 
 

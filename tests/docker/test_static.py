@@ -74,6 +74,13 @@ def test_torch_comes_from_a_configurable_cpu_index_by_default():
     assert re.search(r"^ARG TORCH_INDEX_URL=https://download\.pytorch\.org/whl/cpu\s*$", DOCKERFILE, flags=re.M)
 
 
+def test_embeddings_are_an_explicit_build_option_with_a_loud_fallback_when_off():
+    assert re.search(r"^ARG EMBEDDINGS=1\s*$", DOCKERFILE, flags=re.M), "the default image must include PyTorch and the model"
+    assert 'ARG EMBEDDINGS' in stage_body("py-deps") and 'ARG EMBEDDINGS' in stage_body("model")
+    assert "sentence-transformers" in DOCKERFILE and 'EMBEDDINGS" = "1"' in stage_body("py-deps")
+    assert "EMBEDDINGS" in (ROOT / "docker-compose.yml").read_text() and "SENTINEL_DOCKER_EMBEDDINGS" in (ROOT / "scripts/docker_test.sh").read_text()
+
+
 def test_the_python_and_node_base_images_are_pinned_to_a_major_version_not_latest():
     for arg in re.findall(r"^ARG (?:PYTHON_IMAGE|NODE_IMAGE)=(\S+)", DOCKERFILE, flags=re.M):
         assert ":" in arg and not arg.endswith(":latest"), arg

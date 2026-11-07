@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import websockets
 
-from conftest import free_port, sh
+from conftest import EMBEDDINGS, free_port, sh
 
 pytestmark = pytest.mark.docker
 ROOT = Path(__file__).resolve().parents[2]
@@ -44,7 +44,7 @@ def test_the_compose_file_is_valid_and_renders_the_hardened_settings(stack):
 async def test_up_serves_the_hub_and_the_demo_profile_carries_a_call_to_a_human_decision(stack):
     stack.compose("up", "-d", "--no-build", "--wait", "--wait-timeout", "180", timeout=260)
     h = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{stack.port}/health", timeout=10).read())
-    assert h["status"] == "ok" and h["embedder"] == "minilm"
+    assert h["status"] == "ok" and h["embedder"] == ("minilm" if EMBEDDINGS else "stub")
     # the demo agent blocks until a human decides, so start it in the background through compose
     proc = subprocess.Popen(stack.argv("--profile", "demo", "run", "--rm", "--no-build", "demo-agent"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     ws = await websockets.connect(f"ws://127.0.0.1:{stack.port}/inbox/ws", additional_headers={"Authorization": f"Bearer {stack.admin}"})

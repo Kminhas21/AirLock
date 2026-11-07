@@ -6,7 +6,7 @@ import json
 import pytest
 import websockets
 
-from conftest import ADMIN, AGENT, BOOT_ENV, DEMO_IMAGE, IMAGE, sh
+from conftest import ADMIN, AGENT, BOOT_ENV, DEMO_IMAGE, EMBEDDINGS, IMAGE, sh
 
 pytestmark = pytest.mark.docker
 
@@ -34,7 +34,10 @@ def test_the_image_starts_healthy_runs_as_non_root_and_has_the_model_baked_in(st
     assert sh("docker", "exec", c.id, "id", "-u").stdout.strip() == "10001"
     h = c.get_json("/health")
     assert h["status"] == "ok"
-    assert h["embedder"] == "minilm" and h["monitor"] == "action_sim", f"the baked-in model was not used (no network needed at run time): {h}"
+    if EMBEDDINGS:
+        assert h["embedder"] == "minilm" and h["monitor"] == "action_sim", f"the baked-in model was not used (no network needed at run time): {h}"
+    else:        # built with EMBEDDINGS=0: the documented LOUD fallback, never a silent one
+        assert h["embedder"] == "stub" and h["monitor"] == "rules" and h["requested_monitor"] == "action_sim", h
     assert h["monitor_errors"] == 0 and h["session_fallbacks"] == 0
 
 

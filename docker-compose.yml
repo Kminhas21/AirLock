@@ -11,6 +11,7 @@ services:
       args:
         TEST_LEVEL: ${TEST_LEVEL:-fast}          # fast | full | none; the image is not built if its tests fail
         TORCH_INDEX_URL: ${TORCH_INDEX_URL-https://download.pytorch.org/whl/cpu}
+        EMBEDDINGS: ${EMBEDDINGS:-1}                # 0 = no PyTorch/model (small image; monitors fall back to the stub, /health says so)
     image: sentinel:local
     ports:
       - "${SENTINEL_BIND:-127.0.0.1}:${SENTINEL_HOST_PORT:-8080}:8080"        # loopback only by default; put TLS in front before exposing it
@@ -45,6 +46,7 @@ services:
       args:
         TEST_LEVEL: ${TEST_LEVEL:-fast}
         TORCH_INDEX_URL: ${TORCH_INDEX_URL-https://download.pytorch.org/whl/cpu}
+        EMBEDDINGS: ${EMBEDDINGS:-1}
     image: sentinel:demo
     depends_on:
       sentinel:

@@ -13,15 +13,18 @@
 # Build behind a TLS-intercepting proxy / corporate CA:  --build-arg HTTPS_PROXY=... --secret id=buildca,src=/path/ca-bundle.crt
 # Reuse a model cache instead of downloading:             --build-context hfseed=$HOME/.cache/huggingface/hub
 # No access to download.pytorch.org (uses PyPI's much larger CUDA build):  --build-arg TORCH_INDEX_URL=
+# No PyTorch / no model at all (small image; the monitors fall back LOUDLY to the stub embedder and /health says so):  --build-arg EMBEDDINGS=0
 
 ARG PYTHON_IMAGE=python:3.13-slim
 ARG NODE_IMAGE=node:22-slim
 ARG TEST_LEVEL=fast
 ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+ARG EMBEDDINGS=1
 
 # --------------------------------------------------------------------------------------------------------------------------------- Python dependencies
 FROM ${PYTHON_IMAGE} AS py-deps
 ARG TORCH_INDEX_URL
+ARG EMBEDDINGS
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 PIP_NO_CACHE_DIR=1 PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
@@ -31,19 +34,26 @@ COPY seismograph/requirements.txt seismograph/requirements.txt
 COPY requirements-proxy.txt requirements-proxy.txt
 RUN --mount=type=secret,id=buildca,required=false \
     if [ -f /run/secrets/buildca ]; then export PIP_CERT=/run/secrets/buildca SSL_CERT_FILE=/run/secrets/buildca REQUESTS_CA_BUNDLE=/run/secrets/buildca; fi; \
-    if [ -n "$TORCH_INDEX_URL" ]; then pip install torch --index-url "$TORCH_INDEX_URL"; fi; \
-    pip install -r server/requirements.txt -r seismograph/requirements.txt -r requirements-proxy.txt
+    if [ "$EMBEDDINGS" = "1" ]; then \
+        if [ -n "$TORCH_INDEX_URL" ]; then pip install torch --index-url "$TORCH_INDEX_URL"; fi; \
+        pip install -r server/requirements.txt -r seismograph/requirements.txt -r requirements-proxy.txt; \
+    else \
+        grep -iv '^sentence-transformers' seismograph/requirements.txt > /tmp/requirements-core.txt; \
+        pip install -r server/requirements.txt -r /tmp/requirements-core.txt -r requirements-proxy.txt; \
+    fi
 
 # --------------------------------------------------------------------------------------------------------------------------------- the embedding model
 FROM scratch AS hfseed
 # (empty by default; `--build-context hfseed=<dir containing models--sentence-transformers--all-MiniLM-L6-v2>` seeds it)
 FROM py-deps AS model
+ARG EMBEDDINGS
 ENV HF_HOME=/opt/hf
 COPY --from=hfseed / /opt/hf-seed/
 COPY scripts/docker/prefetch_model.py /tmp/prefetch_model.py
 RUN --mount=type=secret,id=buildca,required=false \
     if [ -f /run/secrets/buildca ]; then export SSL_CERT_FILE=/run/secrets/buildca REQUESTS_CA_BUNDLE=/run/secrets/buildca CURL_CA_BUNDLE=/run/secrets/buildca; fi; \
-    python /tmp/prefetch_model.py /opt/hf-seed && rm -rf /opt/hf-seed /tmp/prefetch_model.py
+    if [ "$EMBEDDINGS" = "1" ]; then python /tmp/prefetch_model.py /opt/hf-seed; else mkdir -p /opt/hf; echo "EMBEDDINGS=0: no model baked in"; fi; \
+    rm -rf /opt/hf-seed /tmp/prefetch_model.py
 
 # --------------------------------------------------------------------------------------------------------------------------------- backend tests (gate)
 FROM py-deps AS backend-test
