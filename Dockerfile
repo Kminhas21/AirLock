@@ -130,7 +130,7 @@ CMD ["serve"]
 # --------------------------------------------------------------------------------------------------------------------------------- demo (fake agent + fake downstream)
 FROM runtime AS demo
 USER root
-COPY tests/proxy/fake_downstream.py tests/proxy/agent_cli.py /app/demo_agent/
+COPY tests/proxy/fake_downstream.py tests/proxy/agent_cli.py /app/tests/proxy/
 COPY docker/demo/proxy.json /etc/sentinel/demo-proxy.json
 USER sentinel
 

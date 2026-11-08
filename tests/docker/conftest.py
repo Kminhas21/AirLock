@@ -1,7 +1,8 @@
+import asyncio
+import json
 """Real-container tests (marker `docker`). Skipped unless SENTINEL_DOCKER_TESTS=1 and the images exist:
     scripts/docker_test.sh            builds the images (tests gate the build), then runs these
 They never build anything themselves; they use SENTINEL_TEST_IMAGE (default sentinel:local) and SENTINEL_TEST_DEMO_IMAGE (default sentinel:demo)."""
-import json
 import os
 import secrets
 import shutil
@@ -126,3 +127,18 @@ def network():
 
 BOOT_ENV = {"SENTINEL_BOOTSTRAP_ADMIN_TOKEN": ADMIN, "SENTINEL_BOOTSTRAP_AGENT_TOKEN": AGENT, "SENTINEL_ALLOWED_ORIGINS": "http://localhost:8080",
             "SENTINEL_EVENT_LOG": "/var/lib/sentinel/events.db", "SENTINEL_LOG_KEY": secrets.token_hex(16)}
+
+
+async def next_pending(ws, timeout=120):
+    """The first held call an operator sees. A late-joining operator gets it inside `inbox_snapshot`
+    (sessions[].pending); one already connected gets a live `inbox_pending` -- both are the same call."""
+    async def go():
+        while True:
+            e = json.loads(await ws.recv())
+            if e.get("event") == "inbox_pending":
+                return e
+            if e.get("event") == "inbox_snapshot":
+                for sess in e.get("sessions", []):
+                    if sess.get("pending"):
+                        return {**sess["pending"][0], "session_id": sess["session_id"]}
+    return await asyncio.wait_for(go(), timeout)

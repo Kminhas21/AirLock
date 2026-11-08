@@ -78,6 +78,8 @@ if [ -d frontend/node_modules ]; then
 else
   echo "--- FAIL: frontend/node_modules missing (run: cd frontend && npm ci)"; fail=1
 fi
+# Docker (DECISIONS.md D23): opt in with RUN_DOCKER_TESTS=1 (needs a Docker daemon, ~6 min; see docs/DOCKER.md for the sandbox env vars). The static Docker tests already run in the pytest stage.
+[ "${RUN_DOCKER_TESTS:-0}" = "1" ] && run "docker: test-gated multi-stage build + real containers + compose" bash scripts/docker_test.sh
 [ -f scripts/mutation_check.py ] && run "mutation check (tests must catch re-introduced bugs)" python scripts/mutation_check.py
 echo; [ $fail -eq 0 ] && echo "GATE: GREEN" || echo "GATE: RED"
 exit $fail

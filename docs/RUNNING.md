@@ -92,7 +92,7 @@ Needs `OPENROUTER_API_KEY` (or `OLLAMA_BASE_URL=http://localhost:11434/v1` for a
 
 ## 7. Deploying to AWS (a reference recipe, NOT run or tested here)
 
-**Honest status:** the repo has no Dockerfile, no Terraform/CDK, no systemd unit and no CI deploy. Nothing in this section has been executed on AWS. Proposal #7 (operating the monitor as a service) is not built.
+**Honest status:** the repo now has a tested Dockerfile and compose file (`docs/DOCKER.md`), but no Terraform/CDK, no systemd unit and no CI deploy. Nothing in this section has been executed on AWS. Proposal #7 (operating the monitor as a service) is not built.
 
 **Constraints that shape any deployment**
 1. **Exactly one backend process.** All state (pending calls, sessions, tenant filters, escalation timers) is in memory. Do not run `--workers N`, do not scale beyond one task. A restart denies the in-flight calls (logged as `restart`), by design.
@@ -115,7 +115,7 @@ Needs `OPENROUTER_API_KEY` (or `OLLAMA_BASE_URL=http://localhost:11434/v1` for a
 6. UI: on your machine `cd frontend && VITE_SENTINEL_INBOX_WS_URL=wss://sentinel.example.com/inbox/ws VITE_SENTINEL_WS_URL=wss://sentinel.example.com/ws npm run build`, then upload `frontend/dist` to S3 behind CloudFront, or serve it from the same nginx. Do **not** set `VITE_SENTINEL_WS_TOKEN` (identity mode).
 7. Point DNS at it. Test: `curl https://sentinel.example.com/health`, sign in at the UI, run section 3 on a laptop with `"backend": "wss://sentinel.example.com/proxy/ws"` and `SENTINEL_AGENT_TOKEN`.
 
-**Recipe B, ECS Fargate + ALB (more AWS-native, more work).** Needs a Dockerfile you would have to write (python:3.13-slim, install the requirements, copy `server/ seismograph/ eval/`, bake MiniLM, run uvicorn as above). Desired count **1**, ALB idle timeout 3600 s, health check `GET /health`, secrets from Secrets Manager into env, ephemeral storage only (so the event log is lost on a task replacement unless you use EBS via ECS-on-EC2). The UI goes to S3+CloudFront as above.
+**Recipe B, ECS Fargate + ALB (more AWS-native, more work).** Use the repo's `Dockerfile` (`docs/DOCKER.md`; it already contains the UI, bakes MiniLM, runs as non-root and reports `/health`); push it to ECR. Desired count **1**, ALB idle timeout 3600 s, health check `GET /health`, secrets from Secrets Manager into env, ephemeral storage only (so the event log is lost on a task replacement unless you use EBS via ECS-on-EC2). The UI goes to S3+CloudFront as above.
 
 **What I would not do yet:** put it on the public internet without identity mode and TLS; run more than one backend process; rely on the sandbox features on Fargate (Landlock/user namespaces may be unavailable there: the sandbox then **fails closed**, i.e. sandboxed servers refuse to start).
 

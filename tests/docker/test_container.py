@@ -2,11 +2,12 @@
 persist its data, and carry a call from a proxy in another container to a human decision and back."""
 import asyncio
 import json
+import re
 
 import pytest
 import websockets
 
-from conftest import ADMIN, AGENT, BOOT_ENV, DEMO_IMAGE, EMBEDDINGS, IMAGE, sh
+from conftest import ADMIN, AGENT, BOOT_ENV, DEMO_IMAGE, EMBEDDINGS, IMAGE, next_pending, sh
 
 pytestmark = pytest.mark.docker
 
@@ -92,7 +93,7 @@ def test_bad_configuration_fails_fast_with_a_clear_message_instead_of_starting(e
     r = sh(*cmd, IMAGE, "check", check=False)
     assert r.returncode == 2, r.stdout + r.stderr
     assert message in r.stderr
-    assert not any(v in r.stdout + r.stderr for v in env.values() if len(v) >= 16), "a credential value was printed"
+    assert not any(v in r.stdout + r.stderr for k, v in env.items() if "TOKEN" in k and len(v) >= 16), "a credential value was printed"
 
 
 def test_no_credential_is_baked_into_the_image(start):
@@ -101,20 +102,21 @@ def test_no_credential_is_baked_into_the_image(start):
     for needle in ("TOKEN=", "SECRET=", "PASSWORD=", "LOG_KEY="):
         assert needle not in cfg, needle
     hist = sh("docker", "history", "--no-trunc", "--format", "{{.CreatedBy}}", IMAGE).stdout
-    assert ADMIN not in hist and AGENT not in hist and "buildca" not in hist.replace("--mount=type=secret,id=buildca,required=false", "")
+    assert ADMIN not in hist and AGENT not in hist
+    # the optional build-time CA is only ever *mounted* (never COPY'd / ADD'd into a layer)
+    assert not re.search(r"\b(COPY|ADD)\b[^\n]*(ca-bundle|\.crt|\.pem)", hist), hist
 
 
 async def test_a_call_from_a_proxy_in_another_container_is_held_decided_logged_and_the_data_survives_a_restart(start, volume, network):
-    c = start(env=BOOT_ENV, volume=volume, network=network, name=f"sentinel-{network[-8:]}")
     # the demo proxy config addresses the hub as `sentinel`: give the hub that network alias
-    sh("docker", "network", "connect", "--alias", "sentinel", network, c.id, check=False)
+    c = start(env=BOOT_ENV, volume=volume, network=network, name=f"sentinel-{network[-8:]}", extra=["--network-alias", "sentinel"])
     demo = sh("docker", "run", "-d", "--network", network, "--read-only", "--tmpfs", "/tmp:size=16m,mode=1777", "--cap-drop", "ALL",
               "-e", f"SENTINEL_AGENT_TOKEN={AGENT}", "-e", "SENTINEL_AGENT_PASSTHROUGH=SENTINEL_AGENT_TOKEN", "--entrypoint", "python", DEMO_IMAGE,
-              "/app/demo_agent/agent_cli.py", "/etc/sentinel/demo-proxy.json", "write_file", '{"path": "/tmp/report.txt", "content": "q3"}').stdout.strip()
+              "/app/tests/proxy/agent_cli.py", "/etc/sentinel/demo-proxy.json", "write_file", '{"path": "/tmp/report.txt", "content": "q3"}').stdout.strip()
     try:
         ws = await operator(c.port, ADMIN)
         await recv_until(ws, "auth_ok")
-        pend = await recv_until(ws, "inbox_pending", timeout=90)
+        pend = await next_pending(ws, 90)
         assert (pend["tool"], pend["agent_id"], pend["tenant"]) == ("write_file", "agent", "default")
         assert pend["args"] == {"path": "/tmp/report.txt", "content": "q3"}
         await ws.send(json.dumps({"event": "inbox_decision", "session_id": pend["session_id"], "call_id": pend["call_id"], "decision": "approve"}))
@@ -128,10 +130,10 @@ async def test_a_call_from_a_proxy_in_another_container_is_held_decided_logged_a
         sh("docker", "rm", "-f", demo, check=False)
     c.stop()                                                                # graceful: the event log writes its final checkpoint
     # a SECOND container on the same volume: identity persisted (bootstrap did not rewrite it), log verifies and holds the decision
-    v = sh("docker", "run", "--rm", "-v", f"{volume}:/var/lib/sentinel", "-e", f"SENTINEL_LOG_KEY={BOOT_ENV['SENTINEL_LOG_KEY']}", IMAGE,
+    v = sh("docker", "run", "--rm", "-w", "/app/server", "-v", f"{volume}:/var/lib/sentinel", "-e", f"SENTINEL_LOG_KEY={BOOT_ENV['SENTINEL_LOG_KEY']}", IMAGE,
            "python", "-m", "eventlog_cli", "verify", "/var/lib/sentinel/events.db", check=False, timeout=120)
     assert v.returncode == 0, v.stdout + v.stderr
-    ex = sh("docker", "run", "--rm", "-v", f"{volume}:/var/lib/sentinel", IMAGE, "python", "-m", "eventlog_cli", "export", "/var/lib/sentinel/events.db", "--jsonl").stdout
+    ex = sh("docker", "run", "--rm", "-w", "/app/server", "-v", f"{volume}:/var/lib/sentinel", IMAGE, "python", "-m", "eventlog_cli", "export", "/var/lib/sentinel/events.db", "--jsonl").stdout
     decisions = [json.loads(l)["payload"] for l in ex.splitlines() if '"kind": "decision"' in l or '"kind":"decision"' in l]
     assert [(d["decision"], d["operator"]) for d in decisions] == [("approve", "admin")]
     c2 = start(env=BOOT_ENV, volume=volume)

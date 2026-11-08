@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 import websockets
 
-from conftest import EMBEDDINGS, free_port, sh
+from conftest import EMBEDDINGS, free_port, next_pending, sh
 
 pytestmark = pytest.mark.docker
 ROOT = Path(__file__).resolve().parents[2]
@@ -46,7 +46,7 @@ async def test_up_serves_the_hub_and_the_demo_profile_carries_a_call_to_a_human_
     h = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{stack.port}/health", timeout=10).read())
     assert h["status"] == "ok" and h["embedder"] == ("minilm" if EMBEDDINGS else "stub")
     # the demo agent blocks until a human decides, so start it in the background through compose
-    proc = subprocess.Popen(stack.argv("--profile", "demo", "run", "--rm", "--no-build", "demo-agent"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    proc = subprocess.Popen(stack.argv("--profile", "demo", "run", "--rm", "demo-agent"), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     ws = await websockets.connect(f"ws://127.0.0.1:{stack.port}/inbox/ws", additional_headers={"Authorization": f"Bearer {stack.admin}"})
     try:
         async def until(name, timeout=120):
@@ -57,7 +57,11 @@ async def test_up_serves_the_hub_and_the_demo_profile_carries_a_call_to_a_human_
                         return e
             return await asyncio.wait_for(go(), timeout)
         await until("auth_ok")
-        pend = await until("inbox_pending", 150)
+        try:
+            pend = await next_pending(ws, 150)
+        except TimeoutError:
+            proc.kill()
+            raise AssertionError("no held call reached the operator; demo-agent said:\n" + (proc.communicate()[0] or "")[-2500:])
         assert pend["tool"] == "write_file" and pend["args"]["path"] == "/tmp/report.txt"
         await ws.send(json.dumps({"event": "inbox_decision", "session_id": pend["session_id"], "call_id": pend["call_id"], "decision": "deny"}))
         out, _ = proc.communicate(timeout=120)
