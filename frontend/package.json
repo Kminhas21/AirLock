@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "journeys": "vite build && playwright test -c playwright.journeys.config.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.10.1",
