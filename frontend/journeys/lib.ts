@@ -79,12 +79,16 @@ export async function startStack(env: Record<string, string> = {}): Promise<Stac
       cwd: path.join(ROOT, "server"),
       env: {
         ...process.env, SENTINEL_UI_DIR: DIST, SENTINEL_ALLOWED_ORIGINS: `http://127.0.0.1:${port},http://localhost:${port}`,
-        SENTINEL_MONITOR: "rules", SENTINEL_EMBEDDER: "stub", HF_HUB_OFFLINE: "1", SENTINEL_GATE_TIMEOUT_S: "120", ...env,
+        SENTINEL_MONITOR: "rules", SENTINEL_EMBEDDER: "minilm", SENTINEL_HEALTH_DETAIL: "1", HF_HUB_OFFLINE: "1", SENTINEL_GATE_TIMEOUT_S: "120", ...env,
       },
     });
     proc.stdout?.on("data", (d) => { out += d; });
     proc.stderr?.on("data", (d) => { out += d; });
     await waitHealthy(`http://127.0.0.1:${port}/health`, proc);
+    // a silent fallback to the hashing stub must FAIL a journey that asked for the real embedding model
+    const want = (env.SENTINEL_EMBEDDER ?? "minilm");
+    const got = (await (await fetch(`http://127.0.0.1:${port}/health`)).json()).embedder;
+    if (want === "minilm" && got !== "minilm") throw new Error(`asked for the MiniLM embedder but /health says "${got}"`);
   };
   const stopProc = () => new Promise<void>((res) => {
     if (!proc || proc.exitCode !== null || proc.signalCode !== null) return res();
@@ -130,7 +134,7 @@ export async function signIn(page: Page, token: string) {
   await page.locator('[data-testid="inbox-signin-submit"]').click();
 }
 
-export function sh(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv } = {}) {
-  const r = spawnSync(cmd, args, { encoding: "utf8", ...opts });
-  return { code: r.status ?? -1, out: (r.stdout ?? "") + (r.stderr ?? "") };
+export function sh(cmd: string, args: string[], opts: { cwd?: string; env?: NodeJS.ProcessEnv; input?: string } = {}) {
+  const r = spawnSync(cmd, args, { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, ...opts });
+  return { code: r.status ?? -1, out: (r.stdout ?? "") + (r.stderr ?? ""), stdout: r.stdout ?? "" };
 }
