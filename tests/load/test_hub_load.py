@@ -58,8 +58,10 @@ def test_every_decision_a_client_saw_is_in_the_log_exactly_once_with_the_same_ve
 
 
 def test_calls_held_when_the_agent_vanished_are_denied_not_lost(loaded):
-    """KNOWN GAP (docs/TESTING_REALITY.md): a call whose proxy dies in the same instant it sends the proposal is not logged at all; a call that was HELD first is."""
+    """Half the aborting sessions close in the same instant as the proposal, half after it was held: every such call is logged as proposed, then denied by the system as disconnected."""
     rep, _, db = loaded
     _, _, events = verify_log(db)
+    proposed = {e["call_id"] for e in events if e["kind"] == "call_proposed"}
+    assert rep.aborted_calls <= proposed, f"aborted calls missing from the log: {len(rep.aborted_calls - proposed)}"
     gone = [e for e in events if e["kind"] == "decision" and e["payload"].get("reason") == "disconnected" and e["payload"].get("actor") == "system"]
     assert rep.aborted_sessions == 0 or gone, f"{rep.aborted_sessions} sessions vanished mid-call but no 'agent gone' decision was logged"

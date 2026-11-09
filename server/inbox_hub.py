@@ -738,9 +738,7 @@ class InboxHub:
                 working = False
         if call_id in session.cancelled_early:     # the proxy dropped it while the monitor ran: never hold or approve
             return
-        if session.closed:
-            await self._register(session, tool, args, "deny")
-            return
+        # (a session closed while the monitor ran is NOT dropped here: call_proposed is written first, then denied/disconnected below)
 
         rule_id: str | None = None
         digest: str | None = None

@@ -218,12 +218,28 @@ async def test_authentication_matrix(world):
     assert [e for e in seen if e.get("event") == "auth_error"] and seen[0]["reason"] == "throttled"
 
 
+async def _agent_hello(world, token, servers, late: float = 0.0):
+    """Send a proxy_hello and return the hub's first frame. `late` delays our hello: the hub rejects an unauthenticated agent and CLOSES (1008) without
+    waiting for it, so on a slow machine our send can come after the close. The rejection frame is still queued and must still be readable
+    (this was a load-dependent flake in the original test: ConnectionClosed raised by `ws.send`)."""
+    hdr = {"Authorization": f"Bearer {token}"} if token else {}
+    async with websockets.connect(f"ws://127.0.0.1:{world.port}/proxy/ws", additional_headers=hdr) as ws:
+        await asyncio.sleep(late)
+        try:
+            await ws.send(json.dumps({"event": "proxy_hello", "session_id": "raw-1", "servers": servers, "auto_approve": []}))
+        except websockets.ConnectionClosed:
+            pass                                                   # rejected before we spoke; the reject frame is still in the receive queue
+        return json.loads(await asyncio.wait_for(ws.recv(), 10))
+
+
+async def test_a_rejection_is_readable_even_when_the_client_sends_its_hello_after_the_hub_closed(world):
+    assert await _agent_hello(world, None, ["fs"], late=0.5) == {"event": "hello_reject", "reason": "unauthorized"}
+    assert await _agent_hello(world, TOK["bob"], ["fs"], late=0.5) == {"event": "hello_reject", "reason": "unauthorized"}
+
+
 async def test_agents_authenticate_and_cannot_declare_servers_outside_their_allowlist(world):
     async def hello(token, servers):
-        hdr = {"Authorization": f"Bearer {token}"} if token else {}
-        async with websockets.connect(f"ws://127.0.0.1:{world.port}/proxy/ws", additional_headers=hdr) as ws:
-            await ws.send(json.dumps({"event": "proxy_hello", "session_id": "raw-1", "servers": servers, "auto_approve": []}))
-            return json.loads(await asyncio.wait_for(ws.recv(), 10))
+        return await _agent_hello(world, token, servers)
     assert (await hello(TOK["ag_acme"], ["fs"]))["event"] == "hello_ack"
     assert await hello(TOK["ag_acme"], ["secretsrv"]) == {"event": "hello_reject", "reason": "forbidden_server"}
     assert await hello(None, ["fs"]) == {"event": "hello_reject", "reason": "unauthorized"}

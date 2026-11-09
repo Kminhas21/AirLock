@@ -103,6 +103,9 @@ MUTANTS = [
     ("H4 agent loop: list-of-parts content is passed through un-normalised", "server/agent_loop.py", "        content = _content_text(message.content)", "        content = message.content or \"\"", 1),
     ("H5 proxy: an oversize call is sent anyway (the hub drops the whole link)", "sentinel_proxy/backend.py", "if len(frame.encode()) > MAX_FRAME_BYTES:", "if False:", 1),
     ("H6 proxy and hub disagree about the frame limit", "sentinel_proxy/backend.py", "MAX_FRAME_BYTES = 1_000_000 ", "MAX_FRAME_BYTES = 2_000_000 ", 1),
+    ("H7 hub: a call whose proxy closed while the monitor ran is dropped BEFORE call_proposed (vanishes from the audit trail)", "server/inbox_hub.py", "        # (a session closed while the monitor ran is NOT dropped here: call_proposed is written first, then denied/disconnected below)\n", "        if session.closed:\n            return\n", 1),
+    ("H8 replay ignores the logged denials (denied-effect alerts never fire)", "server/eventlog_cli.py", '            mon.register_decision(c["tool"], c["args"], c["decision"])', '            pass', 1),
+    ("H9 verify --previous does not compare the archive head with log_continues", "server/eventlog_cli.py", 'if (p.get("head_seq"), p.get("head_hash")) != (seq, h):', 'if False:', 1),
 ]
 
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.

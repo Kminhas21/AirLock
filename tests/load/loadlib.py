@@ -31,6 +31,7 @@ class Report:
     sessions: int = 0
     calls_decided: int = 0
     aborted_sessions: int = 0
+    aborted_calls: set[str] = field(default_factory=set)          # call_ids sent just before the agent host died
     latencies: list[float] = field(default_factory=list)
     decisions: dict[str, str] = field(default_factory=dict)       # call_id -> approve|deny as the CLIENT saw it
     errors: list[str] = field(default_factory=list)
@@ -65,7 +66,9 @@ async def _session(backend: Backend, i: int, calls: int, rep: Report, rnd: rando
                 await ws.send(json.dumps({"event": "proxy_call", "call_id": cid, "server": "fs", "tool": tool, "args": args, "auto": False, "secrets_used": []}))
                 if abort_at is not None and n == abort_at:
                     rep.aborted_sessions += 1
-                    await asyncio.sleep(rnd.uniform(0.08, 0.3))        # the call is HELD for a moment, then the agent host dies
+                    rep.aborted_calls.add(cid)
+                    if i % 2:                                          # half of the aborters: the call is HELD for a moment, then the agent host dies
+                        await asyncio.sleep(rnd.uniform(0.08, 0.3))    # the other half: closed in the same instant as the proposal
                     await ws.close()
                     return
                 while True:

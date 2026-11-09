@@ -39,7 +39,7 @@ log = logging.getLogger("sentinel.eventlog")
 SCHEMA_VERSION = 1
 GENESIS = "0" * 64
 KINDS = ("log_open", "proxy_hello", "proxy_close", "call_proposed", "decision", "call_result", "checkpoint",
-         "policy_rule_added", "auth_failed", "notification")
+         "policy_rule_added", "auth_failed", "notification", "log_continues")
 _RESERVED = ("log_open", "checkpoint")                  # written by the store itself, never by callers
 _NEEDS_CALL = ("call_proposed", "decision", "call_result")
 SECRET_KEY_PARTS = ("password", "passwd", "secret", "token", "apikey", "api_key", "authorization", "cookie",

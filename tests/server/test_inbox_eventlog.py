@@ -448,3 +448,37 @@ def test_real_store_chain_is_valid_after_shutdown(real):
     dec = [e for e in store.events() if e.kind == "decision"][0]
     assert dec.payload["reason"] == "human" and dec.payload["actor"] == "human"
     store.close()
+
+
+class _VanishingWS:
+    """A proxy socket that sends its frames and reports disconnect on the very next receive (no wait)."""
+
+    def __init__(self, *frames):
+        self.q = [{"type": "websocket.receive", "text": json.dumps(f)} for f in frames]
+        self.sent = []
+
+    async def receive(self):
+        return self.q.pop(0) if self.q else {"type": "websocket.disconnect"}
+
+    async def send_json(self, payload):
+        self.sent.append(payload)
+
+    async def close(self, code=1000):
+        pass
+
+
+async def test_call_sent_then_immediate_disconnect_is_still_logged_as_proposed(tmp_path):
+    """The audit gap: proxy_call then an instant close must still leave call_proposed, then a system deny/disconnected."""
+    db = tmp_path / "e.db"
+    hub = InboxHub(gate_timeout=5.0, monitor_factory=FakeMonitor)   # on_proposal runs in a thread: the close lands while it runs
+    await hub.open_log_from_env({"SENTINEL_EVENT_LOG": str(db), "SENTINEL_LOG_KEY": KEY})
+    await inbox_hub.serve_proxy(hub, _VanishingWS(HELLO, call("v1")))
+    await hub.close_log()
+    assert eventlog.verify_file(db, key=KEY.encode()).ok
+    store = eventlog.EventStore.open_readonly(db, key=KEY.encode())
+    evs = [(e.kind, e.call_id, e.payload) for e in store.events() if e.kind in ("call_proposed", "decision", "proxy_close")]
+    store.close()
+    kinds = [k for k, _, _ in evs]
+    assert kinds == ["call_proposed", "decision", "proxy_close"], kinds
+    assert evs[0][1] == "v1" and evs[1][1] == "v1"
+    assert evs[1][2]["decision"] == "deny" and evs[1][2]["reason"] == "disconnected" and evs[1][2]["actor"] == "system"

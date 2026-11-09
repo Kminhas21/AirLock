@@ -13,7 +13,7 @@ one terminal record, history survives reconnects, and tampering is detectable. F
   `decision` gets a `decision` (deny, reason `restart`, actor `system`) so the audit invariant "every proposed call has exactly one decision" holds. The Inbox snapshot after a restart shows recent history from the log.
 - Privacy: before storage, values under secret-looking keys (case-insensitive substring match on `password passwd secret token apikey api_key authorization cookie credential private_key access_key`) become
   `"[REDACTED]"` (recursively); strings are cut at 8,192 chars with a marker; a payload over 64 KB becomes `{"_truncated": true, "_orig_bytes": N, "_orig_sha256": "..."}`. The hash chain covers the STORED (redacted) form.
-- No deletion in v1 (append-only). Retention/rotation is a follow-up (documented).
+- No deletion (append-only). Retention is by rotation: `eventlog_cli rotate` archives the whole log and starts a new one (see docs/eventlog.md).
 
 ## Schema
 `events(seq INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL NOT NULL, session_id TEXT, call_id TEXT, kind TEXT NOT NULL, payload TEXT NOT NULL, prev_hash TEXT NOT NULL, hash TEXT NOT NULL)`.
@@ -69,4 +69,4 @@ Protocol additions: `proxy_decision.reason` may be `log_unavailable`; `inbox_sna
 | EL4 | proxy reason + UI history | `sentinel_proxy/`, `frontend/src/**` |
 | EL5 | e2e (kill -9, restart, tamper), gate stage, mutants, docs/eventlog.md, DECISIONS D19, issue #4 comment | tests/e2e, scripts, docs |
 
-Non-goals now: Postgres, retention/rotation/pruning, signed external transparency log, replaying logged sessions through the monitors (embedder/registry state), encryption at rest, multi-writer.
+Non-goals now: Postgres, pruning, signed external transparency log, encryption at rest, multi-writer. (Built since: `eventlog_cli replay`, `rotate`, `verify --previous`.)

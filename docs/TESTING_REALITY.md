@@ -28,7 +28,7 @@ the mutation check; every bug they found also has a fast in-process regression t
 | hostile model, `list_content_parts` | assistant content as a list of parts reached the embedder and raised | session died | `_content_text` normaliser; mutant H4 |
 | real servers, 2 MB argument | the hub drops the proxy's whole link on a frame over 1 MB | the agent saw "backend connection lost", and **every other pending call of that session was denied** | the proxy denies only that call, locally, with a clear reason; mutants H5, H6 |
 | real servers, `search_files` | (my test assumed substring matching; the real server uses globs) | none, a test bug | test fixed; recorded because it shows how a fake downstream hides real semantics |
-| load, vanished agent | a call whose proxy dies in the same instant it sends the proposal is **never logged** | no side effect (nothing was approved), but the attempt is missing from the audit trail | NOT fixed, see "Known gaps" |
+| load, vanished agent | a call whose proxy dies in the same instant it sends the proposal was **never logged** (`_run_call_inner` returned on `session.closed` after the monitor ran, before `call_proposed`) | no side effect (nothing was approved), but the attempt was missing from the audit trail | fixed: the closed check now comes after the write-ahead `call_proposed`; `test_call_sent_then_immediate_disconnect_is_still_logged_as_proposed`, mutant H7 |
 
 Measured on this machine (real MiniLM, 100 sessions x 20 calls, 3 operators): about 38 decided calls/s, p50 decision latency about 2.4 s (queueing:
 one call at a time through the monitor, so latency is about concurrency / throughput), `/health` worst 24 ms, memory flat (+10 MB), event log
@@ -49,13 +49,12 @@ verified with 5,879 events. The hub is single-process by design, so this is its 
 
 ## Known gaps (not fixed, not hidden)
 
-1. A proposal whose connection closes in the same instant is not logged (see above). Consider logging `call_proposed` before anything else on receipt.
-2. The ceiling is about 38 calls/s and one process. There is no soak test longer than a few minutes; run `python -m tests.load.loadlib --sessions 200 --calls 50 --seconds 3600` for one.
-3. Only one real model (gpt-4o-mini) has been run, once; real clients (Claude Desktop, Cursor) never.
-4. Detector thresholds were tuned on synthetic, one-model-family traces (D12 to D14). Nothing here tests detection quality on real traffic.
-5. No TLS (`wss`), no load balancer, no Fargate, no Firefox/Safari; the default CPU-PyTorch image was never built end to end here.
-6. Provider error bodies are written to the server log (a provider that echoes a key fragment would put it there); the client never sees them.
-7. The reference servers are well behaved. Slow, huge-reply, hanging and progress-notification servers are still untested.
+1. The ceiling is about 38 calls/s and one process. There is no soak test longer than a few minutes; run `python -m tests.load.loadlib --sessions 200 --calls 50 --seconds 3600` for one.
+2. Only one real model (gpt-4o-mini) has been run, once; real clients (Claude Desktop, Cursor) never.
+3. Detector thresholds were tuned on synthetic, one-model-family traces (D12 to D14). Nothing here tests detection quality on real traffic.
+4. No TLS (`wss`), no load balancer, no Fargate, no Firefox/Safari; the default CPU-PyTorch image was never built end to end here.
+5. Provider error bodies are written to the server log (a provider that echoes a key fragment would put it there); the client never sees them.
+6. The reference servers are well behaved. Slow, huge-reply, hanging and progress-notification servers are still untested.
 
 ## How to use this
 
