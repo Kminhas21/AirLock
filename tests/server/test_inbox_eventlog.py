@@ -482,3 +482,66 @@ async def test_call_sent_then_immediate_disconnect_is_still_logged_as_proposed(t
     assert kinds == ["call_proposed", "decision", "proxy_close"], kinds
     assert evs[0][1] == "v1" and evs[1][1] == "v1"
     assert evs[1][2]["decision"] == "deny" and evs[1][2]["reason"] == "disconnected" and evs[1][2]["actor"] == "system"
+
+
+class _AckFailsWS(_VanishingWS):
+    """The proxy is already gone when the hello_ack goes out (send raises) but its frames are still queued."""
+
+    async def send_json(self, payload):
+        raise RuntimeError("peer gone")
+
+
+async def _serve_ack_fails(tmp_path, *frames):
+    db = tmp_path / "e.db"
+    hub = InboxHub(gate_timeout=5.0, monitor_factory=FakeMonitor)
+    await hub.open_log_from_env({"SENTINEL_EVENT_LOG": str(db), "SENTINEL_LOG_KEY": KEY})
+    await asyncio.wait_for(inbox_hub.serve_proxy(hub, _AckFailsWS(*frames)), 5)
+    sessions = dict(hub.sessions)
+    await hub.close_log()
+    assert eventlog.verify_file(db, key=KEY.encode()).ok
+    store = eventlog.EventStore.open_readonly(db, key=KEY.encode())
+    evs = [(e.kind, e.call_id, e.payload) for e in store.events() if e.kind in ("proxy_hello", "call_proposed", "decision", "proxy_close")]
+    store.close()
+    return evs, sessions
+
+
+async def test_failed_hello_ack_still_reads_the_queued_call_and_logs_it_as_proposed(tmp_path):
+    """Same-instant hello+call+close: the ack send fails, but the already-queued call must still be read and logged."""
+    evs, sessions = await _serve_ack_fails(tmp_path, HELLO, call("v1"))
+    assert [k for k, _, _ in evs] == ["proxy_hello", "call_proposed", "decision", "proxy_close"], evs
+    assert evs[1][1] == "v1" and evs[2][1] == "v1"
+    assert evs[2][2]["decision"] == "deny" and evs[2][2]["reason"] == "disconnected" and evs[2][2]["actor"] == "system"
+    assert not sessions
+
+
+async def test_failed_hello_ack_without_a_call_logs_hello_and_close_and_leaks_nothing(tmp_path):
+    evs, sessions = await _serve_ack_fails(tmp_path, HELLO)
+    assert [k for k, _, _ in evs] == ["proxy_hello", "proxy_close"], evs
+    assert not sessions
+
+
+class _AckFailsHangingWS(_AckFailsWS):
+    """Ack send fails and, after the queued frames, receive() never returns (a socket the server knows is dead but the ASGI layer has not reported)."""
+
+    async def receive(self):
+        if self.q:
+            return self.q.pop(0)
+        await asyncio.sleep(3600)
+
+
+async def test_a_call_on_a_peer_known_to_be_dead_is_denied_disconnected_not_held_or_auto_approved(tmp_path):
+    db = tmp_path / "e.db"
+    hub = InboxHub(gate_timeout=30.0, monitor_factory=FakeMonitor)
+    await hub.open_log_from_env({"SENTINEL_EVENT_LOG": str(db), "SENTINEL_LOG_KEY": KEY})
+    held = {**call("held1")}
+    auto = {**call("auto1"), "auto": True}
+    task = asyncio.create_task(inbox_hub.serve_proxy(hub, _AckFailsHangingWS(HELLO, held, auto)))
+    await asyncio.sleep(1.0)                       # far less than the 30 s gate timeout: both must ALREADY be resolved (read before any cleanup)
+    store = eventlog.EventStore.open_readonly(db, key=KEY.encode())
+    decisions = {e.call_id: e.payload for e in store.events() if e.kind == "decision"}
+    store.close()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await hub.close_log()
+    for cid in ("held1", "auto1"):
+        assert decisions[cid]["decision"] == "deny" and decisions[cid]["reason"] == "disconnected" and decisions[cid]["actor"] == "system", decisions

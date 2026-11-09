@@ -199,7 +199,9 @@ test("replan nodes after a denial are drawn with the dashed denial-fork edge", a
   await page.locator(".btn-approve").first().click(); // list_directory
   await expect(page.locator(".btn-deny").first()).toBeVisible();
   await page.locator(".btn-deny").first().click(); // send_email
-  await expect(page.locator(".btn-deny").first()).toBeVisible(); // slack: first replan
+  // wait for the replan frame itself: `.btn-deny` is ALSO the (still visible) send_email button until the server answers, so waiting for
+  // "a deny button" races the server (it failed ~1 run in 6 on a loaded machine, also before the event-log work)
+  await expect.poll(() => names(received, "tool_pending").length, { timeout: 15_000 }).toBe(3);
   expect(names(received, "tool_pending").map((p) => p.node_type)).toEqual(["tool_call", "tool_call", "replan"]);
   await expect(page.locator(".replan-wrapper")).toHaveCount(1);
   const dashed = await page.locator(".react-flow__edge-path").evaluateAll(

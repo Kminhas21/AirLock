@@ -601,8 +601,9 @@ class InboxHub:
                 return await reject("log_unavailable")
             session.logged_hello = True
         if not await conn.send({"event": "hello_ack", "session_id": sid}):
-            await self.proxy_closed(session)
-            return None
+            # the proxy is already gone, but frames it queued first (a call sent in the same instant) are still readable:
+            # keep the session so serve_proxy reads them; its finally-cleanup denies and logs whatever is pending
+            return session
         # a UI that is already open learns the servers and the boundary from this event (the snapshot only reaches UIs that connect later):
         # without them a sandboxed session would be displayed as unsandboxed
         self._spawn(self._broadcast({"event": "inbox_session", "session_id": sid, "state": "open",
@@ -793,7 +794,7 @@ class InboxHub:
         if call_id in session.cancelled_early:
             await self._log_decision(session, call_id, "deny", "cancelled", "system", rule_id, digest)
             return
-        if session.closed:
+        if session.closed or session.conn.dead:        # a peer we know is dead can receive no decision: never hold or auto-approve for it
             await self._log_decision(session, call_id, "deny", "disconnected", "system", rule_id, digest)
             await self._register(session, tool, args, "deny")
             return

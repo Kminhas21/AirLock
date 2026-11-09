@@ -106,6 +106,8 @@ MUTANTS = [
     ("H7 hub: a call whose proxy closed while the monitor ran is dropped BEFORE call_proposed (vanishes from the audit trail)", "server/inbox_hub.py", "        # (a session closed while the monitor ran is NOT dropped here: call_proposed is written first, then denied/disconnected below)\n", "        if session.closed:\n            return\n", 1),
     ("H8 replay ignores the logged denials (denied-effect alerts never fire)", "server/eventlog_cli.py", '            mon.register_decision(c["tool"], c["args"], c["decision"])', '            pass', 1),
     ("H9 verify --previous does not compare the archive head with log_continues", "server/eventlog_cli.py", 'if (p.get("head_seq"), p.get("head_hash")) != (seq, h):', 'if False:', 1),
+    ("H10 a failed hello_ack abandons the connection (a call queued in the same instant is never read nor logged)", "server/inbox_hub.py", '            return session\n        # a UI that is already open learns', '            await self.proxy_closed(session)\n            return None\n        # a UI that is already open learns', 1),
+    ("H11 hub: a call on a peer already known to be dead is held or auto-approved instead of denied", "server/inbox_hub.py", "if session.closed or session.conn.dead:", "if session.closed:", 1),
 ]
 
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.

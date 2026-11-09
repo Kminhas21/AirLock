@@ -67,6 +67,7 @@ async def _session(backend: Backend, i: int, calls: int, rep: Report, rnd: rando
                 if abort_at is not None and n == abort_at:
                     rep.aborted_sessions += 1
                     rep.aborted_calls.add(cid)
+                    # even index: abort_at is 0, so hello + call + close go out back to back, the hello_ack is never awaited
                     if i % 2:                                          # half of the aborters: the call is HELD for a moment, then the agent host dies
                         await asyncio.sleep(rnd.uniform(0.08, 0.3))    # the other half: closed in the same instant as the proposal
                     await ws.close()
@@ -103,7 +104,7 @@ async def run_load(backend: Backend, *, sessions: int, calls: int, operators: in
     t0 = time.monotonic()
     pr = asyncio.create_task(probe())
     aborters = set(rnd.sample(range(sessions), int(sessions * abort_fraction)))
-    await asyncio.gather(*[_session(backend, i, calls, rep, random.Random(seed * 1000 + i), (rnd.randrange(1, max(2, calls)) if i in aborters else None), t0 + seconds)
+    await asyncio.gather(*[_session(backend, i, calls, rep, random.Random(seed * 1000 + i), ((0 if i % 2 == 0 else rnd.randrange(1, max(2, calls))) if i in aborters else None), t0 + seconds)
                            for i in range(sessions)])
     await asyncio.sleep(1.0)                                            # let the last broadcasts land
     stop["flag"] = True
