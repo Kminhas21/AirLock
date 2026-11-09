@@ -96,6 +96,13 @@ MUTANTS = [
     ("R4 denied-party match ignored when choosing the earlier denied proposal for the alert text", "server/proposal_monitor.py",
      'pool = [d for d in self._denied_props if party in d[2].reaches] or list(self._denied_props)',
      'pool = list(self._denied_props)', 1),
+    # found by running hostile models / real servers (DECISIONS.md D25)
+    ("H1 effects: the file-name pattern is quadratic again (one 200 KB argument froze the hub)", "eval/effects.py", r"[\w./\-]{0,255}\w\.(?:csv", r"[\w./\-]*\w\.(?:csv", 1),
+    ("H2 effects: the whole hostile argument is scanned, not a bounded window", "eval/effects.py", "_FILE_RE.findall(t[:_SCAN_LIMIT])", "_FILE_RE.findall(t)", 1),
+    ("H3 agent loop: a response with no choices raises IndexError", "server/agent_loop.py", 'if not getattr(response, "choices", None):', "if False:", 1),
+    ("H4 agent loop: list-of-parts content is passed through un-normalised", "server/agent_loop.py", "        content = _content_text(message.content)", "        content = message.content or \"\"", 1),
+    ("H5 proxy: an oversize call is sent anyway (the hub drops the whole link)", "sentinel_proxy/backend.py", "if len(frame.encode()) > MAX_FRAME_BYTES:", "if False:", 1),
+    ("H6 proxy and hub disagree about the frame limit", "sentinel_proxy/backend.py", "MAX_FRAME_BYTES = 1_000_000 ", "MAX_FRAME_BYTES = 2_000_000 ", 1),
 ]
 
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.

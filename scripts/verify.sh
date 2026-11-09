@@ -11,6 +11,10 @@ run() { # name, command...
 }
 run "mutation targets are current (fast: stale mutants fail here, not at the end)" python scripts/mutation_check.py --check-targets
 run "backend pytest (server + seismograph + contract + e2e)" python -m pytest
+# reality stages (DECISIONS.md D25, docs/TESTING_REALITY.md): real processes instead of in-process fakes
+run "reality: hostile model (every malformed/oversized/odd response, real backend over HTTP)" python -m pytest -m reality tests/hostile
+run "reality: real MCP servers (filesystem, memory, time) behind the real proxy and hub" env REALDEPS_REQUIRED=1 python -m pytest -m reality tests/realdeps
+run "reality: hub under concurrent load (races, disconnects, event-log invariants, responsiveness)" python -m pytest -m reality tests/load
 run "seismograph legacy pipeline script" python -m seismograph.test_pipeline --stub-only
 if [ -d frontend/node_modules ]; then
   run "frontend typecheck" bash -c 'cd frontend && npx tsc -b'

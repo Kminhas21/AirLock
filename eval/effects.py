@@ -27,8 +27,9 @@ INTERNAL_HANDLES = {"@alice", "@bob", "@charlie", "@diana"}
 GIST_LIMIT = 120
 
 _FILE_RE = re.compile(
-    r"[\w./\-]*\w\.(?:csv|tsv|json|jsonl|txt|md|xlsx?|docx?|pptx?|pdf|log|py|zip|tar|gz|sql|ya?ml|key|pem|db|env|png|jpe?g|parquet)\b",
+    r"[\w./\-]{0,255}\w\.(?:csv|tsv|json|jsonl|txt|md|xlsx?|docx?|pptx?|pdf|log|py|zip|tar|gz|sql|ya?ml|key|pem|db|env|png|jpe?g|parquet)\b",
     re.I)
+_SCAN_LIMIT = 20_000
 _URL_HOST_RE = re.compile(r"\b(?:https?|ftp|sftp|ssh)://([^\s/'\"?#]+)", re.I)
 _AT_HOST_RE = re.compile(r"(?<![\w.-])[\w.+-]+@([A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,})")
 _NET_TOOLS = {"curl", "wget", "scp", "rsync", "nc", "ncat", "ssh", "sftp", "ftp", "telnet",
@@ -54,7 +55,9 @@ def _gist(text, limit: int = GIST_LIMIT) -> str:
     if len(t) <= limit:
         return t
     cut = t[: limit - 3].rstrip() + "..."
-    lost = [m for m in dict.fromkeys(_FILE_RE.findall(t)) if m not in cut]
+    # bounded work on hostile input: the pattern's prefix is capped (it was quadratic: ~4 min on 200 KB of "A", holding the GIL, which froze the whole
+    # hub) and only the first _SCAN_LIMIT characters are scanned for file names that the cut would hide
+    lost = [m for m in dict.fromkeys(_FILE_RE.findall(t[:_SCAN_LIMIT])) if m not in cut]
     if lost:
         cut += " (files: " + ", ".join(lost[:3]) + ")"
     return cut

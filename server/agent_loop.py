@@ -71,6 +71,17 @@ MAX_ITERATIONS = 20   # Safety limit to prevent infinite loops
 MAX_TOKENS = 1024     # Max tokens per LLM response (keeps API costs down)
 
 
+def _content_text(content) -> str:
+    """The assistant text as ONE string whatever the provider sent: str, None, or a list of content parts ({"type": "text", "text": ...})."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(p if isinstance(p, str) else str(p.get("text", "")) if isinstance(p, dict) else str(getattr(p, "text", "") or "") for p in content).strip()
+    return str(content)
+
+
 
 # ---------------------------------------------------------------------------
 # TERMINAL VERSION — for testing without WebSocket (A3)
@@ -270,21 +281,26 @@ async def run_agent_loop(
             await emit(events.session_complete("llm_error", "The model API returned an error."))
             return
 
+        if not getattr(response, "choices", None):      # a provider can answer 200 with no choices (content filter, outage): not an IndexError
+            logger.error("LLM returned a response with no choices")
+            await emit(events.session_complete("llm_error", "The model API returned an empty response."))
+            return
         message = response.choices[0].message
+        content = _content_text(message.content)       # providers can send a list of parts, None, or a non-string
         tool_calls = message.tool_calls or []
 
         # 2. Reasoning node
         reasoning_id = None
-        if message.content:
+        if content:
             reasoning_id = next_node_id()
-            await emit(events.reasoning(reasoning_id, last_reasoning_id, message.content))
+            await emit(events.reasoning(reasoning_id, last_reasoning_id, content))
             last_reasoning_id = reasoning_id
 
         # Pre-allocate tool node ids so the drift step can be linked to a node
         tool_node_ids = [next_node_id() for _ in tool_calls]
 
         # Seismograph step: embeds the reasoning (or a description of the tool calls)
-        step_text = message.content or "Calling tools: " + ", ".join(tc.function.name for tc in tool_calls)
+        step_text = content or "Calling tools: " + ", ".join(tc.function.name for tc in tool_calls)
         step_node = reasoning_id or (tool_node_ids[0] if tool_node_ids else "node_000")
         await emit(*await asyncio.to_thread(drift.observe_reasoning, step_text, step_node))
 
@@ -295,7 +311,7 @@ async def run_agent_loop(
 
         messages.append({
             "role": "assistant",
-            "content": message.content,
+            "content": content or None,
             "tool_calls": [
                 {"id": tc.id, "type": "function",
                  "function": {"name": tc.function.name, "arguments": tc.function.arguments}}

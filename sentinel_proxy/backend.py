@@ -16,6 +16,8 @@ from sentinel_proxy.config import clean_note, strip_query
 _KNOWN_REASONS = {"human", "auto", "policy", "log_unavailable", "timeout", "invalid", "disconnected", "duplicate"}
 UNREACHABLE = "SENTINEL backend unreachable"
 LOST = "SENTINEL backend connection lost"
+MAX_FRAME_BYTES = 1_000_000          # the hub refuses (and DROPS the link on) anything larger: server/inbox_hub.py MAX_FRAME_BYTES (a test keeps them equal)
+TOO_LARGE = "call arguments are too large for a human to review (limit 1 MB); split the call"
 
 
 _SECRETS: set[str] = set()
@@ -164,10 +166,13 @@ class BackendLink:
         if not self._connected or ws is None:
             return Decision(False, UNREACHABLE)
         cid = call["call_id"]
+        frame = json.dumps(call)
+        if len(frame.encode()) > MAX_FRAME_BYTES:      # deny THIS call only; sending it would make the hub drop the whole link (and every other pending call)
+            return Decision(False, TOO_LARGE)
         fut: asyncio.Future[Decision] = asyncio.get_running_loop().create_future()
         self._pending[cid] = fut
         try:
-            if not await self._send(ws, json.dumps(call)):
+            if not await self._send(ws, frame):
                 return Decision(False, LOST)
             return await asyncio.wait_for(asyncio.shield(fut), self._call_timeout)  # shield: wait_for must not cancel fut
         except asyncio.TimeoutError:

@@ -1,0 +1,9 @@
+{
+  "name": "sentinel-realdeps",
+  "private": true,
+  "description": "Pinned REAL MCP servers the realdeps tests put the proxy in front of (docs/TESTING_REALITY.md, rung 2)",
+  "dependencies": {
+    "@modelcontextprotocol/server-filesystem": "1.0.0",
+    "@modelcontextprotocol/server-memory": "1.0.0"
+  }
+}
