@@ -126,6 +126,8 @@ MUTANTS = [
     ("H20 icontains_any: path normalisation removed (only the as-written text is tested)", "server/policy.py", '    yield f\n    n = f.replace(', '    yield f\n    return\n    n = f.replace(', 1),
     ("H21 icontains_any: non-string list entries are skipped instead of matching", "server/policy.py", '        if not isinstance(it, str) or len(it) > MAX_ICASE_STR:',
      '        if not isinstance(it, str):\n            continue\n        if len(it) > MAX_ICASE_STR:', 1),
+    ("H22 the :// needle is removed from the path rule (a URL read is auto-allowed again)", "server/policies/starter.json", '".git-credentials", "://"]}]}},\n {"id": "ask-sensitive-paths"', '".git-credentials"]}]}},\n {"id": "ask-sensitive-paths"', 1),
+    ("H23 the ask-url-flag rule is an allow (isUrl:true fetches unattended again)", "server/policies/starter.json", '{"id": "ask-url-flag", "verdict": "ask",', '{"id": "ask-url-flag", "verdict": "allow",', 1),
 ]
 
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.

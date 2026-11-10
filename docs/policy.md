@@ -41,9 +41,12 @@ starts allowing anything on its own; you opt in by setting the variable (compose
   `convert_time` (time server). Matching is by tool name, on any server: scope the allow rules with `when.server` if you run a server that reuses a read-only tool name for something with side effects. A file path must be a string.
   `directory_tree`, `search_files` and `get_file_info` are allowed on ANY directory, so they expose file NAMES and metadata (not contents), sensitive ones included;
   if that matters to you, remove them from the `allow-read-only-fs` rule.
+  Reads of URLs always ask: any path argument containing `://` (http, https, ftp, file, s3, ...) and any call with `isUrl` set (rule `ask-url-flag`) is held, because a tool such as
+  Desktop Commander's `read_file` with `isUrl: true` makes an outbound request that can carry data in the URL. The allow rules cannot see tool annotations such as `openWorldHint`,
+  so a tool that fetches through another flag name is not covered: scope the allow rules with `when.server` for servers you do not trust.
 - **Asks** (a human decides) when `path`, `paths` (any entry), `source`, `destination`, `directory` or `file` contains, in any letter case, `.ssh`, `.aws`, `.gnupg`,
   `.env`, `id_rsa`, `id_ed25519`, `id_ecdsa`, `id_dsa`, `credentials`, `secrets`, `.netrc`, `.pgpass`, `.npmrc`, `.docker`, `.pem`, `.p12`, `.pfx`,
-  `/etc/shadow`, `/etc/passwd`, `sudoers`, `/proc/`, `.bash_history`, `.git-credentials`, `.kube` or `.git/config`. One `icontains_any` rule per argument, so
+  `/etc/shadow`, `/etc/passwd`, `sudoers`, `/proc/`, `.bash_history`, `.git-credentials`, `.kube`, `.git/config` or `://` (a URL). One `icontains_any` rule per argument, so
   one sensitive entry in `read_multiple_files` holds the whole call. This is a substring test on the text of the path: it cannot see symlinks or a file reached
   through another name. These rules beat the allow rules.
 - **Asks** for everything else (default `ask`): writes, edits, moves, deletes, `send_*`, webhooks, shell, database, unknown tools. There are no `deny` rules.

@@ -49,3 +49,15 @@ image, embedded resource, `resource_link`, `structuredContent`, `isError`. Every
   the tools that depend on them (4 of the 17 `everything` tools were absent through the proxy).
 - The server's identity: the client sees `sentinel-proxy`. Starting a proxied server takes about 3 s longer (hub connection and monitor build).
 - HTTP/SSE (remote) servers: stdio only.
+
+### Third-party servers (chosen by research, not written by us)
+Chosen from public MCP-server rankings (2026) on four criteria: widely used, NOT an Anthropic reference server, runs over stdio without credentials, and exercises the risky classes the gate exists for.
+**Desktop Commander 0.3.1** (`@wonderwhy-er/desktop-commander`, MIT; terminal execution, file read/write/edit, process control: 25 tools) and **Context7 4.6.0** (`@upstash/context7-mcp`, MIT; library documentation
+from a hosted API: 2 tools). Both were run directly and through the proxy and hub, and with a real Claude Code client behind `builtin:starter`.
+- Desktop Commander: all 25 tools, schemas and annotations identical through the proxy; 10 of 10 calls gated; a real `start_process` ran only after approval; a denied `rm -rf` left the project directory intact.
+  Dropped as documented above: its `instructions`, its `resources` (`ui://` pages) and its logging notifications (49 in one session).
+- Context7: works end to end through the proxy (real library results after approval; the anonymous tier answers a monthly-quota error when shared egress is exhausted: the real server's own message is passed back unchanged).
+- **A proxied server gets a CLEAN environment on purpose.** A server that needs the network from behind an HTTPS proxy, or needs credentials, must be given them in its own `env` block
+  (here: `HTTPS_PROXY`, `NODE_USE_ENV_PROXY=1`, `NODE_EXTRA_CA_CERTS` for Node's built-in `fetch`); without them Context7 answered "fetch failed" even when run directly in the same minimal environment.
+- The starter policy auto-allowed Desktop Commander's `read_file {isUrl: true}` (an outbound HTTP request) because the allow rules match tool NAMES on any server: fixed by asking for any URL-like value and for `isUrl: true` (D27).
+

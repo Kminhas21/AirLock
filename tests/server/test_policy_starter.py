@@ -344,8 +344,8 @@ def test_icontains_any_is_listed_and_explain_prints_it(tmp_path, capsys):
 
 
 def test_starter_is_small_and_hand_editable():
-    assert os.path.getsize(STARTER) < 4096
-    assert len(P.load_policy(STARTER).rules) <= 12
+    assert os.path.getsize(STARTER) < 6144
+    assert len(P.load_policy(STARTER).rules) <= 10
 
 
 # ---------------------------------------------------------------------------------------------------- path spelling variants
@@ -389,3 +389,36 @@ def test_starter_asks_for_the_extended_sensitive_families(pol, path):
 def test_starter_odd_list_entries_are_asked(pol):
     for paths in ([["/.ssh/x"]], [{"path": "/.ssh/x"}], [5], ["/ok", None]):
         assert ev(pol, "read_multiple_files", {"paths": paths}).verdict == "ask", paths
+
+
+# ------------------------------------------------------------------------------------------------------------ URL fetches
+
+URLS = ["http://127.0.0.1:9/exfil?data=x", "https://example.com/a", "ftp://h/f", "file:///etc/hosts", "HTTP://UPPER.EXAMPLE/x",
+        "s3://bucket/key", "gopher://h/"]
+
+
+@pytest.mark.parametrize("url", URLS)
+def test_a_url_in_any_path_slot_is_asked(pol, url):
+    for tool, args in (("read_file", {"path": url}), ("read_file", {"path": url, "isUrl": True}),
+                       ("read_multiple_files", {"paths": ["/p/a", url, "/p/b"]}), ("move_file", {"source": url, "destination": "/p/x"}),
+                       ("copy_file", {"source": "/p/x", "destination": url}), ("list_directory", {"directory": url}),
+                       ("read_file", {"file": url, "path": "/p/ok"})):
+        d = ev(pol, tool, args)
+        assert d.verdict == "ask" and d.rule_id, (tool, args)
+
+
+@pytest.mark.parametrize("flag", [True, "true", "True", "TRUE", 1])
+def test_the_url_flag_asks_even_with_a_local_path(pol, flag):
+    d = ev(pol, "read_file", {"path": "/p/notes.txt", "isUrl": flag})
+    assert d.verdict == "ask" and d.rule_id == "ask-url-flag"
+
+
+@pytest.mark.parametrize("args", [{"path": "/p/notes.txt", "isUrl": False}, {"path": "/p/notes.txt", "isUrl": "false"},
+                                  {"path": "/p/a:b.txt"}, {"path": "C:/p/a.txt"}, {"path": "/p/notes.txt"}])
+def test_local_reads_stay_allowed(pol, args):
+    assert ev(pol, "read_file", args).verdict == "allow"
+
+
+def test_starter_stays_small_with_the_url_rules():
+    p = P.load_policy(STARTER)
+    assert len(p.rules) <= 10 and os.path.getsize(STARTER) < 6144
