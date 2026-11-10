@@ -29,7 +29,7 @@ VERSION = 1
 VERDICTS = ("allow", "deny", "ask")
 _STRENGTH = {"deny": 3, "ask": 2, "allow": 1}           # winning class order
 DESTINATIONS = ("internal", "external", "relay", "none", "any")
-POSITIVE_OPS = ("equals", "in", "glob", "under", "contains", "exists", "max_len")
+POSITIVE_OPS = ("equals", "in", "glob", "under", "contains", "exists", "max_len", "icontains_any")
 NEGATIVE_OPS = ("not_equals", "not_in", "not_glob", "not_under", "not_exists")
 OPS = POSITIVE_OPS + NEGATIVE_OPS
 _NEG_OF = {"not_equals": "equals", "not_in": "in", "not_glob": "glob", "not_under": "under", "not_exists": "exists"}
@@ -46,6 +46,8 @@ MAX_PATTERN = 200               # engine: longest glob pattern accepted from a p
 MAX_PATTERNS = 50               # engine: entries of a server / tool list
 MAX_VALUE_STR = 1000            # engine: longest non-pattern string value (equals, in, contains, under)
 MAX_VALUE_LIST = 1000           # engine: entries of an `in` / `not_in` value
+MAX_ICASE_ITEMS = 64            # engine: icontains_any looks at a string or at most this many list elements ...
+MAX_ICASE_STR = 4096            # ... of at most this many characters each; anything bigger counts as a match (fail closed)
 MAX_FILE_BYTES = 1_000_000      # engine: policy file size
 
 _ID_RE = re.compile(r"[A-Za-z0-9._-]{1,60}")
@@ -214,6 +216,13 @@ def _check_arg(a, where: str, errs: list) -> ArgCond | None:
             errs.append(f"{where}.value: string longer than {MAX_VALUE_STR} characters")
         else:
             out = val
+    elif op == "icontains_any":
+        if not isinstance(val, list) or not val or len(val) > MAX_ICASE_ITEMS:
+            errs.append(f"{where}.value: must be a list of 1 to {MAX_ICASE_ITEMS} strings")
+        elif not all(isinstance(x, str) and 0 < len(x) <= MAX_VALUE_STR and "\x00" not in x for x in val):
+            errs.append(f"{where}.value: entries must be non-empty strings (<= {MAX_VALUE_STR}) without NUL")
+        else:
+            out = tuple(x.casefold() for x in val)
     elif op == "max_len":
         if not _is_int(val) or val < 0:
             errs.append(f"{where}.value: must be a non-negative integer")
@@ -454,6 +463,46 @@ def _under(v, prefix: str):
     return n == prefix or n.startswith(prefix + "/")
 
 
+_SLASHES = re.compile(r"/{2,}")
+
+
+def _spellings(text: str):
+    """The text as written plus its path-normalised forms (backslash -> '/', runs of '/' collapsed, '/./' removed, '..' resolved),
+    all casefolded: `.git//config`, `/etc/./passwd`, `.git\\config` must not hide a needle."""
+    f = text.casefold()
+    yield f
+    n = f.replace("\\", "/")
+    for _ in range(16):                                   # bounded: each pass at least halves a '/./' run
+        m = _SLASHES.sub("/", n).replace("/./", "/")
+        if m == n:
+            break
+        n = m
+    yield n
+    yield posixpath.normpath(n)
+
+
+def _icontains_any(v, needles: tuple):
+    """True if the string (or ANY entry of the list) contains ANY needle, ignoring case and path spelling. Cannot be examined (a string
+    over MAX_ICASE_STR, a list over MAX_ICASE_ITEMS, a list entry that is not a string) counts as a match: the operator exists for `ask`
+    rules, and a padded or oddly typed argument must not slip past one. A missing / non-string, non-list argument is false."""
+    if v is _TRUNC:
+        return True
+    if isinstance(v, str):
+        items = (v,)
+    elif isinstance(v, (list, tuple)):
+        if len(v) > MAX_ICASE_ITEMS:
+            return True
+        items = v
+    else:
+        return None
+    for it in items:
+        if not isinstance(it, str) or len(it) > MAX_ICASE_STR:
+            return True
+        if any(n in f for f in _spellings(it) for n in needles):
+            return True
+    return False
+
+
 def _positive(op: str, val, v):
     """Positive form of an op on a present value -> True / False / None (cannot be evaluated)."""
     if op == "exists":
@@ -464,6 +513,8 @@ def _positive(op: str, val, v):
         if isinstance(v, (str, list, tuple)):
             return len(v) <= val
         return None
+    if op == "icontains_any":
+        return _icontains_any(v, val)
     if v is _TRUNC:
         return None
     if op == "equals":
@@ -638,6 +689,9 @@ class Policy:
         for r in self.rules:
             if r.verdict == "allow":
                 neg = sorted({c.op for c in r.args if c.op in _NEG_OF})
+                if any(c.op == "icontains_any" for c in r.args):
+                    warns.append(f"rule {r.id}: allow rule uses icontains_any, which is TRUE for an argument too big to examine "
+                                 f"(meant for ask / deny rules)")
                 if neg:
                     warns.append(f"rule {r.id}: allow rule uses negative operator(s) {', '.join(neg)}, which are TRUE when "
                                  f"the argument is missing or has the wrong type (it would allow on unknowns)")
@@ -707,14 +761,41 @@ class Policy:
         return Decision(verdict, rid, ids, reason, False)
 
 
+BUILTIN_PREFIX = "builtin:"
+_BUILTIN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "policies")
+_BUILTIN_NAMES = ("starter",)
+
+
+def is_builtin(value) -> bool:
+    return isinstance(value, str) and value.strip().startswith(BUILTIN_PREFIX)
+
+
+def resolve_policy_path(value):
+    """A SENTINEL_POLICY value -> the file to read.  ``builtin:<name>`` -> the shipped file; anything else is returned
+    unchanged; an unknown ``builtin:`` name -> None (the caller treats that like a broken policy: hold everything)."""
+    if not is_builtin(value):
+        return value
+    name = value.strip()[len(BUILTIN_PREFIX):]
+    return os.path.join(_BUILTIN_DIR, name + ".json") if name in _BUILTIN_NAMES else None
+
+
+def _unknown_builtin(value) -> str:
+    return f"unknown built-in policy {value.strip()!r} (available: {', '.join(BUILTIN_PREFIX + n for n in _BUILTIN_NAMES)})"
+
+
 def load_policy(src) -> Policy:
-    """Load from a dict, a Policy, or a path (str / PathLike) to a JSON file.  Raises PolicyError with all messages
-    (PolicyUnreadable, a subclass, when the file cannot be read or parsed)."""
+    """Load from a dict, a Policy, or a path (str / PathLike) to a JSON file (or ``builtin:<name>``).  Raises PolicyError with
+    all messages (PolicyUnreadable, a subclass, when the file cannot be read or parsed)."""
     if isinstance(src, Policy):
         return Policy(src.to_dict())
     if isinstance(src, dict):
         return Policy(src)
     if isinstance(src, (str, os.PathLike)):
+        if is_builtin(src):
+            real = resolve_policy_path(src)
+            if real is None:
+                raise PolicyUnreadable([_unknown_builtin(src)])
+            src = real
         return Policy(_parse_bytes(_read_file(src), str(src)))
     raise PolicyError([f"cannot load a policy from {type(src).__name__}"])
 
@@ -733,8 +814,11 @@ def load_policy_file(path) -> tuple["Policy | None", str]:
     is cached by content hash, so an edit applies at the next call even if size and mtime did not change.  Never raises."""
     try:
         key = str(path)
+        real = resolve_policy_path(path)
+        if real is None:
+            return None, _unknown_builtin(path)
         try:
-            raw = _read_file(path)
+            raw = _read_file(real)
         except PolicyUnreadable as e:
             return None, e.messages[0] if e.messages else "unreadable"
         sig = hashlib.sha256(raw).hexdigest()

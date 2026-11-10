@@ -12,6 +12,17 @@ Everything below was checked against the code in this repository. Where somethin
 
 Flow: `agent --stdio--> sentinel_proxy --stdio--> real MCP servers`, and `sentinel_proxy --websocket--> backend <--websocket-- Inbox UI`.
 
+**What protects what (read this before relying on it).** There are two very different paths:
+
+| Path | What looks at the agent | What it can and cannot see |
+|---|---|---|
+| **Session tab** (the built-in demo agent, `/ws`) | The human gate, the Seismograph drift chart (MiniLM embeds each REASONING step, PCA, Mahalanobis distance), the rules monitor (goal persistence, circumvention by resource category) | Sees the model's reasoning text, so drift is meaningful. A real model often sends tool calls with no text; those steps are embedded as "Calling tools: a, b". |
+| **Proxy -> hub -> Inbox** (Claude Code, Claude Desktop, Cursor, any stdio MCP agent) | The human gate, the policy, the ACTION monitors (`action_sim` embeds the proposed ACTION and compares it with earlier DENIED actions; the registry monitors check destinations), the sandbox | An MCP proxy sees tool calls and nothing else: **it never sees the model's reasoning, so there is no drift chart and no reasoning-based drift detection for proxied agents.** The hub passes empty text to the monitor on purpose. |
+
+So "embedding drift detection" is a property of the demo agent; for real agents the embedding model powers `action_sim` (is this action nearly the same as one you already denied?).
+Out of the box the hub holds EVERY call. For a usable start set `SENTINEL_POLICY=builtin:starter` (reads auto-allowed with a working monitor, sensitive paths and everything that writes, sends or executes still asked; `docs/policy.md`); the shipped `docker-compose.yml` does this.
+
+
 ## 1. Prerequisites
 
 - Linux or macOS (the sandbox features are **Linux only**; everything else works on macOS). Windows is untested.

@@ -21,6 +21,7 @@ services:
       SENTINEL_IDENTITY_FILE: ${SENTINEL_IDENTITY_FILE:-}
       SENTINEL_ALLOWED_ORIGINS: ${SENTINEL_ALLOWED_ORIGINS:-http://localhost:8080}
       SENTINEL_MONITOR: ${SENTINEL_MONITOR:-action_sim}
+      SENTINEL_POLICY: ${SENTINEL_POLICY:-builtin:starter}      # shipped starter: plain reads auto-allowed, everything else asked (docs/policy.md)
       SENTINEL_EVENT_LOG: /var/lib/sentinel/events.db
       SENTINEL_LOG_KEY: ${SENTINEL_LOG_KEY:-}
       FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}

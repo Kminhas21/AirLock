@@ -3,6 +3,9 @@
     python -m policy_cli lint <policy.json>
     python -m policy_cli explain <policy.json> --server S --tool T --args '{...}' [--registry reg.json] [--alert]
     python -m policy_cli test <policy.json> --traces <traces.json> [--registry reg.json] [--server NAME] [--json]
+    python -m policy_cli init OUT.json [--starter] [--force]       (an editable copy of the built-in starter policy)
+
+A policy argument may also be ``builtin:starter`` (the shipped starter policy).
 
 Run from the server/ directory (or with server/ on PYTHONPATH).  Exit status: 0 ok, 1 policy errors,
 2 unreadable file / bad arguments.  Never a traceback for bad input.
@@ -11,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 
 import policy as P
@@ -185,6 +189,25 @@ def cmd_test(ns) -> int:
     return 0
 
 
+def cmd_init(ns) -> int:
+    """Write a copy of the built-in starter policy (mode 0600, like policy_writer) so it can be edited."""
+    src = P.resolve_policy_path("builtin:starter")
+    try:
+        with open(src, "rb") as fh:
+            data = fh.read()
+        flags = os.O_WRONLY | os.O_CREAT | (os.O_TRUNC if ns.force else os.O_EXCL) | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(ns.out, flags, 0o600)
+    except FileExistsError:
+        return _err(f"{ns.out} already exists (use --force to overwrite it)")
+    except OSError as e:
+        return _err(f"cannot write {ns.out}: {e}")
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+    os.chmod(ns.out, 0o600)
+    print(f"wrote {ns.out} (the starter policy). Edit it, then set SENTINEL_POLICY={os.path.abspath(ns.out)}")
+    return 0
+
+
 def main(argv=None) -> int:
     ap = _Args(prog="policy_cli", description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True, parser_class=_Args)
@@ -206,6 +229,11 @@ def main(argv=None) -> int:
     p.add_argument("--server", default="")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_test)
+    p = sub.add_parser("init", help="write an editable copy of the built-in starter policy")
+    p.add_argument("out")
+    p.add_argument("--starter", action="store_true", help="the starter policy (the only one, so this is the default)")
+    p.add_argument("--force", action="store_true", help="overwrite OUT if it exists")
+    p.set_defaults(fn=cmd_init)
     try:
         ns = ap.parse_args(argv)
         return ns.fn(ns)

@@ -31,3 +31,21 @@ alert always holds the call, even an allow-listed one.
   the same id is rejected.
 - Token limit: it keeps out processes that cannot read your environment. Anything with full access to your account can read it.
 - Not covered yet: HTTP/SSE downstream servers, tools/list_changed, multi-user, hosted deployment. See DECISIONS D16.
+
+## Compatibility with real MCP servers (measured, DECISIONS D26)
+Each server below was run DIRECTLY and THROUGH the proxy and hub with the same MCP client, and everything the client can observe was diffed
+(`docs/TESTING_REALITY.md`, rung 2): filesystem 1.0.0, memory 1.0.0, sequential-thinking 1.0.0, the protocol-coverage `everything` 1.0.0 (all npm), Microsoft
+Playwright MCP 0.0.85 (real Chromium), git, fetch, time (PyPI, current SDK), and sqlite 2025.4.25 (built on the OLD 1.x Python SDK; it works through the 2.x proxy).
+
+**Passes through unchanged:** the tool list (names, descriptions, input and output schemas, annotations such as `readOnlyHint`), and every call result: text,
+image, embedded resource, `resource_link`, `structuredContent`, `isError`. Every call was held by the gate. A downstream gets a CLEAN environment (not your shell's).
+
+**Does NOT pass through (the proxy is a tool gate, not a transparent MCP proxy):**
+- `resources`, `prompts`, `completions`, `logging` and `tasks`: the client sees only the `tools` capability and gets "Method not found" for the rest. A server whose value is
+  mostly resources or prompts (the git and sqlite servers' prompts, fetch's resources) loses that part. Nothing is gated or leaked; it is simply not offered.
+- Server `instructions` (the usage hints a client normally adds to the model's context) and logging notifications.
+- `progress` notifications: a long tool call shows no progress, and a client that extends its timeout on progress will not get that extension.
+- Server-to-client requests (`sampling`, `roots`, `elicitation`): the proxy does not declare those client capabilities, so a server that needs them does not OFFER
+  the tools that depend on them (4 of the 17 `everything` tools were absent through the proxy).
+- The server's identity: the client sees `sentinel-proxy`. Starting a proxied server takes about 3 s longer (hub connection and monitor build).
+- HTTP/SSE (remote) servers: stdio only.

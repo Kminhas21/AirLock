@@ -157,3 +157,12 @@ def test_the_demo_assets_the_dockerfile_copies_exist():
     for rel in ("tests/proxy/fake_downstream.py", "tests/proxy/agent_cli.py", "docker/demo/proxy.json", "docker/entrypoint.sh",
                 "scripts/docker/bootstrap_identity.py", "scripts/docker/prefetch_model.py", "requirements-proxy.txt", "requirements-dev.txt"):
         assert (ROOT / rel).is_file(), rel
+
+
+def test_shipped_compose_defaults_to_the_starter_policy_and_the_image_carries_it():
+    env = COMPOSE["services"]["sentinel"]["environment"]
+    assert env["SENTINEL_POLICY"] == "${SENTINEL_POLICY:-builtin:starter}"
+    assert (ROOT / "server" / "policies" / "starter.json").is_file()
+    assert "COPY server server" in (ROOT / "Dockerfile").read_text()
+    assert not any(p in IGNORE for p in ("server/policies", "**/policies", "**/*.json", "policies"))
+    assert "SENTINEL_POLICY" in (ROOT / ".env.example").read_text()

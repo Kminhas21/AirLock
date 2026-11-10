@@ -212,8 +212,8 @@ def _check_tenant(tid: str, t: Any, errs: list):
     if not isinstance(name, str) or not name or len(name) > 100 or any(ord(c) < 32 or ord(c) == 127 for c in name):
         errs.append(f"{where}.name: must be a printable string of at most 100 characters")
     pf = t.get("policy_file")
-    if "policy_file" in t and (not isinstance(pf, str) or not pf.startswith("/") or len(pf) > 4096 or "\x00" in pf):
-        errs.append(f"{where}.policy_file: must be an absolute path")
+    if "policy_file" in t and (not isinstance(pf, str) or not pf.startswith(("/", "builtin:")) or len(pf) > 4096 or "\x00" in pf):
+        errs.append(f"{where}.policy_file: must be an absolute path (or builtin:<name>)")
     gt = t.get("gate_timeout_s")
     if "gate_timeout_s" in t and (not _is_num(gt) or not 1 <= gt <= 86400):
         errs.append(f"{where}.gate_timeout_s: must be a number between 1 and 86400")
@@ -661,7 +661,7 @@ class IdentityStore:
             if not any(a.tenant == tid for a in self._agents):
                 w.append(f"tenant {tid}: has no agents")
             cfg = self._tenants[tid]
-            if cfg.policy_file and not os.path.exists(cfg.policy_file):
+            if cfg.policy_file and not cfg.policy_file.startswith("builtin:") and not os.path.exists(cfg.policy_file):
                 w.append(f"tenant {tid}: policy_file {cfg.policy_file} does not exist")
             for ch in cfg.channels.values():
                 if ch.secret_env and not self._env.get(ch.secret_env):

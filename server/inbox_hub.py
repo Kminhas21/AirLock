@@ -19,6 +19,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+import alert_note
 import escalation
 import eventlog
 import gate
@@ -489,6 +490,30 @@ class InboxHub:
         return decision, reason, actor
 
     @staticmethod
+    def _label_suggested(session: "ProxySession", args: dict, alerts: list) -> list:
+        """A denied_effect_match alert on something the operator's own denial note named is labelled and downgraded one
+        level (critical -> warning), as a COPY. Never dropped: it is still logged, shown and still makes a policy ask."""
+        if not any(isinstance(a, dict) and a.get("trigger") == "denied_effect_match" for a in alerts):
+            return alerts
+        denied = [i for i in session.ring if i["decision"] == "deny" and i.get("note")]
+        out = []
+        for a in alerts:
+            token = None
+            if isinstance(a, dict) and a.get("trigger") == "denied_effect_match":
+                token = next((t for i in reversed(denied)
+                              if (t := alert_note.note_names_alternative(i["note"], args, [i["args"]]))), None)
+            if token is None:
+                out.append(a)
+                continue
+            b = dict(a)
+            if b.get("severity") == "critical":
+                b["severity"] = "warning"
+            b["message"] = (f"You suggested this in your denial note ({safe_text.clean_field(token, safe_text.TOKEN)}). "
+                            + str(a.get("message", "")))
+            out.append(b)
+        return out
+
+    @staticmethod
     def _alert_records(alerts: list, secrets=frozenset()) -> list:
         out = []
         for a in alerts:
@@ -737,6 +762,7 @@ class InboxHub:
                 alerts, working = [], False
             if proposal_monitor.error_count() > errors_before:      # real monitors swallow errors and return []
                 working = False
+        alerts = self._label_suggested(session, args, alerts)
         if call_id in session.cancelled_early:     # the proxy dropped it while the monitor ran: never hold or approve
             return
         # (a session closed while the monitor ran is NOT dropped here: call_proposed is written first, then denied/disconnected below)
@@ -1010,7 +1036,14 @@ class InboxHub:
     def _policy_path_for(self, principal: Any) -> str:
         """A tenant's own policy file wins over SENTINEL_POLICY (identity mode)."""
         cfg = self._tenant_cfg(principal.tenant) if principal is not None else None
-        return (getattr(cfg, "policy_file", None) or os.environ.get("SENTINEL_POLICY") or "").strip()
+        path = (getattr(cfg, "policy_file", None) or os.environ.get("SENTINEL_POLICY") or "").strip()
+        if policy_mod.is_builtin(path):                  # shipped policies are read-only: copy one with `policy_cli init` to edit it
+            if path not in _logged_policy_problems:
+                _logged_policy_problems.add(path)
+                logger.warning("SENTINEL_POLICY_WRITABLE=1 ignored: %s is a built-in policy and read-only "
+                               "(python -m policy_cli init OUT.json, then point SENTINEL_POLICY at the copy)", path)
+            return ""
+        return path
 
     def _capabilities(self, principal: Any = None) -> dict:
         """policy_writable: SENTINEL_POLICY_WRITABLE=1 AND a usable policy file (identity mode: also role admin, and the
