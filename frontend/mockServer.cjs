@@ -1,7 +1,10 @@
-// mockServer.js — Standalone mock WebSocket server for frontend development.
+// mockServer.cjs — Standalone mock WebSocket server for frontend development.
 //
-// Run with:   node mockServer.js
-// Connects:   ws://localhost:8000/ws
+// Run with:   node mockServer.cjs
+// Connects:   ws://localhost:8000/ws  (default port 8000 is for the MOCK only;
+//             override with MOCK_PORT=9000). The real backend defaults to :8080,
+//             so point the frontend at the mock with:
+//             VITE_SENTINEL_WS_URL=ws://localhost:8000/ws npm run dev
 //
 // This replays a hardcoded scenario so you can build and test the full UI
 // without needing the Python backend running. It pauses on each tool_pending
@@ -9,7 +12,7 @@
 
 const { WebSocketServer } = require("ws");
 
-const PORT = 8000;
+const PORT = Number(process.env.MOCK_PORT) || 8000;
 
 // Helper: send a JSON message to the client
 function send(ws, data) {

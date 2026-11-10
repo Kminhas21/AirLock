@@ -13,3 +13,7 @@ CHANGELOG_A.md
 .env
 CLAUDE.md
 CLAUDE_BRAVO.md
+
+# Docker support files must be tracked even though `.*` ignores dotfiles (the real .env stays ignored by `.env` above)
+!.dockerignore
+!.env.example

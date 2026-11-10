@@ -18,7 +18,7 @@ import type {
 // ---------- Types for our stored data ----------
 
 /** Extra data we attach to each react-flow node beyond what react-flow needs. */
-export interface NodeData {
+export type NodeData = {
   label: string;
   nodeType: "reasoning" | "tool_call" | "replan";
   toolName?: string;
@@ -31,7 +31,7 @@ export interface NodeData {
   agentResponse?: string;
   isPending: boolean;
   isAlertTarget: boolean;
-}
+};
 
 /** One point on the drift monitor chart. */
 export interface DriftPoint {
@@ -42,6 +42,8 @@ export interface DriftPoint {
   z: number;
   mahalanobisDistance: number;
   baselineBreached: boolean;
+  /** Breach threshold reported with this point (absent => lib/drift DRIFT_THRESHOLD). */
+  threshold?: number;
   metrics: {
     compliance_score: number;
     goal_persistence: number;
@@ -216,6 +218,7 @@ export const useSessionStore = create<SessionState>((set) => ({
           z: e.coordinates.z,
           mahalanobisDistance: e.mahalanobis_distance,
           baselineBreached: e.baseline_breached,
+          threshold: typeof e.threshold === "number" ? e.threshold : undefined,
           metrics: e.metrics,
         },
       ],

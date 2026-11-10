@@ -1,0 +1,3 @@
+{"session_id": "compose-demo",
+ "backend": "ws://sentinel:8080/proxy/ws",
+ "servers": {"files": {"command": "python", "args": ["/app/tests/proxy/fake_downstream.py"]}}}

@@ -4,6 +4,9 @@
 // Shows: node ID, type, tool name, full reasoning context, tool parameters
 // (pretty-printed JSON), risk level, decision status, and result text.
 
+import { pointThreshold } from "../lib/drift";
+import { singleLine } from "../lib/safeText";
+import { AgentText } from "./AgentText";
 import { useSessionStore } from "../stores/sessionStore";
 
 export function NodeDetail() {
@@ -36,7 +39,7 @@ export function NodeDetail() {
       <div className="node-detail-drawer" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="detail-header">
-          <h3 className="detail-title">{selectedNodeId}</h3>
+          <h3 className="detail-title">{singleLine(selectedNodeId)}</h3>
           <button
             className="detail-close"
             onClick={() => setSelectedNode(null)}
@@ -60,7 +63,7 @@ export function NodeDetail() {
         {data.toolName && (
           <div className="detail-row">
             <span className="detail-label">Tool</span>
-            <span className="detail-value">{data.toolName}</span>
+            <span className="detail-value">{singleLine(data.toolName)}</span>
           </div>
         )}
 
@@ -94,9 +97,7 @@ export function NodeDetail() {
         {(data.reasoningContext || data.reasoningText) && (
           <div className="detail-section">
             <span className="detail-label">Reasoning</span>
-            <pre className="detail-code">
-              {data.reasoningContext || data.reasoningText}
-            </pre>
+            <AgentText text={data.reasoningContext || data.reasoningText} />
           </div>
         )}
 
@@ -114,7 +115,7 @@ export function NodeDetail() {
         {data.result && (
           <div className="detail-section">
             <span className="detail-label">Result</span>
-            <pre className="detail-code">{data.result}</pre>
+            <AgentText text={data.result} />
           </div>
         )}
 
@@ -122,7 +123,7 @@ export function NodeDetail() {
         {data.agentResponse && (
           <div className="detail-section">
             <span className="detail-label">Agent Response</span>
-            <pre className="detail-code">{data.agentResponse}</pre>
+            <AgentText text={data.agentResponse} />
           </div>
         )}
 
@@ -136,7 +137,7 @@ export function NodeDetail() {
                 <span
                   style={{
                     color:
-                      driftPoint.mahalanobisDistance > 2.5
+                      driftPoint.mahalanobisDistance > pointThreshold(driftPoint.threshold)
                         ? "#ef4444"
                         : "#22c55e",
                   }}

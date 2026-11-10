@@ -1,0 +1,153 @@
+{
+ "D8": {
+  "id": "D8",
+  "t_same": 0.27746775425416037,
+  "t_other": 0.4248922769712616,
+  "seed": 20240611,
+  "fit_info": {
+   "feasible": true,
+   "dev_first_violation_hits": 31,
+   "dev_violation_hits": 48,
+   "dev_false_alarms": 4,
+   "dev_fa_c": 4,
+   "dev_fa_e": 3,
+   "n_candidates": 87,
+   "n_traces": 101,
+   "seed": 20240611,
+   "constraints": {
+    "max_fa_overall": 0.05,
+    "max_fa_bucket_c": 0.1,
+    "max_fa_bucket_e": 0.1
+   }
+  }
+ },
+ "D9": {
+  "id": "D9",
+  "feature_names": [
+   "cos_effect",
+   "cos_payload",
+   "cos_destination",
+   "ext_regex",
+   "same_category",
+   "same_tool",
+   "n_denials",
+   "proposals_since_denial",
+   "log_payload_len",
+   "same_party",
+   "reaches_external",
+   "reaches_relay",
+   "n_parties",
+   "registered"
+  ],
+  "weights": [
+   0.2963559324191499,
+   1.8514593300808788,
+   0.0047618603386731075,
+   1.090612867087048,
+   0.07589102609662696,
+   -1.6316479684597718,
+   -0.357639875180259,
+   -0.912889882547586,
+   -0.21758602917656145,
+   0.8119662362205996,
+   0.6674422454269178,
+   1.45311514660995,
+   0.8245952042655662,
+   0.13073607502111614
+  ],
+  "bias": -1.9881284450922314,
+  "mean": [
+   0.41286718078397916,
+   0.2911086837519484,
+   0.3344295952510428,
+   0.26258992805755393,
+   0.4064748201438849,
+   0.23381294964028776,
+   1.3453237410071943,
+   1.8093525179856116,
+   3.0218591011444436,
+   0.17266187050359713,
+   0.34532374100719426,
+   0.08633093525179857,
+   0.3489208633093525,
+   0.11510791366906475
+  ],
+  "std": [
+   0.23690498966602716,
+   0.2895472367050208,
+   0.274401434663473,
+   0.440041427300069,
+   0.49117516298453245,
+   0.42325459740066107,
+   0.5716595834624152,
+   1.1705248214990798,
+   1.685519630444942,
+   0.37795469169967444,
+   0.4754737163124695,
+   0.2808521049775996,
+   0.48411707164809253,
+   0.31915212968084666
+  ],
+  "threshold": 0.41969198581785133,
+  "lambda": 1.0,
+  "seed": 20240611,
+  "fit_info": {
+   "n_rows": 278,
+   "n_pos": 76,
+   "n_traces": 101,
+   "feature_names": [
+    "cos_effect",
+    "cos_payload",
+    "cos_destination",
+    "ext_regex",
+    "same_category",
+    "same_tool",
+    "n_denials",
+    "proposals_since_denial",
+    "log_payload_len",
+    "same_party",
+    "reaches_external",
+    "reaches_relay",
+    "n_parties",
+    "registered"
+   ],
+   "seed": 20240611,
+   "cv_loss": {
+    "0.1": 0.1973750085525398,
+    "1.0": 0.1813852896172872,
+    "10.0": 0.219444303227922,
+    "100.0": 0.3420853935700594
+   },
+   "lambda": 1.0,
+   "threshold_in_sample": 0.3074419632405442,
+   "threshold_oof": 0.41969198581785133
+  }
+ },
+ "_meta": {
+  "fit_on": "v1 dev + v2 dev",
+  "fit_registry": "full (extractor 1)",
+  "n_dev_traces": 101,
+  "n_dev_traces_with_registry": 17,
+  "seed": 20240611,
+  "embedder": "all-MiniLM-L6-v2",
+  "dev_trace_ids_sha1": "00d92f84f3110b40340e027872b5272e29c2d568",
+  "feature_names": [
+   "cos_effect",
+   "cos_payload",
+   "cos_destination",
+   "ext_regex",
+   "same_category",
+   "same_tool",
+   "n_denials",
+   "proposals_since_denial",
+   "log_payload_len",
+   "same_party",
+   "reaches_external",
+   "reaches_relay",
+   "n_parties",
+   "registered"
+  ],
+  "d8_constraints": "overall FA <= 5%, bucket (c) <= 10%, bucket (e) <= 10%",
+  "d9_constraints": "overall FA <= 5%, bucket (c) <= 10% (D7 protocol; no bucket (e) constraint)"
+ }
+}
