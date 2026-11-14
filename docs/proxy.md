@@ -32,6 +32,16 @@ alert always holds the call, even an allow-listed one.
 - Token limit: it keeps out processes that cannot read your environment. Anything with full access to your account can read it.
 - Not covered yet: HTTP/SSE downstream servers, tools/list_changed, multi-user, hosted deployment. See DECISIONS D16.
 
+## Symlinks in path arguments (DECISIONS D29)
+Before sending a call to the hub the proxy resolves symlinks in path-slot strings (`path`, `paths`, `source`, `destination`, `directory`, `file`) and in other
+string arguments that look like paths (top level and the first 64 entries of each top-level list), in the Node order (lexical `..` first, then `realpath`) and the
+kernel order: absolute values, `~/...`, and relative values against the server's `cwd` (else the proxy's) and the absolute directories in its `args`. Values whose
+real path differs are sent in the `proxy_call` frame, one map per (base, order), e.g. `"resolved": [{"path": "/work/.env"}]` or
+`[{"paths": {"1": "/home/u/.ssh/id_rsa"}}]`; a hit bound, an error, the 2 s timeout, a path-slot name missing (in the Node order) in any directory the server maps names in (its allowed directories), a relative value with more than 4 bases, or `~` with a server-own HOME adds
+`"resolved_incomplete": true`. Nothing is added when no link is involved. The hub evaluates the policy on the written AND the resolved forms and keeps the stricter
+verdict; a malformed or incomplete resolution turns an `allow` into `ask` (docs/policy.md rule 5). The agent's arguments are forwarded to the server unchanged.
+Limit: the check happens before the server opens the file (a link swapped in between is not seen).
+
 ## Compatibility with real MCP servers (measured, DECISIONS D26)
 Each server below was run DIRECTLY and THROUGH the proxy and hub with the same MCP client, and everything the client can observe was diffed
 (`docs/TESTING_REALITY.md`, rung 2): filesystem 1.0.0, memory 1.0.0, sequential-thinking 1.0.0, the protocol-coverage `everything` 1.0.0 (all npm), Microsoft
@@ -59,5 +69,5 @@ from a hosted API: 2 tools). Both were run directly and through the proxy and hu
 - Context7: works end to end through the proxy (real library results after approval; the anonymous tier answers a monthly-quota error when shared egress is exhausted: the real server's own message is passed back unchanged).
 - **A proxied server gets a CLEAN environment on purpose.** A server that needs the network from behind an HTTPS proxy, or needs credentials, must be given them in its own `env` block
   (here: `HTTPS_PROXY`, `NODE_USE_ENV_PROXY=1`, `NODE_EXTRA_CA_CERTS` for Node's built-in `fetch`); without them Context7 answered "fetch failed" even when run directly in the same minimal environment.
-- The starter policy auto-allowed Desktop Commander's `read_file {isUrl: true}` (an outbound HTTP request) because the allow rules match tool NAMES on any server: fixed by asking for any URL-like value and for `isUrl: true` (D27).
+- The starter policy auto-allowed Desktop Commander's `read_file {isUrl: true}` (an outbound HTTP request) because the allow rules match tool NAMES on any server: fixed by asking for any URL-like value and for `isUrl: true` (D27), then generally by binding every allow rule to the real tools' argument names (`arg_keys`, D29).
 

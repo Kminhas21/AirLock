@@ -28,6 +28,7 @@ import notify as notify_mod
 import policy as policy_mod
 import policy_writer
 import proposal_monitor
+import resolved_args
 import safe_text
 
 logger = logging.getLogger(__name__)
@@ -247,6 +248,7 @@ class _Pending:
     since: float = 0.0            # hub clock when the call became pending (age_s, escalation)
     escalation_level: int = 0
     operator: str | None = None   # principal id of the human who decided (identity mode)
+    resolved: list = field(default_factory=list)   # symlink-resolved forms of the path arguments (proxy_call.resolved, B4)
 
     def claim(self, decision: str, reason: str) -> bool:
         """Once-only: the first claim wins (sync, so there is no await between check and set)."""
@@ -546,6 +548,8 @@ class InboxHub:
         if p.policy_mode:
             d["rule_id"], d["policy_digest"] = p.rule_id, p.policy_digest
         d["secrets_used"] = list(p.secrets_used)
+        if p.resolved:
+            d["resolved"] = p.resolved             # what the symlinked path arguments really name (B4)
         d["session_summary"], d["session_history"], d["earlier_denied"] = p.summary, p.history, p.earlier_denied
         if p.session.identity_mode:
             d["agent_id"], d["tenant"] = p.session.agent_id, p.session.tenant
@@ -747,6 +751,8 @@ class InboxHub:
             return
 
         secrets_used = validate_secrets_used(frame.get("secrets_used"))     # names only; invalid => []
+        # symlink-resolved forms of path arguments (B4): only ever make the verdict stricter; malformed => an allow becomes ask
+        resolved, resolved_bad = resolved_args.parse(frame.get("resolved"), args, frame.get("resolved_incomplete", False))
         alerts: list = []
         # "working": a monitor with a detector looked at the call, did not hit an error, and returned a list
         mon = session.monitor
@@ -778,7 +784,7 @@ class InboxHub:
             verdict = "ask"
             if session.policy is not None:
                 try:
-                    dec = await asyncio.to_thread(session.policy.evaluate, server, tool, args,
+                    dec = await asyncio.to_thread(resolved_args.evaluate, session.policy, server, tool, args, resolved, resolved_bad,
                                                   registry=session.policy_registry, alerts_present=bool(alerts),
                                                   secrets_used=bool(secrets_used))
                     verdict, rule_id = dec.verdict, dec.rule_id
@@ -808,10 +814,13 @@ class InboxHub:
             while len(session.secrets) > 200:
                 session.secrets.pop(next(iter(session.secrets)))
         # write-ahead: call_proposed is on disk before inbox_pending / any auto or policy reply
+        res_fields = {"resolved": resolved} if resolved else {}
+        if resolved_bad:
+            res_fields["resolved_invalid"] = True
         res = await self._append("call_proposed", session.log_sid, call_id,
                                  {"server": server, "tool": tool, "args": args, "auto": auto,
                                   "alerts": self._alert_records(alerts, call_secrets), "policy": policy_rec,
-                                  "secrets_used": secrets_used})
+                                  "secrets_used": secrets_used, **res_fields})
         if res == "dup":
             return
         if res == "fail":
@@ -841,7 +850,7 @@ class InboxHub:
 
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
         p = _Pending(session, call_id, server, tool, args, auto, alerts, rule_id=rule_id, policy_digest=digest,
-                     policy_mode=session.policy_mode, secrets_used=secrets_used)
+                     policy_mode=session.policy_mode, secrets_used=secrets_used, resolved=resolved)
         p.summary, p.history, p.earlier_denied = session.views()        # state BEFORE this call
         session.pending[call_id] = p
         session.starting.discard(call_id)

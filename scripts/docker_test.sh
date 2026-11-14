@@ -24,7 +24,7 @@ if [ "$build" = 1 ]; then
   [ "${SENTINEL_DOCKER_TORCH_INDEX+set}" = set ] && args+=(--build-arg "TORCH_INDEX_URL=${SENTINEL_DOCKER_TORCH_INDEX}")
   [ "${SENTINEL_DOCKER_NETWORK_HOST:-}" = 1 ] && args+=(--network host)
   if [ "${SENTINEL_DOCKER_FORWARD_PROXY:-}" = 1 ]; then
-    args+=(--build-arg "HTTPS_PROXY=${HTTPS_PROXY:-}" --build-arg "HTTP_PROXY=${HTTP_PROXY:-${HTTPS_PROXY:-}}" --build-arg "NO_PROXY=localhost,127.0.0.1")
+    args+=(--build-arg "HTTPS_PROXY=${HTTPS_PROXY:-${https_proxy:-}}" --build-arg "HTTP_PROXY=${HTTP_PROXY:-${http_proxy:-${HTTPS_PROXY:-${https_proxy:-}}}}" --build-arg "NO_PROXY=localhost,127.0.0.1")
   fi
   [ -n "${SENTINEL_DOCKER_BUILD_CA:-}" ] && args+=(--secret "id=buildca,src=${SENTINEL_DOCKER_BUILD_CA}")
   [ -n "${SENTINEL_DOCKER_HF_SEED:-}" ] && args+=(--build-context "hfseed=${SENTINEL_DOCKER_HF_SEED}")

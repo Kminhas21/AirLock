@@ -4,17 +4,23 @@
 set -u
 cd "$(dirname "$0")/.."
 fail=0
-run() { # name, command...
-  local name="$1"; shift
-  echo "=== GATE: $name"
-  if "$@"; then echo "--- PASS: $name"; else echo "--- FAIL: $name"; fail=1; fi
-}
+# run(), gate_preflight and the failure notifications (GATE_EVENTS file, GATE_ON_FAIL hook, GATE_FAIL_FAST=1): scripts/gate_lib.sh
+source scripts/gate_lib.sh || { echo "GATE: RED (scripts/gate_lib.sh could not be loaded: no stage ran)"; exit 1; }
+gate_install_done_trap
+run "preflight: opted-in stages can work at all (Docker daemon + proxy CA, claude CLI), in seconds instead of hours later" gate_preflight
 run "mutation targets are current (fast: stale mutants fail here, not at the end)" python scripts/mutation_check.py --check-targets
+run "live coverage map, static (every user workflow has a live test or a declared gap; referenced files exist; live specs are run)" python scripts/check_live_coverage.py
 run "backend pytest (server + seismograph + contract + e2e)" python -m pytest
-# reality stages (DECISIONS.md D25, docs/TESTING_REALITY.md): real processes instead of in-process fakes
-run "reality: hostile model (every malformed/oversized/odd response, real backend over HTTP)" python -m pytest -m reality tests/hostile
-run "reality: real MCP servers (filesystem, memory, time) behind the real proxy and hub" env REALDEPS_REQUIRED=1 python -m pytest -m reality tests/realdeps
-run "reality: hub under concurrent load (races, disconnects, event-log invariants, responsiveness)" python -m pytest -m reality tests/load
+# reality stages (DECISIONS.md D25, D28, docs/TESTING_REALITY.md): real processes instead of in-process fakes.
+# NS = SENTINEL_NO_SKIP=1 + tests/no_skip_plugin.py: a skipped or xfail test in these stages is a FAILURE (a missing server must never turn a
+# live stage green). Each stage writes junit XML into $JU; the stage after them proves every live test in tests/live/WORKFLOWS.json PASSED in THIS run.
+NS="SENTINEL_NO_SKIP=1 python -m pytest -p tests.no_skip_plugin"
+JU="$(mktemp -d)"
+run "reality: hostile model (every malformed/oversized/odd response, real backend over HTTP)" env $NS -m reality tests/hostile --junitxml="$JU/hostile.xml"
+run "reality: real MCP servers (filesystem, memory, time) behind the real proxy and hub" env REALDEPS_REQUIRED=1 $NS -m reality tests/realdeps --junitxml="$JU/realdeps.xml"
+run "reality: hub under concurrent load (races, disconnects, event-log invariants, responsiveness)" env $NS -m reality tests/load --junitxml="$JU/load.xml"
+run "reality: live workflows (third-party Desktop Commander differential, starter policy on real servers, note-aware alert, event-log CLI audit)" env REALDEPS_REQUIRED=1 $NS -m reality tests/live --junitxml="$JU/live.xml"
+run "live coverage proven (every live pytest test in the workflow map PASSED in this gate run: not skipped, xfail or missing)" python scripts/check_live_coverage.py --junit "$JU"
 run "seismograph legacy pipeline script" python -m seismograph.test_pipeline --stub-only
 if [ -d frontend/node_modules ]; then
   run "frontend typecheck" bash -c 'cd frontend && npx tsc -b'
@@ -77,15 +83,18 @@ if [ -d frontend/node_modules ]; then
     IDDIR="$TMPD/identity"
     run "browser identity (sign-in, roles, tenants, escalation)" bash -c "python scripts/make_identity_fixture.py --dir $IDDIR && cd frontend && IDENTITY_STAGE=1 IDENTITY_TOKENS=$IDDIR/tokens.json SENTINEL_IDENTITY_FILE=$IDDIR/identity.json SENTINEL_MONITOR=rules SENTINEL_EMBEDDER=stub npx playwright test identity"
   else
-    echo "--- FAIL: no Chromium at \${CHROMIUM_PATH:-/opt/pw-browsers/chromium}; set CHROMIUM_PATH"; fail=1
+    run "browser stages need Chromium (set CHROMIUM_PATH)" bash -c 'echo "no Chromium at ${CHROMIUM_PATH:-/opt/pw-browsers/chromium}"; false'
   fi
 else
-  echo "--- FAIL: frontend/node_modules missing (run: cd frontend && npm ci)"; fail=1
+  run "frontend stages need frontend/node_modules (run: cd frontend && npm ci)" false
 fi
 # Docker (DECISIONS.md D23): opt in with RUN_DOCKER_TESTS=1 (needs a Docker daemon, ~6 min; see docs/DOCKER.md for the sandbox env vars). The static Docker tests already run in the pytest stage.
 [ "${RUN_DOCKER_TESTS:-0}" = "1" ] && run "docker: test-gated multi-stage build + real containers + compose" bash scripts/docker_test.sh
 # User journeys with screenshots (docs/JOURNEYS.md): opt in with RUN_JOURNEY_TESTS=1 (W9 needs the Docker images)
 [ "${RUN_JOURNEY_TESTS:-0}" = "1" ] && run "user journeys (W1-W9 with screenshots)" bash -c "cd frontend && npm run journeys"
+# A REAL Claude Code client (`claude -p`) behind the proxy, scripted human on /inbox/ws (DECISIONS.md D28): opt in with RUN_CLAUDE_TESTS=1 (needs a
+# signed-in `claude` CLI, costs real model calls, ~30 s, measured $0.04-0.12 per run). Opted in, a missing or signed-out CLI FAILS. CLAUDE_TEST_MODEL picks the model.
+[ "${RUN_CLAUDE_TESTS:-0}" = "1" ] && run "claude code: a real Claude Code client behind SENTINEL (filesystem + note; Desktop Commander + starter)" env REALDEPS_REQUIRED=1 $NS -m claude_live tests/claude
 [ -f scripts/mutation_check.py ] && run "mutation check (tests must catch re-introduced bugs)" python scripts/mutation_check.py
 echo; [ $fail -eq 0 ] && echo "GATE: GREEN" || echo "GATE: RED"
 exit $fail

@@ -1,9 +1,10 @@
 {
   "name": "sentinel-realdeps",
   "private": true,
-  "description": "Pinned REAL MCP servers the realdeps tests put the proxy in front of (docs/TESTING_REALITY.md, rung 2)",
+  "description": "Pinned REAL MCP servers the reality tests put the proxy in front of (docs/TESTING_REALITY.md, rung 2). Installed with --ignore-scripts (scripts/realdeps_setup.sh): no install script of a third-party package ever runs here.",
   "dependencies": {
     "@modelcontextprotocol/server-filesystem": "1.0.0",
-    "@modelcontextprotocol/server-memory": "1.0.0"
+    "@modelcontextprotocol/server-memory": "1.0.0",
+    "@wonderwhy-er/desktop-commander": "0.3.1"
   }
 }

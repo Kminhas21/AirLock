@@ -49,11 +49,12 @@ MAX_VALUE_LIST = 1000           # engine: entries of an `in` / `not_in` value
 MAX_ICASE_ITEMS = 64            # engine: icontains_any looks at a string or at most this many list elements ...
 MAX_ICASE_STR = 4096            # ... of at most this many characters each; anything bigger counts as a match (fail closed)
 MAX_FILE_BYTES = 1_000_000      # engine: policy file size
+MAX_ARG_KEYS = 100              # engine: entries of a `when.arg_keys` list
 
 _ID_RE = re.compile(r"[A-Za-z0-9._-]{1,60}")
 _TOP_KEYS = {"version", "default", "rules"}
 _RULE_KEYS = {"id", "verdict", "note", "when"}
-_WHEN_KEYS = {"server", "tool", "args", "destination", "party", "alert", "secrets"}
+_WHEN_KEYS = {"server", "tool", "args", "destination", "party", "alert", "secrets", "arg_keys"}
 _ARG_KEYS = {"path", "op", "value"}
 _BAD_NAME_CATS = {"Cc", "Cf", "Cs", "Zl", "Zp"}          # control, format (bidi, ZW), surrogate, line/para separators
 
@@ -102,6 +103,7 @@ class Rule:
     alert: bool | None
     specificity: int
     secrets: bool | None = None   # the call receives just-in-time credentials (proxy `secrets_used` non-empty)
+    arg_keys: frozenset | None = None   # every top-level argument name of the call must be in this set
 
 
 # ---------------------------------------------------------------------------
@@ -238,10 +240,31 @@ def _show(v) -> str:
     return s if len(s) <= 80 else s[:77] + "..."
 
 
+def _check_arg_keys(v, where: str, errs: list) -> frozenset | None:
+    if not isinstance(v, list):
+        errs.append(f"{where}: must be a list of argument names (an empty list allows no argument)")
+        return None
+    if len(v) > MAX_ARG_KEYS:
+        errs.append(f"{where}: at most {MAX_ARG_KEYS} names")
+        return None
+    ok = True
+    for i, k in enumerate(v):
+        if not isinstance(k, str) or not k:
+            errs.append(f"{where}[{i}]: must be a non-empty string")
+            ok = False
+        elif len(k) > MAX_PATTERN:
+            errs.append(f"{where}[{i}]: name longer than {MAX_PATTERN} characters")
+            ok = False
+        elif "\x00" in k:
+            errs.append(f"{where}[{i}]: NUL byte in name")
+            ok = False
+    return frozenset(v) if ok else None
+
+
 def _check_when(w, where: str, errs: list):
-    """-> (server, tool, args, destination, party, alert, specificity, secrets) or None."""
+    """-> (server, tool, args, destination, party, alert, specificity, secrets, arg_keys) or None."""
     if w is None:
-        return None, None, (), None, None, None, 0, None
+        return None, None, (), None, None, None, 0, None, None
     if not isinstance(w, dict):
         errs.append(f"{where}: must be an object")
         return None
@@ -297,9 +320,13 @@ def _check_when(w, where: str, errs: list):
         else:
             secrets = w["secrets"]
         spec += 1
+    arg_keys = None
+    if "arg_keys" in w:
+        arg_keys = _check_arg_keys(w["arg_keys"], f"{where}.arg_keys", errs)
+        spec += 1
     if len(errs) > n0:
         return None
-    return server, tool, args, dest, party, alert, spec, secrets
+    return server, tool, args, dest, party, alert, spec, secrets, arg_keys
 
 
 def _build(data: Any) -> tuple[list, str, list]:
@@ -354,9 +381,9 @@ def _build(data: Any) -> tuple[list, str, list]:
         w = _check_when(r.get("when"), f"{where}.when", errs)
         if len(errs) > n0 or w is None:
             continue
-        server, tool, args, dest, party, alert, spec, secrets = w
+        server, tool, args, dest, party, alert, spec, secrets, arg_keys = w
         rules.append(Rule(rid, verdict, note, copy.deepcopy(r.get("when") or {}), server, tool, args, dest, party, alert, spec,
-                          secrets))
+                          secrets, arg_keys))
     return rules, default, errs
 
 
@@ -484,7 +511,8 @@ def _spellings(text: str):
 def _icontains_any(v, needles: tuple):
     """True if the string (or ANY entry of the list) contains ANY needle, ignoring case and path spelling. Cannot be examined (a string
     over MAX_ICASE_STR, a list over MAX_ICASE_ITEMS, a list entry that is not a string) counts as a match: the operator exists for `ask`
-    rules, and a padded or oddly typed argument must not slip past one. A missing / non-string, non-list argument is false."""
+    rules, and a padded or oddly typed argument must not slip past one. A missing argument is false; a present one that is neither a string
+    nor a list (an object, a number, null, a boolean) cannot be examined either and counts as a match (B4)."""
     if v is _TRUNC:
         return True
     if isinstance(v, str):
@@ -494,7 +522,7 @@ def _icontains_any(v, needles: tuple):
             return True
         items = v
     else:
-        return None
+        return True                                       # an object / scalar where a path is expected: fail closed
     for it in items:
         if not isinstance(it, str) or len(it) > MAX_ICASE_STR:
             return True
@@ -552,6 +580,14 @@ def _clean_name(s: Any) -> bool:
         if unicodedata.category(ch) in _BAD_NAME_CATS:
             return False
     return True
+
+
+def _keys_within(args: Any, keys: frozenset, verdict: str) -> bool:
+    """`when.arg_keys`: every top-level argument name is listed. Args that are not an object cannot be checked: FALSE in allow rules,
+    TRUE in deny / ask rules (the same fail-closed rule as for names)."""
+    if not isinstance(args, Mapping):
+        return verdict != "allow"
+    return all(k in keys for k in args)
 
 
 def _name_matches(name_ok: bool, name: Any, patterns: tuple, verdict: str) -> bool:
@@ -639,6 +675,8 @@ def _rule_matches(rule: Rule, ctx: _Ctx) -> bool:
         return False
     if rule.secrets is not None and rule.secrets != ctx.secrets:
         return False
+    if rule.arg_keys is not None and not _keys_within(ctx.args, rule.arg_keys, rule.verdict):
+        return False
     for c in rule.args:
         if not _arg_holds(c, ctx.args):
             return False
@@ -662,7 +700,7 @@ def _canon_when(rule: Rule) -> str:
     args = sorted(json.dumps([".".join(c.path), c.op, list(c.value) if isinstance(c.value, tuple) else c.value],
                              sort_keys=True, default=str) for c in rule.args)
     return json.dumps({"s": lst(rule.server), "t": lst(rule.tool), "a": args, "d": rule.destination,
-                       "p": lst(rule.party), "al": rule.alert, "se": rule.secrets}, sort_keys=True)
+                       "p": lst(rule.party), "al": rule.alert, "se": rule.secrets, "k": lst(rule.arg_keys)}, sort_keys=True)
 
 
 class Policy:
@@ -695,6 +733,12 @@ class Policy:
                 if neg:
                     warns.append(f"rule {r.id}: allow rule uses negative operator(s) {', '.join(neg)}, which are TRUE when "
                                  f"the argument is missing or has the wrong type (it would allow on unknowns)")
+        for r in self.rules:
+            if r.arg_keys is None:
+                continue
+            outside = sorted({c.path[0] for c in r.args if c.op not in _NEG_OF and c.path[0] not in r.arg_keys})
+            if outside:
+                warns.append(f"rule {r.id}: args condition(s) on {', '.join(outside)} name a key outside arg_keys: the rule can never match")
         for r in self.rules:
             if r.verdict == "allow" and r.secrets is True and r.server is None and r.tool is None and not r.args \
                     and r.destination in (None, "any") and r.party is None and r.alert is None:
@@ -759,6 +803,13 @@ class Policy:
             # credentials are being granted: only a rule that says `secrets: true` may allow that
             return Decision("ask", rid, ids, "secrets", True)
         return Decision(verdict, rid, ids, reason, False)
+
+
+def stricter(a: Decision, b: Decision) -> Decision:
+    """The stricter of two decisions (deny > ask > allow). On a tie `a`, unless only `a` was escalated (an allow turned into ask by an
+    alert) and `b` is a rule's own verdict: the card then names the rule that holds the call. An unknown verdict counts as the strictest."""
+    sa, sb = _STRENGTH.get(a.verdict, 4), _STRENGTH.get(b.verdict, 4)
+    return b if sb > sa or (sb == sa and a.escalated and not b.escalated) else a
 
 
 BUILTIN_PREFIX = "builtin:"

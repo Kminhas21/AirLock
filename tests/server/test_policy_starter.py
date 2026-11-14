@@ -60,10 +60,65 @@ def test_reads_of_a_normal_path_are_allowed_with_a_rule_id(pol, tool):
     assert d.verdict == "allow" and d.rule_id
 
 
+# The REAL argument names of the tools the starter allows (listed from the pinned servers: reference filesystem 1.0.0, memory 1.0.0, time;
+# Desktop Commander 0.3.1's read_file adds offset/length). Every allow rule names exactly these keys (`when.arg_keys`, B3).
+REAL_KEYS = {
+    "read_file": {"path": "/p/a", "head": 3, "tail": 2, "offset": 0, "length": 10}, "read_text_file": {"path": "/p/a", "head": 3, "tail": 2},
+    "list_directory": {"path": "/p"}, "list_directory_with_sizes": {"path": "/p", "sortBy": "size"},
+    "directory_tree": {"path": "/p", "excludePatterns": ["*.o"]}, "search_files": {"path": "/p", "pattern": "*.py", "excludePatterns": []},
+    "get_file_info": {"path": "/p/a"}, "read_multiple_files": {"paths": ["/p/a"]}, "list_allowed_directories": {}, "read_graph": {},
+    "search_nodes": {"query": "x"}, "open_nodes": {"names": ["a"]}, "get_current_time": {"timezone": "UTC"},
+    "convert_time": {"source_timezone": "UTC", "target_timezone": "Europe/Paris", "time": "12:00"},
+}
+
+
 @pytest.mark.parametrize("tool", NO_PATH_TOOLS)
 def test_pathless_read_tools_are_allowed(pol, tool):
-    d = ev(pol, tool, {"query": "x"})
+    d = ev(pol, tool, REAL_KEYS[tool])
     assert d.verdict == "allow" and d.rule_id
+
+
+@pytest.mark.parametrize("tool", sorted(REAL_KEYS))
+def test_every_allowed_tool_is_allowed_with_its_real_arguments(pol, tool):
+    d = ev(pol, tool, REAL_KEYS[tool])
+    assert d.verdict == "allow" and d.rule_id, (tool, d)
+
+
+@pytest.mark.parametrize("tool", sorted(REAL_KEYS))
+@pytest.mark.parametrize("extra", ["isUrl", "url", "options", "origin", "range", "sheet", "command", "depth", "fetch", "PATH"])
+def test_an_argument_the_real_tool_does_not_have_is_held(pol, tool, extra):
+    """B3: a third-party tool that reuses a read-only NAME and does something else through an extra flag is not auto-allowed"""
+    args = {**REAL_KEYS[tool], extra: False}
+    d = ev(pol, tool, args)
+    assert d.verdict == "ask", (tool, extra, d)
+
+
+def test_desktop_commander_read_file_offset_length_is_allowed_but_not_is_url(pol):
+    assert ev(pol, "read_file", {"path": "/p/a", "offset": 10, "length": 100}).verdict == "allow"
+    assert ev(pol, "read_file", {"path": "/p/a", "offset": 10, "length": 100, "isUrl": False}).verdict == "ask"
+    assert ev(pol, "read_file", {"path": "http://x/y", "isUrl": True}).verdict == "ask"
+
+
+def test_url_flag_rule_is_redundant_in_the_shipped_starter_but_kept(pol):
+    """every allow rule lists its keys and none lists isUrl, and the default is ask: a call with isUrl is never allowed even without
+    ask-url-flag; the rule stays for copies that widen arg_keys or change the default"""
+    assert pol.default == "ask"
+    allows = [r for r in pol.rules if r.verdict == "allow"]
+    assert allows and all(r.arg_keys is not None and "isUrl" not in r.arg_keys for r in allows)
+    assert any(r.id == "ask-url-flag" for r in pol.rules)
+
+
+@pytest.mark.parametrize("odd", [{"a": "/home/u/.ssh/id_rsa"}, {"0": "/p/ok"}, 5, None, True, 1.5, "/p/ok", []])
+def test_read_multiple_files_with_paths_that_is_not_a_list_is_held(pol, odd):
+    """B4(2): a `paths` value the sensitive-path rule cannot inspect must not leave allow-read-multiple standing"""
+    assert ev(pol, "read_multiple_files", {"paths": odd}).verdict == "ask", odd
+
+
+@pytest.mark.parametrize("slot", ["path", "source", "destination", "directory", "file"])
+@pytest.mark.parametrize("odd", [{"a": "/home/u/.ssh/id_rsa"}, {}, 5, None, True])
+def test_an_uninspectable_value_in_a_path_slot_is_held(pol, slot, odd):
+    args = {"path": "/p/ok", slot: odd}
+    assert ev(pol, "read_file", args).verdict == "ask", (slot, odd)
 
 
 def test_read_multiple_files_allowed_when_all_normal(pol):
@@ -293,18 +348,20 @@ def test_icontains_any_list_any_element():
     assert not _ic([".ssh"], {"p": ["/a", "/b/ok"]})
 
 
-def test_icontains_any_top_level_dict_or_scalar_is_false_but_odd_list_entries_match():
-    assert not _ic([".ssh"], {"p": {"k": "/x/.ssh"}})
+def test_icontains_any_top_level_dict_or_scalar_counts_as_a_match_and_odd_list_entries_match():
+    for odd in ({"k": "/x/.ssh"}, {}, {"k": "/ok"}):
+        assert _ic([".ssh"], {"p": odd}), odd              # B4(2): an object cannot be examined: fail closed
     for odd in ([["/x/.ssh"]], [{"path": "/.ssh/x"}], [5], [None], [True], ["/ok", 1.5], ["/ok", ["/ok"]]):
         assert _ic([".ssh"], {"p": odd}), odd              # fail closed: an entry that cannot be examined counts as a match
     assert _ic([".ssh"], {"p": [5, "/x/.ssh"]})
 
 
-def test_icontains_any_dotted_path_and_missing_or_odd_args_are_false():
+def test_icontains_any_dotted_path_and_missing_is_false_but_odd_scalars_match():
     assert _ic([".ssh"], {"a": {"b": "/.SSH"}}, path="a.b")
     assert not _ic([".ssh"], {})
+    assert not _ic([".ssh"], {"q": "/.ssh"})
     for odd in (5, None, True, 1.5):
-        assert not _ic([".ssh"], {"p": odd})
+        assert _ic([".ssh"], {"p": odd}), odd             # B4(2): present but neither a string nor a list: cannot be examined
 
 
 def test_icontains_any_casefold_sanity():
@@ -345,7 +402,7 @@ def test_icontains_any_is_listed_and_explain_prints_it(tmp_path, capsys):
 
 def test_starter_is_small_and_hand_editable():
     assert os.path.getsize(STARTER) < 6144
-    assert len(P.load_policy(STARTER).rules) <= 10
+    assert len(P.load_policy(STARTER).rules) <= 20
 
 
 # ---------------------------------------------------------------------------------------------------- path spelling variants
@@ -413,12 +470,17 @@ def test_the_url_flag_asks_even_with_a_local_path(pol, flag):
     assert d.verdict == "ask" and d.rule_id == "ask-url-flag"
 
 
-@pytest.mark.parametrize("args", [{"path": "/p/notes.txt", "isUrl": False}, {"path": "/p/notes.txt", "isUrl": "false"},
-                                  {"path": "/p/a:b.txt"}, {"path": "C:/p/a.txt"}, {"path": "/p/notes.txt"}])
+@pytest.mark.parametrize("args", [{"path": "/p/a:b.txt"}, {"path": "C:/p/a.txt"}, {"path": "/p/notes.txt"}])
 def test_local_reads_stay_allowed(pol, args):
     assert ev(pol, "read_file", args).verdict == "allow"
 
 
+@pytest.mark.parametrize("args", [{"path": "/p/notes.txt", "isUrl": False}, {"path": "/p/notes.txt", "isUrl": "false"}])
+def test_an_explicit_is_url_false_is_held_since_arg_keys(pol, args):
+    """behaviour change (B3): isUrl is not a key of any allow rule, so even isUrl:false is asked"""
+    assert ev(pol, "read_file", args).verdict == "ask"
+
+
 def test_starter_stays_small_with_the_url_rules():
     p = P.load_policy(STARTER)
-    assert len(p.rules) <= 10 and os.path.getsize(STARTER) < 6144
+    assert len(p.rules) <= 20 and os.path.getsize(STARTER) < 6144

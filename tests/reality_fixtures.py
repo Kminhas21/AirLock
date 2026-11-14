@@ -80,7 +80,7 @@ def realdeps():
             pytest.fail(msg)                              # the gate: a missing dependency is a FAILURE, never a silent skip
         pytest.skip(msg)
     return {"filesystem": str(DEPS / "node_modules/.bin/mcp-server-filesystem"), "memory": str(DEPS / "node_modules/.bin/mcp-server-memory"),
-            "time": str(DEPS / "tv/bin/mcp-server-time")}
+            "time": str(DEPS / "tv/bin/mcp-server-time"), "desktop_commander": str(DEPS / "node_modules/.bin/desktop-commander")}
 
 
 

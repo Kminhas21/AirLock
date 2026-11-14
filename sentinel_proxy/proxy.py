@@ -20,7 +20,7 @@ from mcp.server.lowlevel.server import Server
 from mcp.shared.exceptions import MCPError
 
 from sentinel_proxy.backend import BackendLink, log
-from sentinel_proxy import sandbox
+from sentinel_proxy import resolve, sandbox
 from sentinel_proxy.config import ConfigError, ProxyConfig, ServerConfig, build_name_map, is_auto, scrub, summarize
 
 
@@ -308,10 +308,10 @@ class Proxy:
         auto = is_auto(self.cfg, server, orig, ro.read_only_hint if ro else None)
         secrets_used = sc.secrets_for(orig) if per_call else []
         call_id = uuid.uuid4().hex
-        decision = await self.link.decide(
-            {"event": "proxy_call", "call_id": call_id, "server": server, "tool": orig, "args": args, "auto": auto,
-             "secrets_used": secrets_used}
-        )
+        frame = {"event": "proxy_call", "call_id": call_id, "server": server, "tool": orig, "args": args, "auto": auto,
+                 "secrets_used": secrets_used}
+        frame.update(await _resolution(args, sc))
+        decision = await self.link.decide(frame)
         if not decision.approved:
             return _denied(decision.reason, decision.note)
         if per_call:
@@ -364,6 +364,26 @@ class Proxy:
             return _error(f"Downstream server {sc.name!r}: worker timed out")
         await self.link.send_result(call_id, "error" if res.is_error else "ok", scrub(_summary(res), vals))
         return res
+
+
+async def _resolution(args: dict[str, Any], sc: ServerConfig) -> dict[str, Any]:
+    """proxy_call fields with the symlink-resolved path arguments (B4); {} when nothing resolves differently. A slow filesystem cannot
+    stall the call: past RESOLVE_TIMEOUT_S the call is sent as `resolved_incomplete` (the hub then holds what it would allow). The worker
+    thread is not stopped by the timeout (a hung lookup keeps its thread); that only costs a thread, never an allow."""
+    try:
+        maps, incomplete = await asyncio.wait_for(asyncio.to_thread(resolve.resolve_args, args, resolve.bases_for(sc), resolve.home_known(sc),
+                                                                  resolve.map_bases_for(sc)), RESOLVE_TIMEOUT_S)
+    except Exception:
+        maps, incomplete = [], True
+    out: dict[str, Any] = {}
+    if maps:
+        out["resolved"] = maps
+    if incomplete:
+        out["resolved_incomplete"] = True
+    return out
+
+
+RESOLVE_TIMEOUT_S = 2.0
 
 
 class DownstreamStartError(Exception):
