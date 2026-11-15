@@ -82,11 +82,13 @@ class Agent:
         self.proc = proc
 
     @classmethod
-    async def start(cls, backend: Backend, session: str, servers: dict, tmp: Path, extra_cfg: dict | None = None) -> "Agent":
+    async def start(cls, backend: Backend, session: str, servers: dict, tmp: Path, extra_cfg: dict | None = None,
+                    env: dict[str, str] | None = None) -> "Agent":
         cfg = tmp / f"{session}.json"
         cfg.write_text(json.dumps({"session_id": session, "backend": f"{backend.ws}/proxy/ws", "servers": servers, **(extra_cfg or {})}))
         proc = await asyncio.create_subprocess_exec(sys.executable, str(ROOT / "tests/proxy/agent_cli.py"), "--serve", str(cfg), cwd=ROOT,
-                                                    env={**os.environ, "SENTINEL_WS_TOKEN": TOKEN}, stdin=asyncio.subprocess.PIPE,
+                                                    env={**os.environ, "SENTINEL_WS_TOKEN": TOKEN, **(env or {}),      # `env` reaches the proxy too
+                                                         **({"SENTINEL_AGENT_PASSTHROUGH": ",".join(env)} if env else {})}, stdin=asyncio.subprocess.PIPE,
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, limit=256 * 1024 * 1024)
         return cls(proc)
 

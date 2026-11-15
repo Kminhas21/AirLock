@@ -52,7 +52,12 @@ verified with 5,879 events. The hub is single-process by design, so this is its 
 * **Live workflows** (`tests/live`, D28). Desktop Commander direct vs through the proxy: every tool's schema and annotations and every call result
   identical, the documented differences pinned (one tools-only server: no resources, prompts, logging or instructions), every proxied call held and
   logged as a human decision; a `start_process` does not run while held (marker file absent), runs once approved, a denied one never runs and has
-  no logged result. The starter policy on the real filesystem server and on Desktop Commander: a plain read is allowed with no card, `.env` and
+  no logged result. Kernel confinement (D31, `test_kernel_confine_live.py`): both servers sandboxed with `runtime`; every past path-prediction bypass
+  (K0-K5: a link, `..` after a linked dir, a Unicode respelling, a kernel-order decoy, a 4th/5th allowed dir, a decoy in another base) is run as is
+  (held, or auto-allowed and denied by the kernel) AND with `SENTINEL_CONFINE_PRECHECK=force_true` (auto-allowed, no card, the server gets it, EACCES);
+  `SECRET-<uuid>` is in neither the result nor the event log (results logged); plain reads, lists, trees, `read_multiple_files` and Desktop Commander reads
+  are auto-allowed with the right content; a human-approved write still lands through the session process. The starter policy on the real (sandboxed)
+  filesystem server and on Desktop Commander: a plain read is allowed with no card, `.env` and
   `read_file {isUrl: true}` reach a human, the denied secret is not returned and a local HTTP target gets 0 requests; `replay` agrees. Deny with a
   note: the note reaches the agent and the log; the retry of the same content is still a `denied_effect_match` alert, labelled "You suggested this
   in your denial note (summary.md)." and downgraded to warning on the card and in the log, critical and unlabelled without a note. The auditor's CLI
@@ -74,7 +79,7 @@ verified with 5,879 events. The hub is single-process by design, so this is its 
   `-p tests.no_skip_plugin` (`tests/no_skip_plugin.py`, a plugin module, not a conftest): a skipped test (in a fixture, a marker or at module
   level), an xfail (marker or imperative `pytest.xfail`) and an unexpected xpass are FAILURES that name the test and the reason. Nothing
   collected is exit code 5, which `run()` already counts as a failure. Stages that install servers also set `REALDEPS_REQUIRED=1`.
-* **The coverage map, and proof that it ran.** `tests/live/WORKFLOWS.json` lists every user workflow (O1-O6 operator, D1-D4 developer, A1-A3
+* **The coverage map, and proof that it ran.** `tests/live/WORKFLOWS.json` lists every user workflow (O1-O6 operator, D1-D4 developer, A1-A4
   admin, L1-L3 auditor, P1 platform) and the live tests that cover it: pytest node ids or playwright specs; opt-in coverage (docker, journeys,
   claude) is listed as `optional`. `scripts/check_live_coverage.py` (unit-tested in `tests/test_check_live_coverage.py`) runs twice:
   - static, early in the gate (a second): every workflow is present and has a `live` entry or an explicit `"gap"`, every referenced file exists,

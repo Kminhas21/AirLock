@@ -12,7 +12,7 @@ from mcp.server.lowlevel.server import Server
 from mcp.server.stdio import stdio_server
 
 OBJ = {"type": "object"}
-NAMES = ["whoami_env", "whoami_env2", "try_write", "try_net", "sleep"]
+NAMES = ["whoami_env", "whoami_env2", "try_write", "try_net", "sleep", "read_path"]
 TOOLS = [types.Tool(name=n, description=n, input_schema=OBJ) for n in NAMES]
 
 
@@ -51,6 +51,15 @@ async def call_tool(ctx, params):
             out["net"] = "err:" + (_errno(e) if e.errno else type(e).__name__)
         finally:
             s.close()
+    elif params.name == "read_path":                   # reads `path` and, unnamed as a path, `also` (kernel confinement tests)
+        out["pid"] = os.getpid()
+        for key in ("path", "also"):
+            if key in a:
+                try:
+                    with open(a[key]) as f:
+                        out[key] = "ok:" + f.read()
+                except OSError as e:
+                    out[key] = "err:" + _errno(e)
     elif params.name == "sleep":
         await asyncio.sleep(float(a.get("seconds", 30)))
         out["slept"] = True

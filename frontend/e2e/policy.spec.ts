@@ -52,12 +52,12 @@ test("rules decide: allow needs no click, deny never reaches the downstream, ask
   const agent = startAgent();
 
   // allow: no card is ever shown; the resolved row names the rule
-  const ok = await agent.call("read_file", { path: "/project/a.txt" });
+  const ok = await agent.call("echo", { n: 0 });
   expect(ok.is_error).toBe(false);
   const allowed = page.locator('[data-testid="inbox-resolved"][data-reason="policy"]').first();
   await expect(allowed).toBeVisible({ timeout: 30_000 });
-  await expect(allowed).toHaveAttribute("data-rule-id", "allow-read-project");
-  await expect(allowed.locator(".inbox-decision.policy.approve")).toHaveText("auto-allowed by rule allow-read-project");
+  await expect(allowed).toHaveAttribute("data-rule-id", "allow-echo-n");
+  await expect(allowed.locator(".inbox-decision.policy.approve")).toHaveText("auto-allowed by rule allow-echo-n");
   await expect(page.locator('[data-testid="inbox-pending"]')).toHaveCount(0);
 
   // deny: immediate, never forwarded
@@ -66,14 +66,14 @@ test("rules decide: allow needs no click, deny never reaches the downstream, ask
   expect(denied.text).toBe("Denied by SENTINEL: policy");
   await expect(page.locator('[data-testid="inbox-resolved"][data-rule-id="deny-write-outside"] .inbox-decision.policy.deny'))
     .toHaveText("denied by rule deny-write-outside");
-  expect(calls().map((c) => c.tool), "only the allowed read reached the downstream").toEqual(["read_file"]);
+  expect(calls().map((c) => c.tool), "only the allowed echo reached the downstream").toEqual(["echo"]);
 
   // ask rule (and the proxy's auto flag for echo is ignored): held, labelled with the rule, the human decides
-  const held = agent.call("echo", { n: 1 });
+  const held = agent.call("echo", { x: 1 });
   const card = page.locator('[data-testid="inbox-pending"]').first();
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.locator('[data-testid="inbox-rule"]')).toHaveText("held by rule ask-echo");
-  expect(calls().map((c) => c.tool)).toEqual(["read_file"]);
+  expect(calls().map((c) => c.tool)).toEqual(["echo"]);
   await card.locator('[data-testid="inbox-deny"]').click();
   expect((await held).is_error).toBe(true);
   agent.stop();

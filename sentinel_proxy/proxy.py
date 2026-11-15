@@ -20,7 +20,7 @@ from mcp.server.lowlevel.server import Server
 from mcp.shared.exceptions import MCPError
 
 from sentinel_proxy.backend import BackendLink, log
-from sentinel_proxy import resolve, sandbox
+from sentinel_proxy import confine, sandbox
 from sentinel_proxy.config import ConfigError, ProxyConfig, ServerConfig, build_name_map, is_auto, scrub, summarize
 
 
@@ -35,6 +35,7 @@ class Downstream:
         self.tools: list[types.Tool] = []
         self.dead = False
         self.status: dict[str, Any] | None = None  # trampoline status of the startup / session process
+        self.confinable, self.confine_why = False, "not started"   # can its auto-allowed path calls be kernel-confined (D31)
 
 
 _STATUS_PREFIX = "SENTINEL_SANDBOX_STATUS "
@@ -154,14 +155,16 @@ class Proxy:
 
     # ------------------------------------------------------------ spawning
     @asynccontextmanager
-    async def open_session(self, sc: ServerConfig, *, secrets: dict[str, str] | None = None, label: str = ""):
+    async def open_session(self, sc: ServerConfig, *, secrets: dict[str, str] | None = None, label: str = "",
+                           spec: dict | None = None):
         """Spawn one (possibly sandboxed) server and yield (ClientSession, StderrTap). Always kills it on exit and
-        removes its private HOME. `secrets` ({ENV_NAME: value}) are put in the PROCESS environment only."""
+        removes its private HOME. `secrets` ({ENV_NAME: value}) are put in the PROCESS environment only. `spec` replaces the
+        server's sandbox (a confined worker's narrowed spec)."""
         secrets = secrets or {}
         tap = StderrTap(label or sc.name, secrets.values())
         try:
-            if sc.sandbox is not None:
-                spec = dict(sc.sandbox)
+            if spec is not None or sc.sandbox is not None:
+                spec = dict(spec if spec is not None else sc.sandbox)
                 spec["env_allow"] = list(dict.fromkeys([*spec["env_allow"], *secrets]))
                 command, args, env = sandbox.sandbox_params(spec, sc.command, list(sc.args), {**sc.env, **secrets})
                 params = StdioServerParameters(command=command, args=args, env=env, cwd=sc.cwd)
@@ -236,6 +239,9 @@ class Proxy:
                 raise
             except Exception as e:
                 raise self._startup_failure(sc, tap, e) from e
+            d.confinable, d.confine_why = confine.server_confinable(sc)
+            if not d.confinable:
+                log(f"server {name!r}: path allows are asked ({d.confine_why}): auto-allowed path calls need a sandbox with runtime")
             self.downstreams[name] = d
         self.names = build_name_map(
             {n: (self.cfg.servers[n].prefix, [t.name for t in d.tools]) for n, d in self.downstreams.items()}
@@ -279,8 +285,10 @@ class Proxy:
                 layers = [x for x in (st or {}).get("layers", []) if isinstance(x, str)]
                 missing = [x for x in (st or {}).get("missing", []) if isinstance(x, str)]
                 network = sc.sandbox["network"]
+            d = self.downstreams.get(name)
             out[name] = {"lifecycle": sc.lifecycle, "layers": layers, "missing": missing, "network": network,
-                         "secrets": list(sc.secrets)}
+                         "secrets": list(sc.secrets), "confinable": bool(d and d.confinable),
+                         "confine_why": d.confine_why if d else "not started"}
         return out
 
     def build_server(self) -> Server:
@@ -310,12 +318,16 @@ class Proxy:
         call_id = uuid.uuid4().hex
         frame = {"event": "proxy_call", "call_id": call_id, "server": server, "tool": orig, "args": args, "auto": auto,
                  "secrets_used": secrets_used}
-        frame.update(await _resolution(args, sc))
+        frame.update(await _precheck(args, sc, d.confinable))
         decision = await self.link.decide(frame)
         if not decision.approved:
             return _denied(decision.reason, decision.note)
-        if per_call:
-            return await self._call_worker(sc, call_id, orig, args, secrets_used)
+        if decision.reason == "policy" and not decision.confine and confine.has_path_values(args):
+            # belt and braces against a hub that auto-allows a path call without a confine map: never run it unconfined
+            await self.link.send_result(call_id, "error", "unconfined")
+            return _denied("unconfined")
+        if per_call or decision.confine:
+            return await self._call_worker(sc, call_id, orig, args, secrets_used, decision.confine)
         try:
             res = await d.session.call_tool(orig, args)
         except MCPError as e:
@@ -330,8 +342,15 @@ class Proxy:
         return res
 
     async def _call_worker(self, sc: ServerConfig, call_id: str, tool: str, args: dict[str, Any],
-                           secret_names: list[str]) -> types.CallToolResult:
-        """One approved call = one fresh sandboxed worker that holds only this call's secrets and is always killed."""
+                           secret_names: list[str], confine_map: dict | None = None) -> types.CallToolResult:
+        """One approved call = one fresh sandboxed worker that holds only this call's secrets and is always killed. With `confine_map`
+        (a policy approval, D31) the worker's spec is narrowed to the exact grants, and its status must prove it before `call_tool`."""
+        spec = None
+        if confine_map:
+            if not self.downstreams[sc.name].confinable:
+                await self.link.send_result(call_id, "error", "confine_failed")
+                return _denied("confine_failed")
+            spec = confine.confined_spec(sc.sandbox, confine.grant_specs(args, confine_map, sc))
         values: dict[str, str] = {}
         for n in secret_names:  # read NOW, from the proxy's own environment
             v = os.environ.get(sc.secrets[n]["from_env"])
@@ -340,13 +359,17 @@ class Proxy:
                 return _denied("secret_unavailable")
             values[n] = v
         vals = list(values.values())
-        timed_out = False
+        timed_out = unconfined = False
         try:
-            async with self.open_session(sc, secrets=values, label=f"{sc.name}:call") as (session, _tap):
+            async with self.open_session(sc, secrets=values, label=f"{sc.name}:call", spec=spec) as (session, tap):
                 try:  # caught INSIDE the transport's task group, or it would surface as an ExceptionGroup
                     with anyio.fail_after(sc.call_timeout_s):
                         await session.initialize()
-                        res = await session.call_tool(tool, args)
+                        if spec is not None:
+                            await tap.wait_status()
+                            unconfined = not confine.status_ok(tap.status)
+                        if not unconfined:
+                            res = await session.call_tool(tool, args)
                 except TimeoutError:
                     timed_out = True
         except TimeoutError:
@@ -359,6 +382,10 @@ class Proxy:
             log(f"worker for {sc.name!r} failed: {type(e).__name__}")
             await self.link.send_result(call_id, "error", f"worker failed: {type(e).__name__}")
             return _error(f"Downstream server {sc.name!r} failed: {type(e).__name__}")
+        if unconfined:                       # the worker was killed when the session closed; call_tool was never sent
+            log(f"worker for {sc.name!r}: its status does not prove the confinement; call refused")
+            await self.link.send_result(call_id, "error", "confine_failed")
+            return _denied("confine_failed")
         if timed_out:
             await self.link.send_result(call_id, "error", "worker timed out")
             return _error(f"Downstream server {sc.name!r}: worker timed out")
@@ -366,24 +393,19 @@ class Proxy:
         return res
 
 
-async def _resolution(args: dict[str, Any], sc: ServerConfig) -> dict[str, Any]:
-    """proxy_call fields with the symlink-resolved path arguments (B4); {} when nothing resolves differently. A slow filesystem cannot
-    stall the call: past RESOLVE_TIMEOUT_S the call is sent as `resolved_incomplete` (the hub then holds what it would allow). The worker
-    thread is not stopped by the timeout (a hung lookup keeps its thread); that only costs a thread, never an allow."""
+async def _precheck(args: dict[str, Any], sc: ServerConfig, server_ok: bool) -> dict[str, Any]:
+    """proxy_call fields (D31): `confinable` (the server can be confined and the precheck found no symlink, escape or excess), `links` and
+    `links_lexical` (where a symlinked value leads in the kernel's order / with `..` resolved first; display only). A slow filesystem cannot stall the call: past PRECHECK_TIMEOUT_S it is `confinable: false` (a human is asked). The
+    thread is not stopped by the timeout; that only costs a thread, never an allow."""
     try:
-        maps, incomplete = await asyncio.wait_for(asyncio.to_thread(resolve.resolve_args, args, resolve.bases_for(sc), resolve.home_known(sc),
-                                                                  resolve.map_bases_for(sc)), RESOLVE_TIMEOUT_S)
+        ok, links, lexical = await asyncio.wait_for(asyncio.to_thread(confine.precheck, args, sc), PRECHECK_TIMEOUT_S)
     except Exception:
-        maps, incomplete = [], True
-    out: dict[str, Any] = {}
-    if maps:
-        out["resolved"] = maps
-    if incomplete:
-        out["resolved_incomplete"] = True
-    return out
+        ok, links, lexical = False, {}, {}
+    return {"confinable": bool(server_ok and ok), **({"links": links} if links else {}),
+            **({"links_lexical": lexical} if links and lexical else {})}
 
 
-RESOLVE_TIMEOUT_S = 2.0
+PRECHECK_TIMEOUT_S = 2.0
 
 
 class DownstreamStartError(Exception):

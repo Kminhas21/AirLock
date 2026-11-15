@@ -200,6 +200,8 @@ export function BoundaryChips({ session }: { session: InboxSession }) {
       missing: [],
       network: null,
       secrets: [],
+      confinable: null,
+      confine_why: "",
     }));
   return (
     <div className="inbox-boundary" data-testid="inbox-boundary">
@@ -224,6 +226,11 @@ export function BoundaryChips({ session }: { session: InboxSession }) {
           {b.layers.length === 0 && (
             <span className="inbox-boundary-chip unsandboxed" data-testid="inbox-boundary-chip">
               {b.server ? `${b.server}: ` : ""}unsandboxed
+            </span>
+          )}
+          {b.confinable === false && (
+            <span className="inbox-boundary-chip weak" data-testid="inbox-boundary-confine">
+              {b.server ? `${b.server}: ` : ""}path allows asked: {b.confine_why || "not confinable"}
             </span>
           )}
           {b.missing.length > 0 && (

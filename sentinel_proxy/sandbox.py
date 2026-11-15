@@ -5,6 +5,10 @@ sentinel_proxy.sandbox_exec`) applies the layers inside the child process and th
 IS the process (stdio passes through untouched).
 
 Layers (closed set): env, rlimit, no_new_privs, netns, landlock_net, landlock_fs.
+  * Confined workers (DECISIONS D31): a spec with `grants` gets, instead of its `read`/`write` data directories, only the system set,
+    its `runtime` (code), its private HOME and one Landlock rule per grant, on the object openat2 finds by walking the written value
+    beneath its base with RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS (no symlink anywhere, no escape). A value that cannot be opened that
+    way gets NO grant (never a wider one).
   * Landlock is driven through raw syscalls (444/445/446: identical on x86_64 and aarch64, the only architectures
     supported; elsewhere `probe()` reports ABI 0 and a `require`d sandbox fails closed).
   * Network: `os.unshare` network namespace (CLONE_NEWNET as root, CLONE_NEWUSER|CLONE_NEWNET otherwise); `loopback`
@@ -23,6 +27,7 @@ import os
 import platform
 import posixpath
 import re
+import stat
 import struct
 import subprocess
 import sys
@@ -31,7 +36,10 @@ from typing import Any
 LAYERS = ("env", "rlimit", "no_new_privs", "netns", "landlock_net", "landlock_fs")
 NETWORKS = ("none", "loopback", "host")
 RLIMIT_KEYS = ("cpu_s", "mem_mb", "nofile", "nproc", "fsize_mb")
-SPEC_KEYS = ("read", "write", "network", "env_allow", "rlimits", "require")
+SPEC_KEYS = ("read", "write", "runtime", "network", "env_allow", "rlimits", "require")
+GRANTS_KEY = "grants"                  # internal: set by the proxy for a confined worker, never accepted from operator config
+MAX_GRANTS = 256                       # 64 values x 4 bases
+GRANT_RIGHTS = {"read": 1 << 2, "list": 1 << 3}       # FS_READ_FILE on exactly that file; FS_READ_DIR beneath that directory
 MAX_PATHS = 200
 MAX_PATH_LEN = 4096
 MAX_ENV_NAMES = 200
@@ -62,12 +70,42 @@ DEVICE_READ = ("/dev/zero", "/dev/urandom")
 DEVICE_WRITE = ("/dev/null",)                                  # a sink: subprocess.DEVNULL opens it read-write
 NET_ETC = ("/etc/hosts", "/etc/resolv.conf", "/etc/nsswitch.conf", "/etc/services", "/etc/host.conf")    # name resolution, network != none
 
+SYS_OPENAT2 = 437                                               # same number on x86_64 and aarch64
+RESOLVE_NO_MAGICLINKS, RESOLVE_NO_SYMLINKS, RESOLVE_BENEATH = 0x02, 0x04, 0x08
+RESOLVE_GRANT = RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS
+
 _CAPSET = {"x86_64": 126, "amd64": 126, "aarch64": 91}
 _SUPPORTED_ARCH = ("x86_64", "amd64", "aarch64")
 
 
 class SandboxSpecError(ValueError):
     pass
+
+
+BROAD_RUNTIME = ("/etc", "/proc", "/root", "/home", "/var", "/sys", "/dev", "/tmp")    # never a server's code directory
+
+
+def _covers(a: str, b: str) -> bool:
+    """`a` is `b` or an ancestor of it (both normalised absolute paths)."""
+    return a == "/" or b == a or b.startswith(a + "/")
+
+
+def runtime_problem(spec: dict) -> str:
+    """Why `spec["runtime"]` would nullify the sandbox ("" if it is fine): `runtime` is read + execute, so an entry that is `/`, one of
+    BROAD_RUNTIME, or equal to / an ancestor of a read or write entry or of the private HOME (made beneath the temp dir) grants the data
+    the confinement withholds (DECISIONS D31)."""
+    import tempfile
+    homes = {"/tmp", posixpath.normpath(tempfile.gettempdir())}
+    for r in spec.get("runtime") or []:
+        n = posixpath.normpath(r)
+        if n == "/" or n in BROAD_RUNTIME:
+            return f"runtime: {n!r} is too broad (list the server's own code directory, not a system directory)"
+        for other in list(spec.get("read") or []) + list(spec.get("write") or []):
+            if _covers(n, posixpath.normpath(other)):
+                return f"runtime: {n!r} is, or contains, the read/write entry {other[:60]!r} (it would grant that data to every confined call)"
+        if any(_covers(n, h) for h in homes):
+            return f"runtime: {n!r} contains the worker's private HOME (the temp directory)"
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -95,16 +133,35 @@ def _paths(name: str, v: Any) -> list:
     return out
 
 
-def validate_spec(obj: Any) -> dict:
-    """Strict validation; returns a normalised spec with every key present.  Raises SandboxSpecError."""
+def _grants(v: Any) -> list:
+    if not isinstance(v, list) or len(v) > MAX_GRANTS:
+        raise SandboxSpecError(f"grants: must be a list of at most {MAX_GRANTS} [base, value, right] entries")
+    out = []
+    for g in v:
+        if not (isinstance(g, (list, tuple)) and len(g) == 3):
+            raise SandboxSpecError("grants: entries must be [base, value, right]")
+        base, value, right = g
+        _paths("grants base", [base])
+        if not isinstance(value, str) or not value or len(value) > MAX_PATH_LEN or "\x00" in value:
+            raise SandboxSpecError("grants: a value must be a non-empty string without NUL")
+        if right not in GRANT_RIGHTS:
+            raise SandboxSpecError(f"grants: right must be one of {', '.join(GRANT_RIGHTS)}")
+        out.append([base, value, right])
+    return out
+
+
+def validate_spec(obj: Any, *, internal: bool = False) -> dict:
+    """Strict validation; returns a normalised spec with every key present (`grants` only when given, and only with `internal`: the
+    proxy's confined workers).  Raises SandboxSpecError."""
     if not isinstance(obj, dict):
         raise SandboxSpecError("sandbox spec must be an object")
     for k in obj:
-        if k not in SPEC_KEYS:
+        if k not in SPEC_KEYS and not (internal and k == GRANTS_KEY):
             raise SandboxSpecError(f"unknown sandbox key {str(k)[:40]!r}")
     spec = {
         "read": _paths("read", obj.get("read", [])),
         "write": _paths("write", obj.get("write", [])),
+        "runtime": _paths("runtime", obj.get("runtime", [])),
         "network": obj.get("network", "none"),
         "env_allow": obj.get("env_allow", []),
         "rlimits": obj.get("rlimits", {}),
@@ -135,6 +192,10 @@ def validate_spec(obj: Any) -> dict:
     spec["rlimits"] = clean
     if not isinstance(spec["require"], bool):
         raise SandboxSpecError("require: must be true or false")
+    if why := runtime_problem(spec):
+        raise SandboxSpecError(why)
+    if GRANTS_KEY in obj:
+        spec[GRANTS_KEY] = _grants(obj[GRANTS_KEY])
     return spec
 
 
@@ -149,7 +210,7 @@ def decode_spec(blob: str) -> dict:
         raw = base64.b64decode(blob.encode("ascii"), validate=True)
         if len(raw) > MAX_SPEC_BYTES:
             raise ValueError("too large")
-        return validate_spec(json.loads(raw.decode("utf-8")))
+        return validate_spec(json.loads(raw.decode("utf-8")), internal=True)
     except SandboxSpecError:
         raise
     except (ValueError, UnicodeError, RecursionError) as e:
@@ -159,7 +220,7 @@ def decode_spec(blob: str) -> dict:
 def sandbox_params(spec: Any, command: str, args, env=None) -> tuple:
     """-> (command, args, env) that start `command args...` inside the sandbox.  `env` is returned as the PROCESS
     environment (never argv), with PYTHONPATH pointing at this package so `-m sentinel_proxy.sandbox_exec` resolves."""
-    spec = validate_spec(spec)
+    spec = validate_spec(spec, internal=True)
     if not isinstance(command, str) or not command or "\x00" in command:
         raise SandboxSpecError("command must be a non-empty string")
     args = list(args or [])
@@ -219,6 +280,58 @@ def _unshare_net() -> bool:
         return subprocess.run([sys.executable, "-c", _UNSHARE_SNIPPET], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL, timeout=20).returncode == 0
     except Exception:
+        return False
+
+
+def _openat2(dirfd: int, path: str, flags: int, resolve: int) -> int:
+    libc = _libc()
+    libc.syscall.restype = ctypes.c_long
+    how = ctypes.create_string_buffer(struct.pack("<QQQ", flags, 0, resolve), 24)        # struct open_how
+    fd = libc.syscall(SYS_OPENAT2, ctypes.c_int(dirfd), path.encode("utf-8", "surrogateescape"), how, ctypes.c_size_t(24))
+    if fd < 0:
+        e = ctypes.get_errno()
+        raise OSError(e, os.strerror(e), path)
+    return int(fd)
+
+
+def open_beneath(base: str, value: str) -> int:
+    """O_PATH fd of the object the kernel finds by walking `value` beneath `base` with no symlink anywhere (RESOLVE_GRANT). An absolute
+    value is walked from '/'. Raises OSError: ELOOP (a symlink), EXDEV (escapes the base), ENOENT, ... The base itself is operator
+    config (a server's directory argument) and is opened normally."""
+    if value.startswith("/"):
+        base, value = "/", value.lstrip("/") or "."
+    bfd = os.open(base, os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        return _openat2(bfd, value, os.O_PATH | os.O_CLOEXEC, RESOLVE_GRANT)
+    finally:
+        os.close(bfd)
+
+
+def open_grant(base: str, value: str, right: str) -> int | None:
+    """-> O_PATH fd to grant `right` on, or None (no grant): the walk failed, or the object is the wrong kind (`read` is for a
+    non-directory only, so it never covers what is beneath; `list` is for a directory only)."""
+    try:
+        fd = open_beneath(base, value)
+    except (OSError, ValueError):
+        return None
+    try:
+        if stat.S_ISDIR(os.fstat(fd).st_mode) == (right == "list"):
+            return fd
+    except OSError:
+        pass
+    os.close(fd)
+    return None
+
+
+@functools.lru_cache(maxsize=1)
+def openat2_ok() -> bool:
+    """openat2 with the grant flags works here (ENOSYS on old kernels; a seccomp profile can block it: EPERM / ENOSYS)."""
+    if not _arch_ok():
+        return False
+    try:
+        os.close(open_beneath("/", "."))
+        return True
+    except OSError:
         return False
 
 
@@ -324,8 +437,8 @@ def system_read_paths(network: str) -> list:
     return out
 
 
-def restrict_landlock(abi: int, rules: list, *, deny_tcp: bool, handle_fs: bool = True) -> None:
-    """rules: [(path, rights)].  Handles all FS rights the kernel knows (so everything not granted is denied) and, with
+def restrict_landlock(abi: int, rules: list, *, deny_tcp: bool, handle_fs: bool = True, fd_rules: list = ()) -> None:
+    """rules: [(path, rights)]; fd_rules: [(O_PATH fd, rights)] (exact grants, opened by the caller, not closed here).  Handles all FS rights the kernel knows (so everything not granted is denied) and, with
     deny_tcp, TCP bind+connect (ABI >= 4).  Nonexistent paths are skipped (the sandbox is only ever stricter)."""
     if abi < 1:
         raise OSError(0, "Landlock is not available")
@@ -340,22 +453,27 @@ def restrict_landlock(abi: int, rules: list, *, deny_tcp: bool, handle_fs: bool 
     if rfd < 0:
         raise OSError(ctypes.get_errno(), "landlock_create_ruleset failed")
     try:
+        def add(fd: int, rights: int, what: str) -> None:
+            allowed = rights & handled_fs
+            if not stat.S_ISDIR(os.fstat(fd).st_mode):
+                allowed &= _FILE_RIGHTS
+            if not allowed:
+                return
+            rule = ctypes.create_string_buffer(struct.pack("<Qi", allowed, fd), 12)
+            if libc.syscall(SYS_LANDLOCK_ADD_RULE, ctypes.c_int(rfd), ctypes.c_int(LANDLOCK_RULE_PATH_BENEATH), rule, ctypes.c_uint32(0)) != 0:
+                raise OSError(ctypes.get_errno(), f"landlock_add_rule failed for {what}")
+
         for path, rights in rules if handle_fs else []:
             try:
                 pfd = os.open(path, os.O_PATH | os.O_CLOEXEC)
             except OSError:
                 continue
             try:
-                allowed = rights & handled_fs
-                if not os.path.isdir(path):
-                    allowed &= _FILE_RIGHTS
-                if not allowed:
-                    continue
-                rule = ctypes.create_string_buffer(struct.pack("<Qi", allowed, pfd), 12)
-                if libc.syscall(SYS_LANDLOCK_ADD_RULE, ctypes.c_int(rfd), ctypes.c_int(LANDLOCK_RULE_PATH_BENEATH), rule, ctypes.c_uint32(0)) != 0:
-                    raise OSError(ctypes.get_errno(), f"landlock_add_rule failed for {path}")
+                add(pfd, rights, path)
             finally:
                 os.close(pfd)
+        for fd, rights in fd_rules if handle_fs else []:
+            add(fd, rights, "an exact grant")
         if libc.syscall(SYS_LANDLOCK_RESTRICT_SELF, ctypes.c_int(rfd), ctypes.c_uint32(0)) != 0:
             raise OSError(ctypes.get_errno(), "landlock_restrict_self failed")
     finally:
@@ -366,6 +484,7 @@ def fs_rules(spec: dict, home: str) -> list:
     rules = [(p, _READ_RIGHTS) for p in system_read_paths(spec["network"])]
     rules += [(p, FS_READ_FILE) for p in DEVICE_READ]
     rules += [(p, FS_READ_FILE | FS_WRITE_FILE | FS_TRUNCATE) for p in DEVICE_WRITE]
+    rules += [(p, _READ_RIGHTS) for p in spec["runtime"]]          # the server's code: interpreter, packages (read + execute)
     rules += [(p, _READ_RIGHTS) for p in spec["read"]]
     rules += [(p, _WRITE_RIGHTS) for p in spec["write"]]
     rules.append((home, _WRITE_RIGHTS))

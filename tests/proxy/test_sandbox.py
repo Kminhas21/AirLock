@@ -139,10 +139,10 @@ CONNECT = ("def conn():\n    c = socket.create_connection(('127.0.0.1', PORT), t
 class TestSpec:
     def test_minimal_and_defaults(self):
         s = validate_spec({})
-        assert s == {"read": [], "write": [], "network": "none", "env_allow": [], "rlimits": {}, "require": True}
+        assert s == {"read": [], "write": [], "runtime": [], "network": "none", "env_allow": [], "rlimits": {}, "require": True}
 
     def test_full_roundtrip(self):
-        raw = {"read": ["/a/b", "/c"], "write": ["/w"], "network": "loopback", "env_allow": ["A", "B_1"],
+        raw = {"read": ["/a/b", "/c"], "write": ["/w"], "runtime": ["/opt/node"], "network": "loopback", "env_allow": ["A", "B_1"],
                "rlimits": {"cpu_s": 5, "mem_mb": 256, "nofile": 64, "nproc": 32, "fsize_mb": 8}, "require": False}
         s = validate_spec(raw)
         assert s == raw
@@ -869,7 +869,7 @@ class TestFailClosed:
 def test_module_has_no_third_party_imports():
     for mod in (sandbox, sandbox_exec):
         lines = [ln.strip() for ln in open(mod.__file__, encoding="utf-8").read().splitlines() if ln.startswith(("import ", "from "))]
-        allowed = {"__future__", "base64", "ctypes", "functools", "json", "os", "platform", "posixpath", "re", "struct", "subprocess", "sys",
+        allowed = {"__future__", "base64", "ctypes", "functools", "json", "os", "platform", "posixpath", "re", "stat", "struct", "subprocess", "sys",
                    "typing", "tempfile", "sentinel_proxy", "fcntl", "socket", "resource"}
         for ln in lines:
             assert ln.split()[1].split(".")[0] in allowed, ln

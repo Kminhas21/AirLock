@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -18,17 +18,22 @@ const POLICY = process.env.SENTINEL_POLICY ?? "";
 const TOKEN = process.env.INBOX_TOKEN ?? "";
 const calls = () => (existsSync(LOG) ? readFileSync(LOG, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)) : []);
 
-function config(sessionId: string): string {
+// D31: an auto-allowed path call runs kernel-confined, so a server must be sandboxed with `runtime` for a standing allow to auto-approve a
+// read (an unsandboxed one gets a card). The sandbox trampoline needs the absolute interpreter (see boundary.spec.ts).
+const python = () => execFileSync("python", ["-c", "import sys; print(sys.executable)"]).toString().trim();
+const sandboxedServer = () => ({ command: python(), args: [DOWNSTREAM], sandbox: { read: [], runtime: [path.join(REPO_ROOT, "tests/proxy")], network: "none" } });
+
+function config(sessionId: string, sandboxed = false): string {
   const f = path.join(dir, `${sessionId}.json`);
   writeFileSync(f, JSON.stringify({
     session_id: sessionId, backend: `ws://127.0.0.1:${API_PORT}/proxy/ws`,
-    servers: { fs: { command: "python", args: [DOWNSTREAM], env: { FAKE_DOWNSTREAM_LOG: LOG } } },
+    servers: { fs: sandboxed ? sandboxedServer() : { command: "python", args: [DOWNSTREAM], env: { FAKE_DOWNSTREAM_LOG: LOG } } },
   }));
   return f;
 }
 
-function startAgent(sessionId: string) {
-  const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", config(sessionId)], { cwd: REPO_ROOT, env: { ...process.env, SENTINEL_WS_TOKEN: TOKEN } });
+function startAgent(sessionId: string, sandboxed = false) {
+  const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", config(sessionId, sandboxed)], { cwd: REPO_ROOT, env: { ...process.env, SENTINEL_WS_TOKEN: TOKEN } });
   forwardStderr(p, "agent operator.spec");
   let buf = "";
   const waiters: ((r: { is_error: boolean; text: string }) => void)[] = [];
@@ -105,14 +110,16 @@ test("the operator sees why, what happened so far, denies with a reason, and tur
   expect((await third).is_error).toBe(false);
   agent.stop();
 
-  // 4. a NEW session: the rule now decides a sibling call; no card, the resolved row names the rule
-  const agent2 = startAgent("pw-operator-2");
+  // 4. a NEW session (its server sandboxed with runtime): the rule now decides a sibling call; no card, the resolved row names the rule,
+  // and the downstream answered it from a kernel-confined worker (which gets no log file: the reply itself proves it ran)
+  const agent2 = startAgent("pw-operator-2", true);
   const res = await agent2.call("read_file", { path: "/project/docs/b.txt" });
   expect(res.is_error).toBe(false);
+  expect(res.text).toBe('read_file:{"path": "/project/docs/b.txt"}');
   const row = page.locator('[data-testid="inbox-resolved"][data-reason="policy"]').first();
   await expect(row).toBeVisible({ timeout: 30_000 });
   await expect(row).toHaveAttribute("data-rule-id", rules[0].id);
   await expect(row.locator(".inbox-decision.policy.approve")).toContainText("auto-allowed by rule");
-  expect(calls().map((c) => c.tool).filter((t) => t === "read_file")).toHaveLength(2);
+  expect(calls().map((c) => c.tool).filter((t) => t === "read_file")).toHaveLength(1);       // the human-approved one (session 1)
   agent2.stop();
 });

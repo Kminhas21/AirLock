@@ -44,6 +44,7 @@ class Decision:
     approved: bool
     reason: str
     note: str = ""  # sanitised operator note; only ever set on a human deny
+    confine: dict | None = None  # a policy approval's {argument: "read" | "list"}: run it in a kernel-confined worker (D31)
 
 
 class BackendLink:
@@ -149,7 +150,12 @@ class BackendLink:
         approved = frame.get("decision") == "approve"
         # The note is honoured for human DENIALS only; never logged.
         note = clean_note(frame.get("note")) if (not approved and reason == "human") else ""
-        fut.set_result(Decision(approved, reason, note))
+        confine = None
+        if approved and reason == "policy" and "confine" in frame:
+            confine = _confine_map(frame["confine"])
+            if confine is None:                       # a malformed map is never run unconfined: deny
+                approved, reason = False, "invalid"
+        fut.set_result(Decision(approved, reason, note, confine))
 
     async def wait_started(self, timeout: float) -> None:
         """Wait up to `timeout` for the first hello_ack (or a fatal reject)."""
@@ -218,6 +224,14 @@ class BackendLink:
         if ws is None:
             return
         await self._send(ws, json.dumps({"event": "proxy_result", "call_id": call_id, "status": status, "summary": summary}))
+
+
+def _confine_map(v: Any) -> dict[str, str] | None:
+    if not isinstance(v, dict) or not 0 < len(v) <= 20:
+        return None
+    if not all(isinstance(k, str) and 0 < len(k) <= 200 and x in ("read", "list") for k, x in v.items()):
+        return None
+    return dict(v)
 
 
 def _parse(msg: Any) -> dict[str, Any] | None:

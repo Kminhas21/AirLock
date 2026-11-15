@@ -190,10 +190,10 @@ async def test_success_writes_the_file_and_new_sessions_see_it_pending_call_unaf
     # a NEW session gets the rule: the allow rule auto-approves the same call (working monitor, no alert)
     proxy2 = FakePeer()
     s2 = await r.hub.proxy_hello(proxy2, hello("s2"))
-    await r.hub.handle_proxy_frame(s2, call("n1", tool="write_file", args=dict(ARGS)))
+    await r.hub.handle_proxy_frame(s2, call("n1", tool="write_file", args=dict(ARGS), confinable=True))
     await wait_for(lambda: proxy2.events("proxy_decision"))
     assert proxy2.events("proxy_decision")[0] == {"event": "proxy_decision", "call_id": "n1", "decision": "approve",
-                                                  "reason": "policy"}
+                                                  "reason": "policy", "confine": {"path": "read"}}     # D31: confined to the named file
 
 
 async def test_deny_rule_denies_the_same_call_in_a_new_session(pfile):

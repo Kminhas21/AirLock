@@ -1,9 +1,8 @@
-"""`when.arg_keys` (B3): a rule matches only if every top-level argument name of the call is in the list, and the stricter-of
-evaluation over symlink-resolved argument forms (B4, server/resolved_args.py)."""
+"""`when.arg_keys` (B3): a rule matches only if every top-level argument name of the call is in the list. (The B4 symlink resolution that
+lived here is gone: DECISIONS D31, tests/server/test_policy_confine.py.)"""
 import pytest
 
 import policy as P
-import resolved_args as RA
 from policy import Policy, PolicyError, load_policy
 
 
@@ -93,99 +92,5 @@ def test_rules_differing_only_in_arg_keys_are_not_reported_as_duplicates():
 def test_lint_warns_when_an_args_condition_names_a_key_outside_arg_keys():
     p = pol([allow_keys(["path"], args=[{"path": "paths", "op": "exists"}])])
     assert any("arg_keys" in w and "paths" in w for w in p.lint())
-    assert pol([allow_keys(["path"], args=[{"path": "path.x", "op": "exists"}])]).lint() == []
+    assert [w for w in pol([allow_keys(["path"], args=[{"path": "path.x", "op": "exists"}])]).lint() if "confine" not in w] == []
     assert not any("arg_keys" in w for w in pol([allow_keys(["path"], args=[{"path": "other", "op": "not_exists"}])]).lint())
-
-
-# ---------------------------------------------------------------------------------------------------------- stricter-of
-
-def D(v, rid=None):
-    return P.Decision(v, rid, (), "x")
-
-
-def test_stricter_orders_deny_ask_allow_and_keeps_the_first_on_a_tie():
-    assert P.stricter(D("allow"), D("ask")).verdict == "ask"
-    assert P.stricter(D("ask"), D("allow")).verdict == "ask"
-    assert P.stricter(D("ask"), D("deny")).verdict == "deny"
-    assert P.stricter(D("allow", "a"), D("allow", "b")).rule_id == "a"
-    esc = P.Decision("ask", "allow-x", (), "alert", True)
-    assert P.stricter(esc, D("ask", "ask-y")).rule_id == "ask-y"          # the rule that holds the call is named, not the escalated allow
-    assert P.stricter(D("ask", "ask-y"), esc).rule_id == "ask-y"
-
-
-def test_with_an_alert_the_card_names_the_sensitive_rule_of_the_resolved_form():
-    v, bad = RA.parse([{"path": "/w/.env"}], {"path": "notes.txt"})
-    d = RA.evaluate(STARTER, "fs", "read_text_file", {"path": "notes.txt"}, v, bad, alerts_present=True)
-    assert d.verdict == "ask" and d.rule_id == "ask-sensitive-path"
-
-
-# ------------------------------------------------------------------------------------------------- resolved form (hub side)
-
-STARTER = P.load_policy("builtin:starter")
-
-
-def evr(args, resolved, incomplete=False, tool="read_text_file"):
-    variants, bad = RA.parse(resolved, args, incomplete)
-    return RA.evaluate(STARTER, "fs", tool, args, variants, bad, alerts_present=False, secrets_used=False), variants, bad
-
-
-def test_a_symlink_to_a_sensitive_file_is_asked():
-    d, v, bad = evr({"path": "/w/notes.txt"}, [{"path": "/w/.env"}])
-    assert d.verdict == "ask" and d.rule_id == "ask-sensitive-path" and not bad
-    assert v == [{"path": "/w/.env"}]
-
-
-def test_a_symlink_inside_a_list_is_asked():
-    d, _, _ = evr({"paths": ["/w/a", "/w/b"]}, [{"paths": {"1": "/home/u/.ssh/id_rsa"}}], tool="read_multiple_files")
-    assert d.verdict == "ask"
-
-
-def test_a_harmless_resolution_keeps_the_allow_and_no_resolution_is_todays_behaviour():
-    assert evr({"path": "/w/a"}, [{"path": "/real/w/a"}])[0].verdict == "allow"
-    assert evr({"path": "/w/a"}, None)[0].verdict == "allow"
-
-
-def test_the_resolved_form_can_never_loosen():
-    # the written form asks; a resolution to something harmless does not turn it into an allow
-    assert evr({"path": "/w/.env"}, [{"path": "/w/plain"}])[0].verdict == "ask"
-
-
-@pytest.mark.parametrize("bad", [
-    "x", 5, {}, {"path": "/x"}, [5], ["x"], [{"nope": "/x"}], [{"path": 5}], [{"path": "/x\x00"}], [{"path": "x" * 5000}],
-    [{"path": {"0": "/x"}}],                      # path is a string, not a list
-    [{"paths": "/x"}],                            # paths is a list, not a string
-    [{"paths": {"9": "/x"}}], [{"paths": {"a": "/x"}}], [{"paths": {"0": 5}}], [{"paths": {"-1": "/x"}}],
-    [{"path": "/x"}] * 9, [{f"k{i}": "/x" for i in range(65)}],
-    [{"path": "/x", "isUrl": "/y"}],             # isUrl is not a string argument
-])
-def test_a_malformed_resolution_never_crashes_and_can_only_make_things_stricter(bad):
-    args = {"path": "/w/a", "paths": ["/w/a"], "isUrl": False}
-    variants, invalid = RA.parse(bad, args, False)
-    assert invalid and variants == []
-    d = RA.evaluate(STARTER, "fs", "read_text_file", {"path": "/w/a"}, variants, invalid)
-    assert d.verdict == "ask"
-
-
-def test_an_incomplete_resolution_floors_an_allow_at_ask():
-    d, _, bad = evr({"path": "/w/a"}, [], incomplete=True)
-    assert bad and d.verdict == "ask"
-
-
-def test_substitute_does_not_modify_the_written_args():
-    args = {"path": "/w/a", "paths": ["/w/a", "/w/b"]}
-    out = RA.substitute(args, {"path": "/r/a", "paths": {"1": "/r/b"}})
-    assert out == {"path": "/r/a", "paths": ["/w/a", "/r/b"]}
-    assert args == {"path": "/w/a", "paths": ["/w/a", "/w/b"]}
-
-
-def test_evaluate_never_raises():
-    class Boom:
-        def evaluate(self, *a, **k):
-            raise RuntimeError("x")
-    assert RA.evaluate(Boom(), "fs", "t", {}, [], False).verdict == "ask"
-
-
-def test_a_floored_allow_does_not_name_the_allow_rule():
-    v, bad = RA.parse("junk", {"path": "/w/a"})
-    d = RA.evaluate(STARTER, "fs", "read_text_file", {"path": "/w/a"}, v, bad)
-    assert d.verdict == "ask" and d.rule_id is None and d.reason == "resolved_invalid"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -25,6 +26,18 @@ def dc_env(home: Path) -> dict[str, str]:
 
 def dc_server(command: str, home: Path) -> dict:
     return {"command": command, "args": [], "env": dc_env(home)}
+
+
+def node_runtime() -> list[str]:
+    """`sandbox.runtime` for a Node server from tests/realdeps: the Node install the `node` on PATH links to, and the pinned packages."""
+    node = os.path.realpath(shutil.which("node") or "/usr/local/bin/node")
+    return [os.path.dirname(os.path.dirname(node)), str(ROOT / ".realdeps" / "node_modules")]
+
+
+def sandboxed(server: dict, read=(), write=(), env_allow=(), network: str = "none") -> dict:
+    """`server` inside the sandbox with `runtime` (DECISIONS D31): the kernel confines its auto-allowed path calls."""
+    return {**server, "sandbox": {"read": [str(p) for p in read], "write": [str(p) for p in write], "runtime": node_runtime(),
+                                  "network": network, "env_allow": list(env_allow)}}
 
 
 def run_cli(*args: str, key: str | None = LOG_KEY) -> subprocess.CompletedProcess:

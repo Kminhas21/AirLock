@@ -130,12 +130,21 @@ def build_rule(verdict, scope, server, tool, args, *, note="") -> dict:
         when["args"] = _exact_args(args)
     elif scope == "tool_under":
         when["args"] = _under_args(args)
+    confine = None
+    if verdict == "allow":                     # DECISIONS D31: an allow lists its arguments and says which are paths (read: exactly that file)
+        if not isinstance(args, dict):
+            raise ValueError(CANNOT_BUILD)
+        when["arg_keys"] = sorted(args)
+        right = "list" if tool in P.LIST_TOOLS else "read"        # the directory-listing tools of the starter get `list`
+        confine = {k: right for k in sorted(args) if (k in P.PATH_SLOTS or k in PATH_KEYS) and isinstance(args[k], str)}
     rule = {"verdict": verdict, "when": when}
     rule_id = f"ui-{verdict}-{hashlib.sha256(_identity(rule).encode('ascii')).hexdigest()[:8]}"
     out = {"id": rule_id, "verdict": verdict}
     if note:
         out["note"] = note
     out["when"] = when
+    if confine is not None:
+        out["confine"] = confine
     try:
         P.Policy({"version": P.VERSION, "rules": [out]})            # the REAL validator decides what is acceptable
     except P.PolicyError:

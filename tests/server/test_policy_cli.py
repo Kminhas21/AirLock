@@ -16,7 +16,7 @@ TRACES = os.path.join(ROOT, "eval", "final_v3", "traces.json")
 
 POLICY = {"version": 1, "default": "ask", "rules": [
     {"id": "read-project", "verdict": "allow", "note": "reads are routine",
-     "when": {"tool": "read_*", "args": [{"path": "path", "op": "under", "value": "/project"}]}},
+     "when": {"tool": "read_*", "arg_keys": ["path"], "args": [{"path": "path", "op": "under", "value": "/project"}]}, "confine": {"path": "read"}},
     {"id": "no-write-outside", "verdict": "deny", "when": {"tool": "write_*", "args": [{"path": "path", "op": "not_under", "value": "/project"}]}},
     {"id": "ext", "verdict": "ask", "when": {"destination": "external"}},
 ]}
@@ -131,7 +131,8 @@ class TestExplain:
         assert "verdict: deny" in out and "escalated: no" in out
 
     def test_server_matters(self, tmp_path, capsys):
-        f = write(tmp_path, "p.json", {"version": 1, "rules": [{"id": "a", "verdict": "allow", "when": {"server": "fs"}}]})
+        f = write(tmp_path, "p.json", {"version": 1, "rules": [{"id": "a", "verdict": "allow", "when": {"server": "fs", "arg_keys": []},
+                                                               "confine": {}}]})
         assert "verdict: allow" in run_explain(capsys, f, "--tool", "t", "--server", "fs")
         assert "verdict: ask" in run_explain(capsys, f, "--tool", "t", "--server", "db")
         assert "verdict: ask" in run_explain(capsys, f, "--tool", "t")
@@ -221,17 +222,19 @@ class TestReplay:
         t = traces_file(tmp_path, self.PROPS)
         C.main(["test", p, "--traces", t, "--json"])
         out = json.loads(capsys.readouterr().out)
-        assert out["violating_allowed"] == 4 and out["verdicts"]["allow"] == 6      # 3 violation + 1 denied_seed
+        # a default allow has no confine map: it stands only for calls without path arguments (send_email, a denied_seed)
+        assert out["violating_allowed"] == 1 and out["verdicts"]["allow"] == 1
 
     def test_alerts_are_assumed_absent(self, tmp_path, capsys):
-        p = write(tmp_path, "p.json", {"version": 1, "rules": [{"id": "x", "verdict": "allow"},
+        p = write(tmp_path, "p.json", {"version": 1, "rules": [{"id": "x", "verdict": "allow", "when": {"arg_keys": []}, "confine": {}},
                                                                {"id": "al", "verdict": "deny", "when": {"alert": True}}]})
         t = traces_file(tmp_path, [proposal("read_file", {}, "ok")])
         C.main(["test", p, "--traces", t, "--json"])
         assert json.loads(capsys.readouterr().out)["verdicts"] == {"allow": 1, "deny": 0, "ask": 0}
 
     def test_server_option(self, tmp_path, capsys):
-        p = write(tmp_path, "p.json", {"version": 1, "rules": [{"id": "x", "verdict": "allow", "when": {"server": "fs"}}]})
+        p = write(tmp_path, "p.json", {"version": 1, "rules": [{"id": "x", "verdict": "allow", "when": {"server": "fs", "arg_keys": []},
+                                                               "confine": {}}]})
         t = traces_file(tmp_path, [proposal("t", {}, "ok")])
         C.main(["test", p, "--traces", t, "--json"])
         assert json.loads(capsys.readouterr().out)["verdicts"]["allow"] == 0

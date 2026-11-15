@@ -28,7 +28,6 @@ import notify as notify_mod
 import policy as policy_mod
 import policy_writer
 import proposal_monitor
-import resolved_args
 import safe_text
 
 logger = logging.getLogger(__name__)
@@ -80,7 +79,9 @@ MAX_SECRET_NAMES = 20
 BOUNDARY_LAYERS = frozenset({"env", "rlimit", "no_new_privs", "netns", "landlock_net", "landlock_fs"})
 BOUNDARY_NETWORK = frozenset({"none", "loopback", "host"})
 BOUNDARY_LIFECYCLE = frozenset({"session", "per_call"})
-_BOUNDARY_KEYS = frozenset({"lifecycle", "layers", "missing", "network", "secrets"})
+_BOUNDARY_KEYS = frozenset({"lifecycle", "layers", "missing", "network", "secrets", "confinable", "confine_why"})
+MAX_LINKS = 64             # proxy_call.links entries (display only)
+MAX_LINK = 4096
 NOTIFY_TIMEOUT_S = 30.0    # hard bound on one notification send (the notifier has its own, shorter, timeouts)
 AUTH_FRAME_TIMEOUT_S = 5.0
 AUTH_AUDIT_WINDOW_S = 60.0
@@ -134,9 +135,24 @@ def validate_boundary(v: Any) -> dict | None:
                 return None
             out[name] = {"lifecycle": lifecycle, "layers": lists["layers"], "missing": lists["missing"],
                          "network": network, "secrets": secrets}
+            if "confinable" in b:                    # D31: can its auto-allowed path calls be kernel-confined, and if not, why
+                if not isinstance(b["confinable"], bool) or not _is_str(b.get("confine_why", ""), MAX_SHORT):
+                    return None
+                out[name]["confinable"] = b["confinable"]
+                out[name]["confine_why"] = safe_text.clean_field(b.get("confine_why", ""), MAX_SHORT)
         return out
     except Exception:
         return None
+
+
+def validate_links(v: Any) -> dict | None:
+    """proxy_call.links: {argument ("path", "paths.1"): where the proxy's realpath says a symlinked value leads}. DISPLAY ONLY: nothing
+    evaluates it. Malformed in any part => None (dropped, never fatal)."""
+    if not isinstance(v, dict) or not v or len(v) > MAX_LINKS:
+        return None
+    if not all(_is_str(k, MAX_SHORT, min_len=1) and _is_str(x, MAX_LINK, min_len=1) for k, x in v.items()):
+        return None
+    return {k: safe_text.clean_field(x, MAX_LINK) for k, x in v.items()}
 
 
 def clean_note(v: Any) -> str | None:
@@ -248,7 +264,8 @@ class _Pending:
     since: float = 0.0            # hub clock when the call became pending (age_s, escalation)
     escalation_level: int = 0
     operator: str | None = None   # principal id of the human who decided (identity mode)
-    resolved: list = field(default_factory=list)   # symlink-resolved forms of the path arguments (proxy_call.resolved, B4)
+    links: dict | None = None     # where symlinked path values lead, as the proxy resolves them (display only, D31)
+    links_lexical: dict | None = None     # the same with `..` resolved before the links, where that differs (display only)
 
     def claim(self, decision: str, reason: str) -> bool:
         """Once-only: the first claim wins (sync, so there is no await between check and set)."""
@@ -548,8 +565,10 @@ class InboxHub:
         if p.policy_mode:
             d["rule_id"], d["policy_digest"] = p.rule_id, p.policy_digest
         d["secrets_used"] = list(p.secrets_used)
-        if p.resolved:
-            d["resolved"] = p.resolved             # what the symlinked path arguments really name (B4)
+        if p.links:
+            d["links"] = p.links                   # where a symlinked path value leads (the server may differ; nothing evaluates it)
+            if p.links_lexical:
+                d["links_lexical"] = p.links_lexical
         d["session_summary"], d["session_history"], d["earlier_denied"] = p.summary, p.history, p.earlier_denied
         if p.session.identity_mode:
             d["agent_id"], d["tenant"] = p.session.agent_id, p.session.tenant
@@ -715,8 +734,10 @@ class InboxHub:
         return True
 
     async def _reply(self, session: ProxySession, call_id: str, decision: str, reason: str,
-                     note: str | None = None) -> None:
+                     note: str | None = None, confine: dict | None = None) -> None:
         msg = {"event": "proxy_decision", "call_id": call_id, "decision": decision, "reason": reason}
+        if confine and decision == "approve" and reason == "policy":      # the proxy runs it in a worker confined to these objects (D31)
+            msg["confine"] = confine
         if note and decision == "deny" and reason == "human":      # the operator's note reaches the agent on human denials only
             msg["note"] = note
         await session.conn.send(msg)
@@ -751,8 +772,10 @@ class InboxHub:
             return
 
         secrets_used = validate_secrets_used(frame.get("secrets_used"))     # names only; invalid => []
-        # symlink-resolved forms of path arguments (B4): only ever make the verdict stricter; malformed => an allow becomes ask
-        resolved, resolved_bad = resolved_args.parse(frame.get("resolved"), args, frame.get("resolved_incomplete", False))
+        # D31: only an exact `true` says the proxy can have the kernel confine this call (an old proxy, a malformed value: false)
+        confinable = frame.get("confinable") is True
+        links = validate_links(frame.get("links"))
+        links_lexical = validate_links(frame.get("links_lexical")) if links else None     # the same values with `..` resolved first
         alerts: list = []
         # "working": a monitor with a detector looked at the call, did not hit an error, and returned a list
         mon = session.monitor
@@ -777,6 +800,7 @@ class InboxHub:
         digest: str | None = None
         verdict: str | None = None
         policy_rec = None
+        confine: dict | None = None
         if session.policy_mode:
             # the proxy's `auto` flag is IGNORED in policy mode; a broken policy asks for everything
             auto = False
@@ -784,12 +808,13 @@ class InboxHub:
             verdict = "ask"
             if session.policy is not None:
                 try:
-                    dec = await asyncio.to_thread(resolved_args.evaluate, session.policy, server, tool, args, resolved, resolved_bad,
+                    dec = await asyncio.to_thread(session.policy.evaluate_call, server, tool, args, confinable=confinable,
                                                   registry=session.policy_registry, alerts_present=bool(alerts),
                                                   secrets_used=bool(secrets_used))
                     verdict, rule_id = dec.verdict, dec.rule_id
+                    confine = dec.confine if verdict == "allow" and dec.confine else None
                     if verdict not in ("allow", "deny", "ask"):
-                        verdict, rule_id = "ask", None
+                        verdict, rule_id, confine = "ask", None, None
                 except Exception:
                     logger.exception("inbox: policy evaluation failed; asking the human")
                     verdict, rule_id = "ask", None
@@ -814,9 +839,8 @@ class InboxHub:
             while len(session.secrets) > 200:
                 session.secrets.pop(next(iter(session.secrets)))
         # write-ahead: call_proposed is on disk before inbox_pending / any auto or policy reply
-        res_fields = {"resolved": resolved} if resolved else {}
-        if resolved_bad:
-            res_fields["resolved_invalid"] = True
+        res_fields = {"confinable": confinable, **({"links": links} if links else {}),
+                      **({"links_lexical": links_lexical} if links_lexical else {})}
         res = await self._append("call_proposed", session.log_sid, call_id,
                                  {"server": server, "tool": tool, "args": args, "auto": auto,
                                   "alerts": self._alert_records(alerts, call_secrets), "policy": policy_rec,
@@ -842,7 +866,7 @@ class InboxHub:
             decision, reason, _actor = eff
             session.record(call_id, server, tool, args, decision, reason, rule_id, None)
             await self._register(session, tool, args, decision)
-            await self._reply(session, call_id, decision, reason)
+            await self._reply(session, call_id, decision, reason, confine=confine)
             await self._broadcast({"event": "inbox_resolved", "session_id": sid, "call_id": call_id,
                                    "decision": decision, "reason": reason, **pol_fields, **self._idf(session)},
                                   session.tenant)
@@ -850,7 +874,7 @@ class InboxHub:
 
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
         p = _Pending(session, call_id, server, tool, args, auto, alerts, rule_id=rule_id, policy_digest=digest,
-                     policy_mode=session.policy_mode, secrets_used=secrets_used, resolved=resolved)
+                     policy_mode=session.policy_mode, secrets_used=secrets_used, links=links, links_lexical=links_lexical)
         p.summary, p.history, p.earlier_denied = session.views()        # state BEFORE this call
         session.pending[call_id] = p
         session.starting.discard(call_id)

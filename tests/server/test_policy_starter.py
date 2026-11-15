@@ -54,6 +54,44 @@ def test_starter_lints_clean():
     assert not any(r.verdict == "deny" for r in p.rules)
 
 
+STARTER_CONFINE = {"allow-read-file": {"path": "read"}, "allow-read-multiple": {"paths": "read"}, "allow-read-only-fs": {"path": "list"},
+                   "allow-list-sizes": {"path": "list"}, "allow-tree": {"path": "list"}, "allow-search": {"path": "list"},
+                   "allow-read-only-other": {}, "allow-memory-search": {}, "allow-memory-open": {}, "allow-time-now": {},
+                   "allow-time-convert": {}}
+
+
+def test_every_starter_allow_rule_says_which_arguments_are_paths(pol):
+    """DECISIONS D31: the kernel confines an auto-allowed path call to the objects named; reads get the exact file, listings the names
+    beneath a directory, the rest are not paths ({})."""
+    assert {r.id: r.confine for r in pol.rules if r.verdict == "allow"} == STARTER_CONFINE
+
+
+@pytest.mark.parametrize("tool", READ_PATH_TOOLS)
+def test_a_path_read_is_allowed_only_on_a_confinable_server(pol, tool):
+    ok = pol.evaluate_call("fs", tool, {"path": "/project/src/main.py"}, confinable=True)
+    assert ok.verdict == "allow" and ok.confine
+    held = pol.evaluate_call("fs", tool, {"path": "/project/src/main.py"}, confinable=False)
+    assert held.verdict == "ask" and held.reason == "unconfinable" and held.rule_id == ok.rule_id
+
+
+@pytest.mark.parametrize("tool", NO_PATH_TOOLS)
+def test_a_tool_without_path_arguments_is_allowed_on_any_server(pol, tool):
+    assert pol.evaluate_call("fs", tool, {}, confinable=False).verdict == "allow"
+
+
+def test_v3_replay_is_unchanged_on_confinable_servers_and_asks_every_path_read_on_unsandboxed_ones(pol):
+    props = C._read_traces(TRACES)
+    def count(confinable):
+        allowed = {"ok": 0, "violation": 0}
+        for p in props:
+            d = pol.evaluate_call(p.get("server") or "", p.get("tool"), p.get("args"), confinable=confinable)
+            if d.verdict == "allow" and p.get("label") in allowed:
+                allowed[p["label"]] += 1
+        return allowed
+    assert count(True) == {"ok": 115, "violation": 0}
+    assert count(False) == {"ok": 0, "violation": 0}
+
+
 @pytest.mark.parametrize("tool", READ_PATH_TOOLS)
 def test_reads_of_a_normal_path_are_allowed_with_a_rule_id(pol, tool):
     d = ev(pol, tool, {"path": "/project/src/main.py"})
@@ -243,9 +281,10 @@ def test_builtin_policy_is_never_writable(monkeypatch, caplog):
 async def test_hub_auto_allows_a_read_with_a_working_monitor_and_holds_a_write(monkeypatch):
     monkeypatch.setenv("SENTINEL_POLICY", "builtin:starter")
     r = await Rig().start()
-    await r.send(call("c1", tool="list_directory", args={"path": "/project"}))
+    await r.send(call("c1", tool="list_directory", args={"path": "/project"}, confinable=True))
     await wait_for(lambda: r.decisions())
     assert r.decisions()[0]["decision"] == "approve" and r.decisions()[0]["reason"] == "policy"
+    assert r.decisions()[0]["confine"] == {"path": "list"}
     assert not r.ui.events("inbox_pending")
     res = r.ui.events("inbox_resolved")[0]
     assert res["rule_id"]
@@ -267,7 +306,7 @@ async def test_hub_holds_a_sensitive_read_with_its_rule(monkeypatch):
 async def test_hub_holds_a_read_when_the_monitor_is_degraded(monkeypatch):
     monkeypatch.setenv("SENTINEL_POLICY", "builtin:starter")
     r = await Rig(SessionMonitor("rules")).start()
-    await r.send(call("c1", tool="list_directory", args={"path": "/project"}))
+    await r.send(call("c1", tool="list_directory", args={"path": "/project"}, confinable=True))
     await wait_for(lambda: r.ui.events("inbox_pending"))
     assert r.decisions() == []
 
@@ -441,6 +480,16 @@ NEW_FAMILIES = ["/home/u/.ssh/id_ecdsa", "/h/id_dsa", "/h/.pgpass", "/h/.npmrc",
 def test_starter_asks_for_the_extended_sensitive_families(pol, path):
     assert ev(pol, "read_file", {"path": path}).verdict == "ask"
     assert ev(pol, "read_multiple_files", {"paths": ["/ok", path]}).verdict == "ask"
+
+
+def test_starter_lists_bare_kernel_directories_without_a_card_a_pinned_trade_off(pol):
+    """Item 9 of the D31 review: the needle `/proc/` leaves a listing of bare `/proc` auto-allowed under `list` (names only: a read of a
+    file beneath it is asked). Dropping the trailing slash turns one benign v3 proposal into an ask (115 -> 114 of 376), so it was reverted.
+    Pinned: if the starter changes, update docs/policy.md "Confinement limits"."""
+    for path in ("/proc", "/sys", "/dev"):
+        assert ev(pol, "list_directory", {"path": path}).verdict == "allow", path
+    for path in ("/proc/self/environ", "/proc/1"):
+        assert ev(pol, "read_file", {"path": path}).verdict == "ask", path
 
 
 def test_starter_odd_list_entries_are_asked(pol):

@@ -935,9 +935,14 @@ class TestDigest:
         assert len(p.to_dict()["rules"]) == 2
 
 
+def _other(warnings):
+    """lint warnings other than the missing-`confine` one (tests/server/test_policy_confine.py covers that)"""
+    return [m for m in warnings if '"confine"' not in m]
+
+
 class TestLint:
     def test_clean_policy_has_no_warnings(self):
-        assert load_policy(BASE).lint() == []
+        assert _other(load_policy(BASE).lint()) == []
 
     @pytest.mark.parametrize("op", ["not_equals", "not_in", "not_glob", "not_under", "not_exists"])
     def test_allow_with_negative_op_warns(self, op):
@@ -950,7 +955,7 @@ class TestLint:
         assert pol([rule("d", "deny", args=[a]), rule("q", "ask", tool="t", args=[a])]).lint() == []
 
     def test_allow_with_positive_ops_only_does_not_warn(self):
-        assert pol([rule("al", "allow", args=[arg("p", "under", "/project")])]).lint() == []
+        assert _other(pol([rule("al", "allow", args=[arg("p", "under", "/project")])]).lint()) == []
 
     def test_default_allow_warns(self):
         assert any("default" in m and "allow" in m for m in pol([], default="allow").lint())
@@ -980,13 +985,13 @@ class TestLint:
         assert any("weak" in m and "shadowed" in m and "strong" in m for m in w), w
 
     def test_different_conditions_do_not_warn(self):
-        assert pol([rule("x1", "deny", tool="t"), rule("x2", "allow", tool="u")]).lint() == []
-        assert pol([rule("x1", "deny", args=[arg("a", "equals", 1)]), rule("x2", "allow", args=[arg("a", "equals", 2)])]).lint() == []
+        assert _other(pol([rule("x1", "deny", tool="t"), rule("x2", "allow", tool="u")]).lint()) == []
+        assert _other(pol([rule("x1", "deny", args=[arg("a", "equals", 1)]), rule("x2", "allow", args=[arg("a", "equals", 2)])]).lint()) == []
 
     def test_lint_returns_list_of_strings(self):
         w = pol([rule("x1", "allow", args=[arg("a", "not_exists", novalue=True)]),
                  rule("x2", "allow", args=[arg("a", "not_exists", novalue=True)])], default="allow").lint()
-        assert len(w) == 4 and all(isinstance(m, str) for m in w)
+        assert len(w) == 6 and all(isinstance(m, str) for m in w)        # 4 + a missing `confine` on each allow rule
 
 
 class TestCache:

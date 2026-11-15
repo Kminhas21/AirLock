@@ -90,11 +90,13 @@ def cmd_explain(ns) -> int:
     reg, err = _load_registry(ns.registry)
     if err:
         return _err(err)
-    d = pol.evaluate(ns.server, ns.tool, args, registry=reg, alerts_present=ns.alert)
+    d = pol.evaluate_call(ns.server, ns.tool, args, confinable=not ns.unconfinable, registry=reg, alerts_present=ns.alert)
     print(f"verdict: {d.verdict}")
     print(f"rule:    {d.rule_id or '(none)'}")
     print(f"reason:  {d.reason}")
-    print(f"escalated: {'yes (alert)' if d.escalated else 'no'}")
+    print(f"escalated: {'yes' if d.escalated else 'no'}")
+    if d.confine:
+        print(f"confine: {json.dumps(d.confine)} (the proxy runs it in a worker confined to these objects)")
     by_id = {r.id: r for r in pol.rules}
     if not d.matched:
         print("matched: (no rule)")
@@ -133,13 +135,14 @@ def _read_traces(path: str):
     return props
 
 
-def run_replay(pol, proposals, registry=None, server: str = "") -> dict:
+def run_replay(pol, proposals, registry=None, server: str = "", confinable: bool = True) -> dict:
+    """Each proposal as the hub decides it, assuming a confinable server (sandboxed with `runtime`) unless `confinable` is False."""
     verdicts = {"allow": 0, "deny": 0, "ask": 0}
     by_label: dict = {}
     hits: dict = {}
     viol_allowed = benign_asked = 0
     for p in proposals:
-        d = pol.evaluate(server, p.get("tool"), p.get("args"), registry=registry, alerts_present=False)
+        d = pol.evaluate_call(server, p.get("tool"), p.get("args"), confinable=confinable, registry=registry, alerts_present=False)
         label = p.get("label")
         label = label if isinstance(label, str) else "unlabeled"
         verdicts[d.verdict] += 1
@@ -171,12 +174,13 @@ def cmd_test(ns) -> int:
     reg, err = _load_registry(ns.registry)
     if err:
         return _err(err)
-    out = run_replay(pol, proposals, reg, ns.server)
+    out = run_replay(pol, proposals, reg, ns.server, confinable=not ns.unconfinable)
     if ns.json:
         print(json.dumps(out, indent=2))
         return 0
     v = out["verdicts"]
-    print(f"policy {ns.policy} (digest {out['policy_digest']}), {out['proposals']} proposals")
+    print(f"policy {ns.policy} (digest {out['policy_digest']}), {out['proposals']} proposals, "
+          f"{'an unsandboxed server (path allows ask)' if ns.unconfinable else 'a sandboxed server with runtime (path allows confined)'}")
     print(f"overall: allow {v['allow']}  deny {v['deny']}  ask {v['ask']}")
     print(f"{'label':14} {'allow':>6} {'deny':>6} {'ask':>6}")
     for label, c in out["by_label"].items():
@@ -221,12 +225,14 @@ def main(argv=None) -> int:
     p.add_argument("--args", default="{}", help="tool arguments as a JSON object")
     p.add_argument("--registry")
     p.add_argument("--alert", action="store_true", help="assume a monitor alert is present on the call")
+    p.add_argument("--unconfinable", action="store_true", help="assume a server without sandbox/runtime: path allows ask")
     p.set_defaults(fn=cmd_explain)
     p = sub.add_parser("test", help="replay recorded proposals of an eval trace file")
     p.add_argument("policy")
     p.add_argument("--traces", required=True)
     p.add_argument("--registry")
     p.add_argument("--server", default="")
+    p.add_argument("--unconfinable", action="store_true", help="assume a server without sandbox/runtime: path allows ask")
     p.add_argument("--json", action="store_true")
     p.set_defaults(fn=cmd_test)
     p = sub.add_parser("init", help="write an editable copy of the built-in starter policy")

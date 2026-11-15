@@ -24,7 +24,6 @@ import sys
 import unicodedata
 
 import eventlog as EL
-import resolved_args
 from policy_cli import BENIGN_LABELS, VIOLATING_LABELS, _Args, _load_registry, _policy_or_exit
 
 _BAD_CATS = {"Cc", "Cf", "Cs", "Co", "Zl", "Zp"}
@@ -324,8 +323,9 @@ def run_policy_test(pol, store, registry=None, session=None) -> dict:
         p = e.payload if isinstance(e.payload, dict) else {}
         server = p.get("server") if isinstance(p.get("server"), str) else ""
         args = p.get("args")
-        variants, bad = resolved_args.parse(p.get("resolved"), args, p.get("resolved_invalid", False))     # as the hub decided it (B4)
-        d = resolved_args.evaluate(pol, server, p.get("tool"), args, variants, bad, registry=registry, alerts_present=bool(p.get("alerts")))
+        # as the hub decides it: the logged `confinable` (absent in logs from before D31 = false: path allows ask)
+        d = pol.evaluate_call(server, p.get("tool"), args, confinable=p.get("confinable") is True, registry=registry,
+                              alerts_present=bool(p.get("alerts")))
         dec = decisions.get((e.session_id, e.call_id))
         human = dec.get("decision") if isinstance(dec, dict) and dec.get("actor") == "human" else None
         label = {"approve": "ok", "deny": "violation"}.get(human, "unlabeled")

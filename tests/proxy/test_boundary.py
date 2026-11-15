@@ -146,8 +146,9 @@ async def test_unsandboxed_server_boundary_and_empty_secrets_used(tmp_path, back
     async with agent(cfg) as s:
         await s.call_tool("echo", {})
     assert backend.of("proxy_hello")[0]["boundary"] == {
-        "fs": {"lifecycle": "session", "layers": [], "missing": [], "network": "host", "secrets": []}}
-    assert backend.of("proxy_call")[0]["secrets_used"] == []
+        "fs": {"lifecycle": "session", "layers": [], "missing": [], "network": "host", "secrets": [],
+               "confinable": False, "confine_why": "not sandboxed"}}              # D31: its path allows are asked
+    assert backend.of("proxy_call")[0]["secrets_used"] == [] and backend.of("proxy_call")[0]["confinable"] is False
 
 
 @needs_sandbox
@@ -196,7 +197,7 @@ async def test_secret_only_for_listed_tool_only_during_call_and_never_leaks(tmp_
     with open(errfile, "w") as el:
         async with agent(cfg, {"HOST_API_KEY": SECRET, "CANARY_PROXY_ENV": "c", "TMPDIR": sbx_root}, errlog=el) as s:
             assert sorted(t.name for t in (await s.list_tools()).tools) == sorted(
-                ["whoami_env", "whoami_env2", "try_write", "try_net", "sleep"])
+                ["whoami_env", "whoami_env2", "try_write", "try_net", "sleep", "read_path"])
             assert len(pids(pidfile)) == 1 and not await wait_until(lambda: alive(pids(pidfile)[0]), 0.5)  # startup worker closed
             first = json.loads(text(await s.call_tool("whoami_env", {"secret_var": "API_KEY"})))
             second = json.loads(text(await s.call_tool("whoami_env2", {"secret_var": "API_KEY"})))

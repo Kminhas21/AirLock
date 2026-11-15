@@ -21,7 +21,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REQUIRED = ("O1", "O2", "O3", "O4", "O5", "O6", "D1", "D2", "D3", "D4", "A1", "A2", "A3", "L1", "L2", "L3", "P1")
+REQUIRED = ("O1", "O2", "O3", "O4", "O5", "O6", "D1", "D2", "D3", "D4", "A1", "A2", "A3", "A4", "L1", "L2", "L3", "P1")
 _RUN = re.compile(r'^\s*(?P<optin>\[ "\$\{RUN_\w+:-0\}" = "1" \] && )?run "[^"]*" (?P<cmd>.*)$')
 _PW = re.compile(r"npx playwright test((?:\s+[\w./-]+)*)")
 

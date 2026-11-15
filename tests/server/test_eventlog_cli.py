@@ -37,6 +37,9 @@ def dec(d, reason="human", actor="human", rule_id=None):
     return {"decision": d, "reason": reason, "actor": actor, "rule_id": rule_id, "policy_digest": None}
 
 
+READ_ALL = {"id": "read-all", "verdict": "allow", "when": {"tool": "read_file", "arg_keys": ["path"]}, "confine": {"path": "read"}}
+
+
 def build(tmp_path, key=None, name="e.db"):
     path = str(tmp_path / name)
     s = EventStore(path, key=key.encode() if key else None, clock=Clock(), checkpoint_every=5)
@@ -54,7 +57,8 @@ def build(tmp_path, key=None, name="e.db"):
     ]
     for cid, tool, args, d, actor, alerts in calls:
         s.append("call_proposed", session_id="s1", call_id=cid, payload={"server": "fs", "tool": tool, "args": args, "auto": False,
-                                                                       "alerts": alerts, "policy": {"verdict": "ask", "rule_id": "r", "digest": "d"}})
+                                                                       "alerts": alerts, "policy": {"verdict": "ask", "rule_id": "r", "digest": "d"},
+                                                                       "confinable": True})
         s.append("decision", session_id="s1", call_id=cid, payload=dec(d, actor=actor))
         s.append("call_result", session_id="s1", call_id=cid, payload={"status": "ok", "summary": f"result of {cid}"})
     s.append("call_proposed", session_id="s2", call_id="x0", payload={"server": "db", "tool": "query_database", "args": {}, "alerts": []})
@@ -288,15 +292,16 @@ class TestPolicyTest:
         out = json.loads(capsys.readouterr().out)
         assert out["proposals"] == 8
         assert sum(out["verdicts"].values()) == 8
-        # c0 allow, c1 ask, c2 deny, c3 allow, c4 ask (outbox), c5 allow (read-project), c6 alert -> ask, x0 query_database -> ask
-        assert out["verdicts"] == {"allow": 3, "deny": 1, "ask": 4}
-        assert out["by_label"]["ok"] == {"allow": 2, "deny": 0, "ask": 0}                  # c0, c3 (human approved)
+        # c0 allow, c1 ask, c2 deny, c3 ask (a write cannot be confined: the example asks), c4 ask (outbox), c5 ask (`password` is outside
+        # the read rule's arg_keys), c6 alert -> ask, x0 query_database -> ask
+        assert out["verdicts"] == {"allow": 1, "deny": 1, "ask": 6}
+        assert out["by_label"]["ok"] == {"allow": 1, "deny": 0, "ask": 1}                  # c0, c3 (human approved)
         assert out["by_label"]["violation"] == {"allow": 0, "deny": 1, "ask": 3}           # c1, c2, c4, c6 (human denied)
-        assert out["by_label"]["unlabeled"] == {"allow": 1, "deny": 0, "ask": 1}           # c5 (policy decided), x0 (pending)
-        assert out["violating_allowed"] == 0 and out["benign_asked"] == 0
-        assert out["comparison"] == {"human_decided": 6, "agree": 3, "policy_would_allow_a_denied_call": 0,
-                                     "policy_would_deny_an_approved_call": 0, "policy_would_ask": 3, "not_human_decided": 2}
-        assert out["rule_hits"]["allow-read-project"] == 2
+        assert out["by_label"]["unlabeled"] == {"allow": 0, "deny": 0, "ask": 2}           # c5 (policy decided), x0 (pending)
+        assert out["violating_allowed"] == 0 and out["benign_asked"] == 1
+        assert out["comparison"] == {"human_decided": 6, "agree": 2, "policy_would_allow_a_denied_call": 0,
+                                     "policy_would_deny_an_approved_call": 0, "policy_would_ask": 4, "not_human_decided": 2}
+        assert out["rule_hits"]["allow-read-project"] == 1
         assert sum(out["rule_hits"].values()) == 8
 
     def test_logged_alerts_are_used(self, tmp_path, capsys):
@@ -309,7 +314,7 @@ class TestPolicyTest:
     def test_would_auto_allow_a_denied_call(self, tmp_path, capsys):
         permissive = tmp_path / "p.json"
         permissive.write_text(json.dumps({"version": 1, "default": "allow", "rules": [
-            {"id": "deny-writes", "verdict": "deny", "when": {"tool": "write_*"}}]}))
+            {"id": "deny-writes", "verdict": "deny", "when": {"tool": "write_*"}}, READ_ALL]}))
         p = build(tmp_path)
         assert C.main(["policy-test", p, str(permissive), "--json"]) == 0
         out = json.loads(capsys.readouterr().out)
@@ -317,25 +322,25 @@ class TestPolicyTest:
         assert out["violating_allowed"] == 1
         assert out["comparison"]["policy_would_allow_a_denied_call"] == 1
         assert out["comparison"]["policy_would_deny_an_approved_call"] == 1               # c3 write approved by the human
-        assert out["would_allow_denied"] == [{"session_id": "s1", "call_id": "c1", "tool": "read_file", "rule_id": None}]
+        assert out["would_allow_denied"] == [{"session_id": "s1", "call_id": "c1", "tool": "read_file", "rule_id": "read-all"}]
 
     def test_text_output(self, tmp_path, capsys):
         p = build(tmp_path)
         assert C.main(["policy-test", p, EXAMPLE]) == 0
         out = capsys.readouterr().out
-        assert "8 logged proposals" in out and "overall: allow 3  deny 1  ask 4" in out
+        assert "8 logged proposals" in out and "overall: allow 1  deny 1  ask 6" in out
         assert "violating proposals the policy would ALLOW: 0" in out
-        assert "benign proposals the policy would ASK: 0" in out
+        assert "benign proposals the policy would ASK: 1" in out
         assert "policy would auto-allow a call the human DENIED: 0" in out
         assert "agreement" in out and "rule hits:" in out and "redacted" in out
 
     def test_text_output_lists_risky_calls(self, tmp_path, capsys):
         permissive = tmp_path / "p.json"
-        permissive.write_text(json.dumps({"version": 1, "default": "allow", "rules": []}))
+        permissive.write_text(json.dumps({"version": 1, "default": "allow", "rules": [READ_ALL]}))
         p = build(tmp_path)
         C.main(["policy-test", p, str(permissive)])
         out = capsys.readouterr().out
-        assert "! session s1 call c1 tool read_file allowed by (default)" in out
+        assert "! session s1 call c1 tool read_file allowed by read-all" in out
 
     def test_session_filter(self, tmp_path, capsys):
         p = build(tmp_path)
@@ -369,7 +374,8 @@ class TestPolicyTest:
             s.append("call_proposed", session_id=sid, call_id="c", payload={"server": srv, "tool": "t", "args": {}, "alerts": []})
         s.close()
         pol = tmp_path / "p.json"
-        pol.write_text(json.dumps({"version": 1, "rules": [{"id": "r", "verdict": "allow", "when": {"server": "fs"}}]}))
+        pol.write_text(json.dumps({"version": 1, "rules": [{"id": "r", "verdict": "allow", "when": {"server": "fs", "arg_keys": []},
+                                                            "confine": {}}]}))
         C.main(["policy-test", path, str(pol), "--json"])
         assert json.loads(capsys.readouterr().out)["verdicts"] == {"allow": 1, "deny": 0, "ask": 1}
 

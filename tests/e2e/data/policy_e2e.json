@@ -1,8 +1,8 @@
 {"version": 1, "default": "ask",
  "rules": [
-  {"id": "allow-read-project", "verdict": "allow", "note": "reads under /project are routine",
-   "when": {"server": "fs", "tool": "read_file", "args": [{"path": "path", "op": "under", "value": "/project"}]}},
+  {"id": "allow-echo-n", "verdict": "allow", "note": "echo of a bare counter is routine (no paths: nothing to confine)",
+   "when": {"server": "fs", "tool": "echo", "arg_keys": ["n"]}, "confine": {}},
   {"id": "deny-write-outside", "verdict": "deny", "note": "no writes outside /project",
    "when": {"tool": "write_file", "args": [{"path": "path", "op": "not_under", "value": "/project"}]}},
-  {"id": "ask-echo", "verdict": "ask", "note": "echo always goes to a human", "when": {"tool": "echo"}}
+  {"id": "ask-echo", "verdict": "ask", "note": "echo with an x goes to a human", "when": {"tool": "echo", "arg_keys": ["x"]}}
  ]}

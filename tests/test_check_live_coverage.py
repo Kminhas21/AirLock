@@ -125,7 +125,7 @@ def test_static_a_required_workflow_missing_from_the_map_fails(tmp_path):
 
 
 def test_the_default_required_set_is_the_documented_workflow_list():
-    assert set(clc.REQUIRED) == {"O1", "O2", "O3", "O4", "O5", "O6", "D1", "D2", "D3", "D4", "A1", "A2", "A3", "L1", "L2", "L3", "P1"}
+    assert set(clc.REQUIRED) == {"O1", "O2", "O3", "O4", "O5", "O6", "D1", "D2", "D3", "D4", "A1", "A2", "A3", "A4", "L1", "L2", "L3", "P1"}
 
 
 # ---- runtime (junit) -----------------------------------------------------------------------------------------------------------------------

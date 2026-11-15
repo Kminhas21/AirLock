@@ -40,7 +40,19 @@ export interface ServerBoundary {
   network: BoundaryNetwork | null;
   /** Env-var NAMES the server may receive (never values). */
   secrets: string[];
+  /** D31: can the proxy have the kernel confine its auto-allowed path calls? false = its path allows are asked; null = not reported. */
+  confinable: boolean | null;
+  confine_why: string;
 }
+
+/** D31, display only: where the proxy says a symlinked path value leads ("path", "paths.1"). Nothing evaluates it. */
+export interface PathLink {
+  arg: string;
+  real: string;
+  /** Where the value leads when `..` is resolved before the links (as Node does); present only when it differs from `real`. */
+  lexical?: string;
+}
+export const MAX_LINKS = 64;
 
 export interface InboxSession {
   session_id: string;
@@ -134,6 +146,8 @@ export interface PendingCall {
   received_at: number;
   /** Credential names (env vars) this call will receive; shown as a warning before approving. */
   secrets_used: string[];
+  /** Where symlinked path values lead, as the proxy resolves them (a hint; the server may differ). */
+  links: PathLink[];
   session_summary: SessionSummary | null;
   /** Newest first, at most MAX_HISTORY. */
   session_history: HistoryItem[];
@@ -332,6 +346,8 @@ function parseBoundary(v: unknown): ServerBoundary[] | null {
       missing: parseLayers(b.missing),
       network: b.network === "none" || b.network === "loopback" || b.network === "host" ? b.network : null,
       secrets: parseSecretNames(b.secrets),
+      confinable: typeof b.confinable === "boolean" ? b.confinable : null,
+      confine_why: typeof b.confine_why === "string" ? singleLine(b.confine_why, 120) : "",
     });
   }
   return out.length > 0 ? out : null;
@@ -375,6 +391,20 @@ function parseAlerts(v: unknown): InboxAlert[] {
   return out;
 }
 
+function parseLinks(v: unknown, lexical?: unknown): PathLink[] {
+  if (!isRec(v)) return [];
+  const lex = isRec(lexical) ? lexical : {};
+  const out: PathLink[] = [];
+  for (const k of Object.keys(v)) {
+    const real = v[k];
+    if (typeof real !== "string" || !real) continue;
+    const other = lex[k];
+    out.push({ arg: singleLine(k, 120), real: singleLine(real, 500), ...(typeof other === "string" && other ? { lexical: singleLine(other, 500) } : {}) });
+    if (out.length >= MAX_LINKS) break;
+  }
+  return out;
+}
+
 function parseServers(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string").slice(0, 50) : [];
 }
@@ -395,6 +425,7 @@ function parsePending(v: unknown, now: number, sessionFallback?: string): Pendin
     age_s: age !== null && age >= 0 && age <= 10_000_000 ? age : null,
     received_at: now,
     secrets_used: parseSecretNames(v.secrets_used),
+    links: parseLinks(v.links, v.links_lexical),
     session_summary: parseSummary(v.session_summary),
     session_history: parseHistory(v.session_history, MAX_HISTORY),
     earlier_denied: parseHistory(v.earlier_denied, MAX_EARLIER_DENIED, true),

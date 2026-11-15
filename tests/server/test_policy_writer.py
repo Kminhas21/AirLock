@@ -61,13 +61,56 @@ def side_files(path):
 # build_rule
 # ---------------------------------------------------------------------------
 
+class TestAllowRulesAreConfined:
+    """DECISIONS D31: an allow without `confine` would ask for ever; a standing allow says which of its arguments are paths."""
+
+    @pytest.mark.parametrize("scope", ["exact", "tool_under"])
+    def test_an_allow_lists_its_arguments_and_confines_its_paths(self, scope):
+        r = build_rule("allow", scope, "fs", "read_file", {"path": "/project/docs/a.txt", "head": 3})
+        assert r["when"]["arg_keys"] == ["head", "path"] and r["confine"] == {"path": "read"}
+        pol = P.Policy({"version": 1, "rules": [r]})
+        assert pol.lint() == []
+        d = pol.evaluate_call("fs", "read_file", {"path": "/project/docs/a.txt", "head": 3}, confinable=True)
+        assert d.verdict == "allow" and d.confine == {"path": "read"}
+        assert pol.evaluate_call("fs", "read_file", {"path": "/project/docs/a.txt", "head": 3}, confinable=False).verdict == "ask"
+
+    @pytest.mark.parametrize("tool", ["list_directory", "list_directory_with_sizes", "directory_tree", "search_files", "get_file_info"])
+    def test_a_directory_listing_tool_gets_list_not_read(self, tool):
+        """`read` on a directory grants nothing useful (the call fails), `list` is what the starter gives these tools."""
+        r = build_rule("allow", "exact", "fs", tool, {"path": "/project/docs"})
+        assert r["confine"] == {"path": "list"}
+        d = P.Policy({"version": 1, "rules": [r]}).evaluate_call("fs", tool, {"path": "/project/docs"}, confinable=True)
+        assert d.verdict == "allow" and d.confine == {"path": "list"}
+
+    def test_the_list_tools_are_the_ones_the_starter_gives_list(self):
+        import pathlib
+        starter = json.loads((pathlib.Path(P.__file__).parent / "policies" / "starter.json").read_text())
+        tools = set()
+        for rule in starter["rules"]:
+            if "list" in (rule.get("confine") or {}).values():
+                t = rule["when"]["tool"]
+                tools |= set([t] if isinstance(t, str) else t)
+        assert tools == set(P.LIST_TOOLS)
+
+    def test_an_allow_without_path_arguments_has_an_empty_map(self):
+        r = build_rule("allow", "exact", "fs", "echo", {"text": "hi"})
+        assert r["confine"] == {} and r["when"]["arg_keys"] == ["text"]
+        assert P.Policy({"version": 1, "rules": [r]}).evaluate_call("fs", "echo", {"text": "hi"}, confinable=False).verdict == "allow"
+
+    @pytest.mark.parametrize("verdict", ["deny", "ask"])
+    def test_deny_and_ask_rules_are_unchanged(self, verdict):
+        r = build_rule(verdict, "exact", "fs", "read_file", {"path": "/project/a"})
+        assert "confine" not in r and "arg_keys" not in r["when"]
+
+
 class TestBuildExact:
     def test_shape_and_id(self):
         r = build_rule("allow", "exact", "fs", "read_file", {"path": "/project/a.txt", "n": 3, "flag": True})
         assert r["verdict"] == "allow" and "note" not in r
-        assert r["when"] == {"server": "fs", "tool": "read_file", "args": [
+        assert r["when"] == {"server": "fs", "tool": "read_file", "arg_keys": ["flag", "n", "path"], "args": [
             {"path": "flag", "op": "equals", "value": True}, {"path": "n", "op": "equals", "value": 3},
             {"path": "path", "op": "equals", "value": "/project/a.txt"}]}
+        assert r["confine"] == {"path": "read"}         # DECISIONS D31: the auto-allowed call may read exactly the named file
         canon = json.dumps({"verdict": "allow", "when": r["when"]}, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         assert r["id"] == "ui-allow-" + hashlib.sha256(canon.encode()).hexdigest()[:8]
         assert re.fullmatch(r"ui-(allow|deny|ask)-[0-9a-f]{8}", r["id"])
@@ -86,7 +129,7 @@ class TestBuildExact:
         pol = P.Policy({"version": 1, "default": "deny", "rules": [r]})
         ok = {"path": "/project/a", "overwrite": False, "n": 1}
         assert pol.evaluate("fs", "write_file", ok).verdict == "allow"
-        assert pol.evaluate("fs", "write_file", {**ok, "extra": "x"}).verdict == "allow"      # other args are not constrained
+        assert pol.evaluate("fs", "write_file", {**ok, "extra": "x"}).verdict == "deny"       # an allow lists its arguments (arg_keys)
         for bad in ({**ok, "path": "/project/b"}, {**ok, "overwrite": True}, {**ok, "n": True}, {**ok, "n": "1"}, {**ok, "n": 2},
                     {"path": "/project/a"}, {**ok, "path": ["/project/a"]}):
             assert pol.evaluate("fs", "write_file", bad).verdict == "deny", bad

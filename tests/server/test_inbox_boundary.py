@@ -166,7 +166,7 @@ def use(monkeypatch, tmp_path, rules, default="ask"):
 
 
 async def test_policy_allow_without_secrets_true_holds_a_credentialed_call(monkeypatch, tmp_path):
-    use(monkeypatch, tmp_path, [{"id": "reads", "verdict": "allow", "when": {"tool": ["read_file"]}}])
+    use(monkeypatch, tmp_path, [{"id": "reads", "verdict": "allow", "when": {"tool": ["read_file"], "arg_keys": ["p"]}, "confine": {}}])
     r = await Rig().start()
     await r.send(call("plain", tool="read_file"))
     await wait_for(lambda: r.decisions())
@@ -176,7 +176,7 @@ async def test_policy_allow_without_secrets_true_holds_a_credentialed_call(monke
 
 
 async def test_policy_allow_with_secrets_true_approves_the_credentialed_call(monkeypatch, tmp_path):
-    use(monkeypatch, tmp_path, [{"id": "creds-ok", "verdict": "allow", "when": {"tool": ["read_file"], "secrets": True}}])
+    use(monkeypatch, tmp_path, [{"id": "creds-ok", "verdict": "allow", "when": {"tool": ["read_file"], "secrets": True, "arg_keys": ["p"]}, "confine": {}}])
     r = await Rig().start()
     await r.send(call("creds", tool="read_file", secrets_used=["API_TOKEN"]))
     await wait_for(lambda: r.decisions())

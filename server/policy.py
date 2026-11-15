@@ -50,10 +50,18 @@ MAX_ICASE_ITEMS = 64            # engine: icontains_any looks at a string or at 
 MAX_ICASE_STR = 4096            # ... of at most this many characters each; anything bigger counts as a match (fail closed)
 MAX_FILE_BYTES = 1_000_000      # engine: policy file size
 MAX_ARG_KEYS = 100              # engine: entries of a `when.arg_keys` list
+MAX_CONFINE = 20                # entries of a rule's `confine` map
+CONFINE_RIGHTS = ("read", "list")
+# argument names that are paths whatever the rule says (the starter's ask rules read them); an allowed call with one of them outside the
+# deciding rule's `confine` asks (DECISIONS D31). sentinel_proxy/confine.py has the same set (a test keeps them equal).
+PATH_SLOTS = frozenset({"path", "paths", "source", "destination", "directory", "file"})
+LIST_TOOLS = frozenset({"list_directory", "list_directory_with_sizes", "directory_tree", "search_files", "get_file_info"})   # = the starter's `list` rules
+_PATH_LIKE = frozenset({"file_path", "filepath", "filename", "dir", "src", "dest", "uri", "url", "name"})   # custom names that look like paths
+_PATH_LIKE_END = ("path", "paths", "file", "dir")
 
 _ID_RE = re.compile(r"[A-Za-z0-9._-]{1,60}")
 _TOP_KEYS = {"version", "default", "rules"}
-_RULE_KEYS = {"id", "verdict", "note", "when"}
+_RULE_KEYS = {"id", "verdict", "note", "when", "confine"}
 _WHEN_KEYS = {"server", "tool", "args", "destination", "party", "alert", "secrets", "arg_keys"}
 _ARG_KEYS = {"path", "op", "value"}
 _BAD_NAME_CATS = {"Cc", "Cf", "Cs", "Zl", "Zp"}          # control, format (bidi, ZW), surrogate, line/para separators
@@ -78,8 +86,9 @@ class Decision:
     verdict: str                  # allow | deny | ask
     rule_id: str | None           # deciding rule; None for the default / a rule error without an ask rule
     matched: tuple                # ids of ALL matching rules, in file order
-    reason: str                   # rule:<id> | default | alert | rule_error:<id> | engine_error
+    reason: str                   # rule:<id> | default | alert | secrets | rule_error:<id> | engine_error | unconfined | unconfinable
     escalated: bool = False       # allow -> ask because an alert is present
+    confine: dict | None = None   # an allow's deciding rule's `confine` map ({} = not paths); None otherwise
 
 
 @dataclass(frozen=True)
@@ -104,6 +113,7 @@ class Rule:
     specificity: int
     secrets: bool | None = None   # the call receives just-in-time credentials (proxy `secrets_used` non-empty)
     arg_keys: frozenset | None = None   # every top-level argument name of the call must be in this set
+    confine: dict | None = None   # allow rules: {arg: "read" | "list"}, the objects a confined worker may touch (DECISIONS D31)
 
 
 # ---------------------------------------------------------------------------
@@ -329,6 +339,33 @@ def _check_when(w, where: str, errs: list):
     return server, tool, args, dest, party, alert, spec, secrets, arg_keys
 
 
+def _check_confine(r: dict, verdict, arg_keys, where: str, errs: list) -> dict | None:
+    if "confine" not in r:
+        return None
+    c = r["confine"]
+    if verdict != "allow":
+        errs.append(f"{where}.confine: only allow rules can have one")
+        return None
+    if not isinstance(c, dict):
+        errs.append(f"{where}.confine: must be an object {{argument: \"read\" | \"list\"}}")
+        return None
+    if len(c) > MAX_CONFINE:
+        errs.append(f"{where}.confine: at most {MAX_CONFINE} arguments")
+        return None
+    if arg_keys is None:
+        errs.append(f"{where}.confine: needs when.arg_keys (every confined argument must be listed there)")
+        return None
+    ok = True
+    for k, v in c.items():
+        if not isinstance(v, str) or v not in CONFINE_RIGHTS:
+            errs.append(f"{where}.confine.{_show(k)}: must be \"read\" (exactly that file) or \"list\" (names beneath that directory)")
+            ok = False
+        elif k not in arg_keys:
+            errs.append(f"{where}.confine: {_show(k)} is not in when.arg_keys")
+            ok = False
+    return dict(c) if ok else None
+
+
 def _build(data: Any) -> tuple[list, str, list]:
     """-> (rules, default, errors)."""
     errs: list[str] = []
@@ -382,8 +419,11 @@ def _build(data: Any) -> tuple[list, str, list]:
         if len(errs) > n0 or w is None:
             continue
         server, tool, args, dest, party, alert, spec, secrets, arg_keys = w
+        confine = _check_confine(r, verdict, arg_keys, where, errs)
+        if len(errs) > n0:
+            continue
         rules.append(Rule(rid, verdict, note, copy.deepcopy(r.get("when") or {}), server, tool, args, dest, party, alert, spec,
-                          secrets, arg_keys))
+                          secrets, arg_keys, confine))
     return rules, default, errs
 
 
@@ -734,6 +774,27 @@ class Policy:
                     warns.append(f"rule {r.id}: allow rule uses negative operator(s) {', '.join(neg)}, which are TRUE when "
                                  f"the argument is missing or has the wrong type (it would allow on unknowns)")
         for r in self.rules:
+            if r.verdict != "allow":
+                continue
+            if r.confine is None:
+                if r.arg_keys is None:
+                    warns.append(f"rule {r.id}: allow rule without \"confine\" asks for every call; add when.arg_keys and "
+                                 f"\"confine\" (a map of its path arguments, {{}} if it has none)")
+                else:
+                    hint = json.dumps({k: "read" for k in sorted(r.arg_keys & PATH_SLOTS)})
+                    warns.append(f"rule {r.id}: allow rule without \"confine\" asks for every call; add \"confine\": {hint} "
+                                 f"(\"list\" for a directory argument; {{}} if no argument is a path)")
+            elif r.arg_keys is not None:
+                out = sorted((r.arg_keys & PATH_SLOTS) - set(r.confine))
+                if out:
+                    warns.append(f"rule {r.id}: a call with {', '.join(out)} is asked: add it to \"confine\"")
+                if not r.confine:
+                    like = sorted(k for k in r.arg_keys - PATH_SLOTS if k.lower() in _PATH_LIKE or k.lower().endswith(_PATH_LIKE_END))
+                    if like:
+                        warns.append(f"rule {r.id}: \"confine\": {{}} says no argument is a path, but {', '.join(like)} looks like one: the "
+                                     f"proxy would run the call UNCONFINED. Give each a \"confine\" entry (\"read\" or \"list\"), or keep {{}} "
+                                     f"only if it is not a path")
+        for r in self.rules:
             if r.arg_keys is None:
                 continue
             outside = sorted({c.path[0] for c in r.args if c.op not in _NEG_OF and c.path[0] not in r.arg_keys})
@@ -793,8 +854,9 @@ class Policy:
         if ask is not None:
             return Decision("ask", ask.id, ids, f"rule:{ask.id}", False)
         allow = best("allow")
+        confine = None
         if allow is not None:
-            verdict, rid, reason = "allow", allow.id, f"rule:{allow.id}"
+            verdict, rid, reason, confine = "allow", allow.id, f"rule:{allow.id}", allow.confine
         else:
             verdict, rid, reason = self.default, None, "default"
         if alerts and verdict == "allow":
@@ -802,14 +864,29 @@ class Policy:
         if secrets and verdict == "allow" and (allow is None or allow.secrets is None):
             # credentials are being granted: only a rule that says `secrets: true` may allow that
             return Decision("ask", rid, ids, "secrets", True)
-        return Decision(verdict, rid, ids, reason, False)
+        return Decision(verdict, rid, ids, reason, False, confine if verdict == "allow" else None)
+
+    def evaluate_call(self, server, tool, args, *, confinable: bool, **kw) -> Decision:
+        """`evaluate`, then the confinement floors: how the hub decides a proxied call (DECISIONS D31)."""
+        return confinement_floor(self.evaluate(server, tool, args, **kw), args, confinable)
 
 
-def stricter(a: Decision, b: Decision) -> Decision:
-    """The stricter of two decisions (deny > ask > allow). On a tie `a`, unless only `a` was escalated (an allow turned into ask by an
-    alert) and `b` is a rule's own verdict: the card then names the rule that holds the call. An unknown verdict counts as the strictest."""
-    sa, sb = _STRENGTH.get(a.verdict, 4), _STRENGTH.get(b.verdict, 4)
-    return b if sb > sa or (sb == sa and a.escalated and not b.escalated) else a
+def confinement_floor(d: Decision, args: Any, confinable: bool) -> Decision:
+    """Stricter only. An allow stands only when the proxy can make the kernel enforce it: its rule has a `confine` map, every path-slot
+    argument of the call is in it, and (for a non-empty map) the server is confinable (`proxy_call.confinable` is exactly true). A default
+    allow has no map: it stands for a call without path-slot arguments only."""
+    if d.verdict != "allow":
+        return d
+    slots = {k for k in args if k in PATH_SLOTS} if isinstance(args, Mapping) else set()
+    if d.confine is None:
+        if d.rule_id is not None or slots:
+            return Decision("ask", d.rule_id, d.matched, "unconfined", True)
+        return d
+    if slots - set(d.confine):
+        return Decision("ask", d.rule_id, d.matched, "unconfined", True)
+    if d.confine and confinable is not True:
+        return Decision("ask", d.rule_id, d.matched, "unconfinable", True)
+    return d
 
 
 BUILTIN_PREFIX = "builtin:"

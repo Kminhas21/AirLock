@@ -15,6 +15,10 @@ from pathlib import Path
 
 import pytest
 import websockets
+
+from sentinel_proxy import sandbox
+from tests.no_skip_plugin import sandbox_skipif
+
 pytestmark = pytest.mark.slow  # GATE_TIER=pr: a slow, process-based file (scripts/gate_lib.sh, docs/TESTING_REALITY.md "CI tiers")
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -96,6 +100,17 @@ def session(tmp_path, port, sid):
     return log, H.agent(path, {"SENTINEL_WS_TOKEN": TOKEN})
 
 
+def sandboxed_session(tmp_path, port, sid, work):
+    """A session whose server is sandboxed with `runtime`, so a standing path allow is kernel-confined and auto-allowed (DECISIONS D31)."""
+    d = tmp_path / sid
+    d.mkdir(exist_ok=True)
+    probe = ROOT / "tests/proxy/fake_downstream_probe.py"
+    server = {"command": sys.executable, "args": [str(probe)],
+              "sandbox": {"read": [str(work)], "runtime": [str(probe.parent)], "network": "none"}}
+    path, log = H.make_config(d, f"ws://127.0.0.1:{port}/proxy/ws", servers={"fs": server}, session_id=sid)
+    return log, H.agent(path, {"SENTINEL_WS_TOKEN": TOKEN})
+
+
 def text(res):
     return "".join(c.text for c in res.content)
 
@@ -127,14 +142,22 @@ async def test_deny_with_reason_reaches_the_agent_and_the_card_shows_the_session
             assert not ok.is_error and "operator note" not in text(ok)
 
 
+@sandbox_skipif(sandbox.landlock_abi() < 1 or not sandbox.openat2_ok() or not sandbox.probe()["unshare_net"],
+                reason="a confined auto-allow needs Landlock, openat2 and a network namespace on this host")
 async def test_a_standing_rule_written_from_one_call_applies_to_the_next_session_and_is_logged(tmp_path, backend):
     logdb = tmp_path / "events.db"
+    work = tmp_path / "work"
+    (work / "docs").mkdir(parents=True)
+    (work / "docs/a.txt").write_text("A")
+    (work / "docs/b.txt").write_text("B")
+    (work / "other").mkdir()
+    (work / "other/c.txt").write_text("C")
     _, port, pol = backend(log=logdb)
-    log1, ctx1 = session(tmp_path, port, "op-one")
+    log1, ctx1 = sandboxed_session(tmp_path, port, "op-one", work)
     async with ui(port) as u:
         await next_event(u, "inbox_snapshot")
         async with ctx1 as a:
-            t = asyncio.create_task(a.call_tool("read_file", {"path": "/project/docs/a.txt"}))
+            t = asyncio.create_task(a.call_tool("read_path", {"path": f"{work}/docs/a.txt"}))
             p = await next_event(u, "inbox_pending")
             assert p["rule_id"] is None                                       # the empty policy's default: ask
             await u.send(json.dumps({"event": "inbox_rule_request", "session_id": p["session_id"], "call_id": p["call_id"],
@@ -143,19 +166,19 @@ async def test_a_standing_rule_written_from_one_call_applies_to_the_next_session
             assert res["ok"] is True and res["reason"] == "ok" and res["applies"] == "new_sessions" and res["rule_id"].startswith("ui-allow-")
             rules = json.loads(pol.read_text())["rules"]
             assert len(rules) == 1 and rules[0]["id"] == res["rule_id"] and rules[0]["verdict"] == "allow"
-            assert rules[0]["when"]["args"][0]["value"] == "/project/docs"
+            assert rules[0]["when"]["args"][0]["value"] == f"{work}/docs" and rules[0]["confine"] == {"path": "read"}
             # the call that triggered it is still pending: the rule never decides it
             await decide(u, p, "approve")
             assert not (await asyncio.wait_for(t, 20)).is_error
-        # a NEW session: the allow rule now auto-approves a sibling call (no card), with the rule named
-        log2, ctx2 = session(tmp_path, port, "op-two")
+        # a NEW session: the allow rule now auto-approves a sibling call (no card), with the rule named, kernel-confined
+        log2, ctx2 = sandboxed_session(tmp_path, port, "op-two", work)
         async with ctx2 as b:
-            r = await asyncio.wait_for(b.call_tool("read_file", {"path": "/project/docs/b.txt"}), 60)
-            assert not r.is_error
+            r = await asyncio.wait_for(b.call_tool("read_path", {"path": f"{work}/docs/b.txt"}), 60)
+            assert not r.is_error and "ok:B" in text(r)
             resolved = await next_event(u, "inbox_resolved", session_id="op-two")
             assert (resolved["reason"], resolved["decision"], resolved["rule_id"]) == ("policy", "approve", res["rule_id"])
             # ...but a call outside the folder is still held
-            t = asyncio.create_task(b.call_tool("read_file", {"path": "/project/other/c.txt"}))
+            t = asyncio.create_task(b.call_tool("read_path", {"path": f"{work}/other/c.txt"}))
             held = await next_event(u, "inbox_pending", session_id="op-two")
             assert held["rule_id"] is None
             await decide(u, held, "deny")

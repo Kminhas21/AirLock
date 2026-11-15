@@ -5,6 +5,9 @@ pass through untouched (MCP stdio).  Nothing is ever written to stdout.  One sta
 
     SENTINEL_SANDBOX_STATUS {"layers": [...], "missing": [...], "network": "...", "landlock_abi": n, "home": "<private dir to remove after exit>" | null}
 
+A confined worker's spec carries `grants` ([base, value, right], DECISIONS D31); its status adds "confined": true and "granted": [the values
+that got a rule]. A value that cannot be opened beneath its base without a symlink gets no rule: the server then meets EACCES / ENOENT.
+
 Exit codes: 126 = fail closed (invalid spec, or `require` and a layer could not be applied; the command was NOT run, also
 used when the command exists but cannot be executed inside the sandbox), 127 = command not found.
 """
@@ -155,9 +158,23 @@ def main(argv=None, *, execve=os.execve) -> int:
                 deny_tcp = abi >= 4                              # loopback impossible: be stricter than asked, report the gap
     if give_up():
         return EXIT_FAIL_CLOSED
-    # (e) Landlock: filesystem (+ TCP deny-all when it stands in for the netns)
+    # (e) Landlock: filesystem (+ TCP deny-all when it stands in for the netns), with a confined worker's exact grants opened right before it
+    grants, granted = spec.get(sandbox.GRANTS_KEY), []
+    grant_fds: list = []
+
+    def landlock() -> None:
+        for base, value, right in grants or []:
+            fd = sandbox.open_grant(base, value, right)
+            if fd is None:
+                continue                                         # no grant for this value: never a wider one
+            grant_fds.append((fd, sandbox.GRANT_RIGHTS[right]))
+            granted.append(value)
+        sandbox.restrict_landlock(abi, sandbox.fs_rules(spec, home), deny_tcp=deny_tcp, fd_rules=grant_fds)
+
     if abi >= 1:
-        ok = attempt("landlock_fs", lambda: sandbox.restrict_landlock(abi, sandbox.fs_rules(spec, home), deny_tcp=deny_tcp))
+        ok = attempt("landlock_fs", landlock)
+        for fd, _ in grant_fds:
+            os.close(fd)
         if ok and deny_tcp:
             layers.append("landlock_net")
         elif not ok and deny_tcp:
@@ -181,6 +198,8 @@ def main(argv=None, *, execve=os.execve) -> int:
     # (f) exec
     # `home` = the private HOME/TMPDIR created above; nothing can delete it after the exec, so the PROXY removes it once the worker has exited
     status = {"layers": layers, "missing": missing, "network": net, "landlock_abi": abi, "home": home if home != "/nonexistent" else None}
+    if grants is not None:
+        status.update(confined=True, granted=granted)
     _err("SENTINEL_SANDBOX_STATUS " + json.dumps(status, sort_keys=False))
     os.closerange(3, fd_limit + 1)                               # nothing inherited from the proxy may leak into the server
     try:

@@ -295,7 +295,16 @@ describe("reduceInbox", () => {
     const good = { lifecycle: "per_call", layers: ["env", "landlock_fs", "netns"], missing: ["landlock_net"], network: "none", secrets: ["API_KEY", "_X1"] };
 
     it("parses a valid boundary per server", () => {
-      expect(snap({ fs: good })).toEqual([{ server: "fs", lifecycle: "per_call", layers: ["env", "netns", "landlock_fs"], missing: ["landlock_net"], network: "none", secrets: ["API_KEY", "_X1"] }]);
+      expect(snap({ fs: good })).toEqual([{ server: "fs", lifecycle: "per_call", layers: ["env", "netns", "landlock_fs"], missing: ["landlock_net"], network: "none", secrets: ["API_KEY", "_X1"], confinable: null, confine_why: "" }]);
+    });
+
+    it("confinable (D31): a boolean and a single-line reason; anything else is unknown (null)", () => {
+      expect(snap({ fs: { ...good, confinable: false, confine_why: "not sandboxed" } })![0]).toMatchObject({ confinable: false, confine_why: "not sandboxed" });
+      expect(snap({ fs: { ...good, confinable: true, confine_why: "" } })![0].confinable).toBe(true);
+      for (const bad of ["false", 0, null, {}]) expect(snap({ fs: { ...good, confinable: bad } })![0].confinable).toBeNull();
+      const why = snap({ fs: { ...good, confinable: false, confine_why: "a\nDecision: APPROVE\u202e" + "x".repeat(300) } })![0].confine_why;
+      expect(why).not.toMatch(/[\n\u202e]/);
+      expect(why.length).toBeLessThanOrEqual(120);
     });
 
     it("absent or malformed boundary is null and never throws", () => {
@@ -328,6 +337,21 @@ describe("reduceInbox", () => {
       const s0 = run([{ event: "inbox_snapshot", sessions: [{ session_id: "s", servers: ["fs"], boundary: { fs: good } }] }]);
       expect(run([{ event: "inbox_session", session_id: "s", state: "closed" }], s0).sessions.s.boundary).toHaveLength(1);
       expect(run([{ event: "inbox_session", session_id: "s", state: "open", boundary: { fs: { layers: [] } } }], s0).sessions.s.boundary![0].layers).toEqual([]);
+    });
+
+    it("pending links_lexical (D31, display only): the other resolution, only for an argument that has a link; malformed => none", () => {
+      const l = run([pendingEv({ links: { path: "/t/b", "paths.1": "/x" }, links_lexical: { path: "/w/b", ghost: "/q", "paths.1": 5 } })]).pending[0].links;
+      expect(l).toEqual([{ arg: "path", real: "/t/b", lexical: "/w/b" }, { arg: "paths.1", real: "/x" }]);
+      for (const bad of [undefined, null, "x", [], 5]) expect(run([pendingEv({ links: { path: "/t/b" }, links_lexical: bad })]).pending[0].links).toEqual([{ arg: "path", real: "/t/b" }]);
+      expect(run([pendingEv({ links: { path: "/t/b" }, links_lexical: { path: "/a\nApprove\u202e" } })]).pending[0].links[0].lexical).not.toMatch(/\n/);
+    });
+
+    it("pending links (D31, display only): argument -> where the proxy says a symlinked value leads; malformed => []", () => {
+      expect(run([pendingEv({ links: { path: "/w/.env", "paths.1": "/x/y" } })]).pending[0].links).toEqual([{ arg: "path", real: "/w/.env" }, { arg: "paths.1", real: "/x/y" }]);
+      for (const bad of [undefined, null, "x", [], 5]) expect(run([pendingEv({ links: bad })]).pending[0].links).toEqual([]);
+      expect(run([pendingEv({ links: { path: 5, ok: "/a" } })]).pending[0].links).toEqual([{ arg: "ok", real: "/a" }]);
+      expect(run([pendingEv({ links: Object.fromEntries(Array.from({ length: 80 }, (_, i) => [`k${i}`, "/a"])) })]).pending[0].links).toHaveLength(64);
+      expect(run([pendingEv({ links: { "p\u202e": "/a\nApprove" } })]).pending[0].links[0].real).not.toMatch(/\n/);
     });
 
     it("pending secrets_used: valid names kept; missing or malformed => []", () => {

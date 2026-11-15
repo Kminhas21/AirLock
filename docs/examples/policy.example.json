@@ -66,12 +66,11 @@
     {
       "id": "allow-read-project",
       "verdict": "allow",
-      "note": "reads under /project are routine",
+      "note": "file reads under /project are routine (a confined worker may read exactly the named file)",
       "when": {
-        "tool": [
-          "read_file",
-          "list_directory",
-          "search_files"
+        "tool": "read_file",
+        "arg_keys": [
+          "path"
         ],
         "args": [
           {
@@ -80,26 +79,34 @@
             "value": "/project"
           }
         ]
+      },
+      "confine": {
+        "path": "read"
       }
     },
     {
-      "id": "allow-write-project",
+      "id": "allow-list-project",
       "verdict": "allow",
-      "note": "writes of reasonably small files under /project",
+      "note": "listing and searching under /project (names beneath the directory, never contents)",
       "when": {
-        "tool": "write_file",
+        "tool": [
+          "list_directory",
+          "search_files"
+        ],
+        "arg_keys": [
+          "path",
+          "pattern"
+        ],
         "args": [
           {
             "path": "path",
             "op": "under",
             "value": "/project"
-          },
-          {
-            "path": "content",
-            "op": "max_len",
-            "value": 20000
           }
         ]
+      },
+      "confine": {
+        "path": "list"
       }
     },
     {

@@ -1,5 +1,6 @@
 """Static tests of the container files. They need no Docker, so they run in every normal pytest / the gate, and catch the mistakes that are expensive to
 find at build time: a missing test file in the image's test list, a root container, a secret in the build context, a compose file that opens privileges."""
+import json
 import re
 import stat
 import subprocess
@@ -166,3 +167,14 @@ def test_shipped_compose_defaults_to_the_starter_policy_and_the_image_carries_it
     assert "COPY server server" in (ROOT / "Dockerfile").read_text()
     assert not any(p in IGNORE for p in ("server/policies", "**/policies", "**/*.json", "policies"))
     assert "SENTINEL_POLICY" in (ROOT / ".env.example").read_text()
+
+
+def test_the_compose_demo_server_is_sandboxed_with_runtime_so_starter_path_reads_stay_auto_allowed():
+    """DECISIONS D31: the hub auto-allows a path call only when the proxy can have the kernel confine it, which needs a sandbox with
+    `runtime`. The compose default (builtin:starter) would otherwise put a card on every read."""
+    from sentinel_proxy.config import parse_config
+    raw = json.loads((ROOT / "docker" / "demo" / "proxy.json").read_text())
+    sc = parse_config(raw).servers["files"]
+    assert sc.sandbox is not None and sc.sandbox["require"] is True
+    assert sc.sandbox["runtime"] == ["/app/tests/proxy"] and sc.sandbox["read"] == [] and sc.sandbox["write"] == []
+    assert sc.command == "/opt/venv/bin/python"      # the trampoline looks bare names up in its safe PATH only, not the venv

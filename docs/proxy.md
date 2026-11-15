@@ -32,15 +32,21 @@ alert always holds the call, even an allow-listed one.
 - Token limit: it keeps out processes that cannot read your environment. Anything with full access to your account can read it.
 - Not covered yet: HTTP/SSE downstream servers, tools/list_changed, multi-user, hosted deployment. See DECISIONS D16.
 
-## Symlinks in path arguments (DECISIONS D29)
-Before sending a call to the hub the proxy resolves symlinks in path-slot strings (`path`, `paths`, `source`, `destination`, `directory`, `file`) and in other
-string arguments that look like paths (top level and the first 64 entries of each top-level list), in the Node order (lexical `..` first, then `realpath`) and the
-kernel order: absolute values, `~/...`, and relative values against the server's `cwd` (else the proxy's) and the absolute directories in its `args`. Values whose
-real path differs are sent in the `proxy_call` frame, one map per (base, order), e.g. `"resolved": [{"path": "/work/.env"}]` or
-`[{"paths": {"1": "/home/u/.ssh/id_rsa"}}]`; a hit bound, an error, the 2 s timeout, a path-slot name missing (in the Node order) in any directory the server maps names in (its allowed directories), a relative value with more than 4 bases, or `~` with a server-own HOME adds
-`"resolved_incomplete": true`. Nothing is added when no link is involved. The hub evaluates the policy on the written AND the resolved forms and keeps the stricter
-verdict; a malformed or incomplete resolution turns an `allow` into `ask` (docs/policy.md rule 5). The agent's arguments are forwarded to the server unchanged.
-Limit: the check happens before the server opens the file (a link swapped in between is not seen).
+## Auto-allowed path calls run kernel-confined (DECISIONS D31)
+Path prediction (D29 B4) is gone. Every `proxy_call` carries `confinable` (bool): true only when the server has a `sandbox` with `runtime`, the host has
+Landlock and `openat2`, and a dry run of the worker's walk over every path-slot string (`path`, `paths`, `source`, `destination`, `directory`, `file`; top
+level and list entries) found no symlink, no escape from its base, no `~`, at most 64 values and at most 4 bases for a relative value (2 s budget, else
+false). A missing name is fine. For a value with a symlink the frame also carries `links` (`{"path": "/work/.env"}`, `{"paths.1": ...}`; `realpath`,
+display only: the card shows it, nothing evaluates it). A policy approval whose rule has a `confine` map comes back as `proxy_decision` with
+`"confine": {"path": "read"}`; the proxy then runs the call in a fresh one-shot worker of the same server (also for `lifecycle: "session"`, whose own
+process keeps serving human-approved calls) with the server's `read`/`write` REPLACED by exact grants: each value is opened in the worker, right before
+Landlock is applied, with `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)` from `/` (absolute) or each base (the server's absolute
+directory arguments, else its `cwd`), and gets READ_FILE on exactly that file (`read`) or READ_DIR beneath that directory (`list`). A value that cannot be
+opened that way gets no grant: the server meets EACCES. The worker's status line must say `confined` with `landlock_fs` and nothing missing, or it is killed
+before `call_tool` and the agent gets `Denied by SENTINEL: confine_failed`. A policy approval of a path call WITHOUT `confine` is refused
+(`Denied by SENTINEL: unconfined`). The agent's arguments are forwarded unchanged. Measured cost: a server start per auto-allowed read, about 0.2 s for the
+filesystem server 1.0.0 and 0.8 s for Desktop Commander. Test knob: `SENTINEL_CONFINE_PRECHECK=force_true` makes the precheck say true (the kernel still
+decides); used by the live tests only. Ship hub and proxy together: an old proxy's path allows ask, an old hub's policy approvals of path calls are refused.
 
 ## Compatibility with real MCP servers (measured, DECISIONS D26)
 Each server below was run DIRECTLY and THROUGH the proxy and hub with the same MCP client, and everything the client can observe was diffed

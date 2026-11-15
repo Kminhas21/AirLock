@@ -323,6 +323,13 @@ describe("Inbox", () => {
       expect(html).toContain('data-testid="inbox-boundary-weak">fs: weaker than requested: landlock_net, netns<');
     });
 
+    it("an unconfinable server (D31) says its path allows are asked, and why", () => {
+      state.sessions = sess([b({ confinable: false, confine_why: "not sandboxed" }), b({ server: "ok", confinable: true }), b({ server: "old", confinable: null })]);
+      const html = render();
+      expect(html).toContain('data-testid="inbox-boundary-confine">fs: path allows asked: not sandboxed<');
+      expect(html.match(/inbox-boundary-confine/g)).toHaveLength(1);
+    });
+
     it("a hostile server name stays plain escaped text", () => {
       state.sessions = sess([b({ server: "<img src=x onerror=1>" })]);
       const html = render();
@@ -339,6 +346,26 @@ describe("Inbox", () => {
       expect(html.match(/disabled=""/g)).toBeNull();
       state.pending = [call()];
       expect(render()).not.toContain("inbox-secrets");
+    });
+
+    it("links (D31): when `..` after a link resolves two ways, the card shows both, labelled, and says a human-approved call is not confined", () => {
+      state.pending = [call({ tool: "read_text_file", args: { path: "far/../b" }, links: [{ arg: "path", real: "/t/b", lexical: "/w/b" }] })];
+      const html = render();
+      expect(html).toContain("far/../b → /t/b (or /w/b, depending on how the server handles ..)");
+      expect(html).toContain("a human-approved call is not confined");
+    });
+
+    it("links (D31): the card shows where a symlinked path value leads, as a hint, next to what the agent wrote", () => {
+      state.pending = [call({ tool: "read_text_file", args: { path: "notes.txt", paths: ["a", "lnk"] }, links: [{ arg: "path", real: "/w/.env" }, { arg: "paths.1", real: "/w/b" }, { arg: "gone", real: "/z" }] })];
+      const html = render();
+      expect(html).toContain('data-testid="inbox-links"');
+      expect(html).toContain("notes.txt → /w/.env");
+      expect(html).toContain("lnk → /w/b");
+      expect(html).toContain("gone → /z");
+      expect(html).toContain("as the proxy resolves it; the server may differ");
+      expect(html).not.toContain("depending on how the server handles");
+      state.pending = [call({ links: [] })];
+      expect(render()).not.toContain("inbox-links");
     });
   });
 

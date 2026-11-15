@@ -37,7 +37,7 @@ def rule(rid, verdict, **when):
 
 
 RULES = [rule("no-rm", "deny", tool=["delete_file"]),
-         rule("reads", "allow", tool=["read_file"]),
+         {**rule("reads", "allow", tool=["read_file"], arg_keys=["p"]), "confine": {}},     # call() args {"p": 1}: not a path
          rule("writes", "ask", tool=["write_file"])]
 
 

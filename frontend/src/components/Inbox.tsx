@@ -7,12 +7,25 @@
 
 import { useEffect, useId, useState } from "react";
 import { useInboxStore } from "../stores/inboxStore";
-import { callKey, MAX_PENDING_RENDERED, type InboxDecision, type PendingCall, type ResolvedCall } from "../lib/inboxRoute";
+import { callKey, MAX_PENDING_RENDERED, type InboxDecision, type PathLink, type PendingCall, type ResolvedCall } from "../lib/inboxRoute";
 import { panelView, singleLine } from "../lib/safeText";
 import { forbiddenText, ruleToast, type Scope, type Verdict } from "../lib/inboxView";
 import { formatAge, pendingAge } from "../lib/inboxAge";
 import { AgentText } from "./AgentText";
 import { BoundaryChips, SessionSoFar, SignInPanel, StandingRules, WhyFlagged } from "./InboxPanels";
+
+/** The value the agent wrote for a link's argument ("path", "paths.1"), else the argument name. */
+/** "written → X" or "written → X (or Y, depending on how the server handles ..)": rendered text, one string, never HTML. */
+function linkLine(written: string, l: PathLink): string {
+  return `${written} → ${l.real}${l.lexical ? ` (or ${l.lexical}, depending on how the server handles ..)` : ""}`;
+}
+
+function writtenValue(args: unknown, arg: string): string {
+  const [key, idx] = arg.split(".");
+  const v = args !== null && typeof args === "object" && Object.prototype.hasOwnProperty.call(args, key) ? (args as Record<string, unknown>)[key] : undefined;
+  const w = idx !== undefined && Array.isArray(v) ? v[Number(idx)] : idx === undefined ? v : undefined;
+  return typeof w === "string" ? w : arg;
+}
 
 export interface InboxProps {
   /** Returns false when the decision could not be sent (socket not open). */
@@ -105,6 +118,18 @@ function PendingCard({
       {call.secrets_used.length > 0 && (
         <div className="inbox-secrets" role="alert" data-testid="inbox-secrets-warning">
           This call will receive credentials: {call.secrets_used.join(", ")} (exist only during this call)
+        </div>
+      )}
+      {(call.links ?? []).length > 0 && (
+        <div className="inbox-links" data-testid="inbox-links">
+          {(call.links ?? []).map((l, i) => (
+            <div key={i}>
+              {linkLine(singleLine(writtenValue(call.args, l.arg), 200), l)}
+            </div>
+          ))}
+          <div className="detail-label">
+            {`(as the proxy resolves it; the server may differ${(call.links ?? []).some((l) => l.lexical) ? "; a human-approved call is not confined" : ""})`}
+          </div>
         </div>
       )}
       <AgentText text={argsText} max={MAX_ARGS_PANEL} />

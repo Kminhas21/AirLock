@@ -120,7 +120,7 @@ async def test_held_call_write_ahead_order_human_approve():
     assert i_prop < i_pend < i_dec < i_pd and i_dec < i_res
     prop = logged(st, "call_proposed")[0][3]
     assert prop == {"server": "fs", "tool": "write_file", "args": {"p": 1}, "auto": False, "alerts": [], "policy": None,
-                    "secrets_used": []}
+                    "secrets_used": [], "confinable": False}
     assert logged(st, "decision")[0][3] == {"decision": "approve", "reason": "human", "actor": "human", "rule_id": None,
                                             "policy_digest": None}
 
@@ -288,7 +288,7 @@ async def test_policy_and_log_together(monkeypatch, tmp_path):
     f = tmp_path / "p.json"
     f.write_text(json.dumps({"version": 1, "default": "ask", "rules": [
         {"id": "no-rm", "verdict": "deny", "when": {"tool": ["delete_file"]}},
-        {"id": "reads", "verdict": "allow", "when": {"tool": ["read_file"]}}]}))
+        {"id": "reads", "verdict": "allow", "when": {"tool": ["read_file"], "arg_keys": ["p"]}, "confine": {}}]}))
     monkeypatch.setenv("SENTINEL_POLICY", str(f))
     pol = policy_mod.load_policy_file(str(f))[0]
     tl = Timeline()

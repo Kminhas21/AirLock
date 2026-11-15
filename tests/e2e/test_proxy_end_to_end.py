@@ -308,17 +308,17 @@ async def test_policy_allow_deny_and_ask_end_to_end(tmp_path, backend_proc):
     async with websockets.connect(ui_url(port)) as ui:
         async with H.agent(path, {"SENTINEL_WS_TOKEN": TOKEN}) as agent:
             # allow: no card, no click, forwarded; the UI is told which rule did it
-            r = await asyncio.wait_for(call(agent, "read_file", {"path": "/project/a.txt"}), 60)
-            assert not r.is_error and [c["tool"] for c in downstream_calls(log)] == ["read_file"]
+            r = await asyncio.wait_for(call(agent, "echo", {"n": 1}), 60)
+            assert not r.is_error and [c["tool"] for c in downstream_calls(log)] == ["echo"]
             res = await next_event(ui, "inbox_resolved")
-            assert (res["decision"], res["reason"], res["rule_id"]) == ("approve", "policy", "allow-read-project")
+            assert (res["decision"], res["reason"], res["rule_id"]) == ("approve", "policy", "allow-echo-n")
             assert isinstance(res["policy_digest"], str) and len(res["policy_digest"]) == 16
             # deny: refused immediately, never forwarded, rule recorded
             d = await asyncio.wait_for(call(agent, "write_file", {"path": "/etc/passwd"}), 30)
             assert d.is_error and text(d) == "Denied by SENTINEL: policy"
             res = await next_event(ui, "inbox_resolved")
             assert (res["decision"], res["reason"], res["rule_id"]) == ("deny", "policy", "deny-write-outside")
-            assert [c["tool"] for c in downstream_calls(log)] == ["read_file"]
+            assert [c["tool"] for c in downstream_calls(log)] == ["echo"]
             # default verdict (ask): held, no rule id, a human approves
             t = asyncio.create_task(call(agent, "write_file", {"path": "/project/new.txt"}))
             p = await next_event(ui, "inbox_pending")
@@ -331,7 +331,7 @@ async def test_policy_allow_deny_and_ask_end_to_end(tmp_path, backend_proc):
             assert p["rule_id"] == "ask-echo"
             await decide(ui, p, "deny")
             assert (await asyncio.wait_for(t, 20)).is_error
-            assert [c["tool"] for c in downstream_calls(log)] == ["read_file", "write_file"]
+            assert [c["tool"] for c in downstream_calls(log)] == ["echo", "write_file"]
 
 
 async def test_a_broken_policy_holds_everything_even_auto_flagged_calls(tmp_path, backend_proc):

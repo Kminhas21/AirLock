@@ -101,7 +101,7 @@ async def test_policy_resolutions_are_counted_as_policy(monkeypatch, tmp_path):
     f = tmp_path / "p.json"
     f.write_text(json.dumps({"version": 1, "default": "ask", "rules": [
         {"id": "no-rm", "verdict": "deny", "when": {"tool": ["rm"]}},
-        {"id": "reads", "verdict": "allow", "when": {"tool": ["read_file"]}}]}))
+        {"id": "reads", "verdict": "allow", "when": {"tool": ["read_file"], "arg_keys": ["p"]}, "confine": {}}]}))
     monkeypatch.setenv("SENTINEL_POLICY", str(f))
     r = await Rig().start()
     await r.send(call("a", tool="rm"))

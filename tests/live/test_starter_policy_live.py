@@ -1,7 +1,8 @@
 """The built-in starter policy (SENTINEL_POLICY=builtin:starter; workflow A2) in front of REAL servers: the reference filesystem server and the
 third-party Desktop Commander. Asserted: a plain read is allowed by policy with no human card, a credential-like path (`.env`) and a URL fetch
 (`isUrl: true`) reach a human, and what the human denies never happens (the secret is not returned, the local HTTP target gets 0 requests).
-Then `eventlog_cli replay` re-runs the logged session. Exact rule ids are not asserted: the starter rules evolve."""
+Then `eventlog_cli replay` re-runs the logged session. Exact rule ids are not asserted: the starter rules evolve. Both servers are sandboxed
+with `runtime`: an auto-allowed path read runs kernel-confined (DECISIONS D31); an unsandboxed server would get a card for every read."""
 import pytest
 
 from tests.harness import Agent, Backend, Operator
@@ -69,7 +70,7 @@ def _policy_allowed(hub, sid, tool, path):
 async def test_starter_on_the_real_filesystem_server(realdeps, hub, tmp_path):
     proj = _project(tmp_path)
     sid = "starter-fs"
-    (read, read_card), (env, env_card), (write, write_card) = (await _run(hub, {"command": realdeps["filesystem"], "args": [str(proj)]}, sid, tmp_path, [
+    (read, read_card), (env, env_card), (write, write_card) = (await _run(hub, livelib.sandboxed({"command": realdeps["filesystem"], "args": [str(proj)]}, read=[proj]), sid, tmp_path, [
         ("read_file", {"path": str(proj / "notes.txt")}),
         ("read_file", {"path": str(proj / ".env")}),
         ("write_file", {"path": str(proj / "new.txt"), "content": "x"}),
@@ -85,7 +86,9 @@ async def test_starter_on_desktop_commander_a_url_fetch_reaches_a_human_and_a_de
     target = livelib.HitCounter()
     sid = "starter-dc"
     try:
-        results, human = await _run(hub, livelib.dc_server(realdeps["desktop_commander"], tmp_path / "home"), sid, tmp_path, [
+        dc = livelib.sandboxed(livelib.dc_server(realdeps["desktop_commander"], tmp_path / "home"), read=[proj], network="host",   # host: the
+                               env_allow=["DESKTOP_COMMANDER_DISABLE_TELEMETRY", "DC_FLAG_URL", "NO_COLOR"])       # gate, not a namespace, must stop the denied fetch
+        results, human = await _run(hub, dc, sid, tmp_path, [
             ("read_file", {"path": str(proj / "notes.txt")}),
             ("list_directory", {"path": str(proj)}),
             ("read_file", {"path": str(proj / ".env")}),
