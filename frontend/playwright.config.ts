@@ -8,6 +8,9 @@ const API_PORT = Number(process.env.API_PORT ?? 8081);
 // Optional second backend WITHOUT SENTINEL_REGISTRY (registry-ui.spec.ts: the loud fallback). Off unless this is set.
 const FALLBACK_API_PORT = process.env.FALLBACK_API_PORT ? Number(process.env.FALLBACK_API_PORT) : 0;
 const UI_PORT = 5173; // the backend's default Origin allow-list is http://localhost:5173
+/** e2e/.results/<dir> per gate stage (GATE_STAGE, set by scripts/gate_lib.sh run()); "local" outside the gate or for a name with no letters. */
+const stageDir = (stage: string | undefined) =>
+  (stage ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 60).replace(/^-+|-+$/g, "") || "local";
 
 /** The real FastAPI backend. `registry` = SENTINEL_REGISTRY for this process (undefined: variable not set at all). */
 function backend(port: number, registry: string | undefined) {
@@ -52,7 +55,9 @@ export default defineConfig({
   timeout: 60_000,
   workers: 1,
   reporter: [["list"]],
-  outputDir: "./e2e/.results",
+  // One directory per gate stage (scripts/gate_lib.sh run() sets GATE_STAGE): playwright wipes its outputDir at the start of every run, so a
+  // shared one would lose a failed stage's traces and screenshots to the next stage (CI uploads e2e/.results on failure).
+  outputDir: `./e2e/.results/${stageDir(process.env.GATE_STAGE)}`,
   use: {
     baseURL: `http://localhost:${UI_PORT}`,
     screenshot: "only-on-failure",

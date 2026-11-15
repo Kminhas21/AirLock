@@ -155,6 +155,18 @@ jobs:
         if: always()
         run: cat "${{ runner.temp }}/gate/events.log" || true
 
+      - name: Upload the browser stages' traces and screenshots (one directory per stage)
+        if: failure() || cancelled()   # cancelled includes a job that hit its timeout
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results-${{ steps.tier.outputs.tier }}-${{ github.run_id }}
+          path: |
+            frontend/e2e/.results/
+            frontend/journeys/.results/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload the gate events and junit
         if: always()
         uses: actions/upload-artifact@v4

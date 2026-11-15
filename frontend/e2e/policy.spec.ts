@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { API_PORT, REPO_ROOT } from "./helpers/traces";
+import { forwardStderr } from "./helpers/stderr";
 
 // Policy engine in a real browser (stage "browser inbox policy" of scripts/verify.sh; skipped elsewhere): real backend with SENTINEL_POLICY
 // (tests/e2e/data/policy_e2e.json), real MiniLM + action_sim (a working monitor, so an allow can stand), a REAL stdio proxy and downstream.
@@ -23,6 +24,7 @@ const TOKEN = process.env.INBOX_TOKEN ?? "";
 
 function startAgent() {
   const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", CFG], { cwd: REPO_ROOT, env: { ...process.env, SENTINEL_WS_TOKEN: TOKEN } });
+  forwardStderr(p, "agent policy.spec");
   let buf = "";
   const waiters: ((r: { is_error: boolean; text: string }) => void)[] = [];
   p.stdout.on("data", (d) => {

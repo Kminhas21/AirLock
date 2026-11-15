@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { API_PORT, REPO_ROOT } from "./helpers/traces";
+import { forwardStderr } from "./helpers/stderr";
 
 // Identity, tenancy and escalation in a real browser (stage "browser identity" of scripts/verify.sh; skipped elsewhere). The backend runs with an
 // identity file (scripts/make_identity_fixture.py): tenants acme + globex, operators bob (approver), vera (viewer), gina (globex), per-agent tokens,
@@ -20,6 +21,7 @@ function startAgent(sessionId: string, agentToken: string) {
   const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", cfg], {
     cwd: REPO_ROOT, env: { ...process.env, SENTINEL_AGENT_TOKEN: agentToken, SENTINEL_AGENT_PASSTHROUGH: "SENTINEL_AGENT_TOKEN" },
   });
+  forwardStderr(p, "agent identity.spec");
   let buf = "";
   const waiters: ((r: { is_error: boolean; text: string }) => void)[] = [];
   p.stdout.on("data", (d) => {

@@ -46,7 +46,7 @@ run() { # name, command...
   local t0=$SECONDS
   echo "=== GATE: $name"
   gate_event START "$name"
-  if "$@"; then
+  if GATE_STAGE="$name" "$@"; then      # the stage sees its own name (frontend/playwright.config.ts: one outputDir per stage)
     echo "--- PASS: $name"
     gate_event PASS "$name" $((SECONDS - t0))
   else

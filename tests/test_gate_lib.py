@@ -201,3 +201,11 @@ def test_verify_sh_takes_the_key_before_any_stage_and_gives_it_only_to_the_claud
     assert v.index("gate_take_claude_key") < v.index('run "preflight')
     uses = [l for l in v.splitlines() if "gate_with_claude_key" in l]
     assert len(uses) == 1 and 'run "claude code:' in uses[0]
+
+
+def test_each_stage_command_sees_its_own_stage_name(tmp_path):
+    """frontend/playwright.config.ts derives a per-stage outputDir from GATE_STAGE: playwright wipes its outputDir at the start of every run,
+    so with one shared directory a failed stage's traces and screenshots were gone by the end of the gate (and missing from the CI artifact)."""
+    r = sh("run 'browser boundary (chips)' printenv GATE_STAGE; run second printenv GATE_STAGE; printenv GATE_STAGE || echo unset", tmp_path)
+    assert r.stdout.splitlines() == ["=== GATE: browser boundary (chips)", "browser boundary (chips)", "--- PASS: browser boundary (chips)",
+                                     "=== GATE: second", "second", "--- PASS: second", "unset", "fail=0"]

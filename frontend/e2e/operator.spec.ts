@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { API_PORT, REPO_ROOT } from "./helpers/traces";
+import { forwardStderr } from "./helpers/stderr";
 
 // Operator UI in a real browser (stage "browser operator UI" of scripts/verify.sh; skipped elsewhere): real backend (token, MiniLM + action_sim,
 // SENTINEL_POLICY + SENTINEL_POLICY_WRITABLE=1), a REAL stdio proxy and downstream. Covers: deny-with-reason reaches the agent, 'Why flagged' and
@@ -28,6 +29,7 @@ function config(sessionId: string): string {
 
 function startAgent(sessionId: string) {
   const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", config(sessionId)], { cwd: REPO_ROOT, env: { ...process.env, SENTINEL_WS_TOKEN: TOKEN } });
+  forwardStderr(p, "agent operator.spec");
   let buf = "";
   const waiters: ((r: { is_error: boolean; text: string }) => void)[] = [];
   p.stdout.on("data", (d) => {

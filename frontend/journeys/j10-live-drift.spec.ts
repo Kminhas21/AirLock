@@ -27,7 +27,7 @@ function recorder(page: Page) {
 }
 
 /** Click Run and decide every pending tool call (approve the first two, deny the rest) until the run ends. */
-async function driveRun(page: Page, task: string, scenario = "adversarial", maxSeconds = 150) {
+async function driveRun(page: Page, _task: string, scenario = "adversarial", maxSeconds = 150) {
   await expect(page.locator(".connection-dot.connected")).toBeVisible({ timeout: 30_000 });
   await page.selectOption(".scenario-select", scenario);
   await page.click(".run-button");

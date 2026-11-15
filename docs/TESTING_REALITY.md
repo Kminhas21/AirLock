@@ -214,6 +214,8 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   weekly set `RUN_DOCKER_TESTS=1` and `RUN_JOURNEY_TESTS=1` on the runner's own Docker (no proxy variables). Weekly sets
   `RUN_CLAUDE_TESTS=1` only when the `ANTHROPIC_API_KEY` secret exists and passes it as `SENTINEL_CLAUDE_API_KEY`: verify.sh moves it out
   of the environment before the first stage and hands it, as `ANTHROPIC_API_KEY`, to the Claude stage alone (never in argv; tested).
+  On failure CI also uploads `frontend/e2e/.results` (one directory per stage: `run()` sets `GATE_STAGE`, `playwright.config.ts` derives
+  the outputDir from it), and the e2e specs forward the agents' and proxies' stderr to the test output.
   Unverified until it runs on GitHub: the Landlock + network-namespace tests on `ubuntu-24.04` (the workflow lifts the AppArmor
   restriction on unprivileged user namespaces; a failure there now fails the job), the Docker stage's build time without cached layers,
   and the Claude stage's sign-in by key.

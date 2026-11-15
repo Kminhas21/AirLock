@@ -1,9 +1,10 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { API_PORT, REPO_ROOT } from "./helpers/traces";
+import { forwardStderr } from "./helpers/stderr";
 
 // Enforcement boundary in a real browser (stage "browser boundary" of scripts/verify.sh; skipped elsewhere): a REAL stdio proxy with a Landlock +
 // network-namespace sandboxed per-call downstream holding a just-in-time secret, a REAL backend, and an UNSANDBOXED second session for contrast.
@@ -13,6 +14,12 @@ const SECRET = "sk-live-0123456789-VERY-SECRET";
 const PROBE = path.join(REPO_ROOT, "tests/proxy/fake_downstream_probe.py");
 const PLAIN = path.join(REPO_ROOT, "tests/proxy/fake_downstream.py");
 const TOKEN = process.env.INBOX_TOKEN ?? "";
+// The sandbox trampoline looks a BARE command up in its safe PATH only (/usr/local/bin:/usr/bin:/bin), never in ours (fail closed). On a
+// GitHub runner `python` is setup-python's interpreter under /opt/hostedtoolcache and /usr/bin has only python3 (without our packages), so
+// the sandboxed server gets the absolute path of the interpreter on OUR PATH, like the pytest boundary tests (sys.executable).
+// Resolved on first use (inside the test), so stages that only collect this spec and skip it never run python.
+let pythonPath = "";
+const python = () => (pythonPath ||= execFileSync("python", ["-c", "import sys; print(sys.executable)"]).toString().trim());
 const dir = mkdtempSync(path.join(tmpdir(), "boundary-"));
 const allowed = path.join(dir, "allowed");
 mkdirSync(allowed);
@@ -23,7 +30,7 @@ function config(sessionId: string, servers: Record<string, unknown>): string {
   return f;
 }
 const sandboxed = () => ({
-  command: "python", args: [PROBE], lifecycle: "per_call", call_timeout_s: 30,
+  command: python(), args: [PROBE], lifecycle: "per_call", call_timeout_s: 30,
   sandbox: { read: [path.join(REPO_ROOT, "tests/proxy")], write: [allowed], network: "none", env_allow: [], require: true },
   secrets: { API_TOKEN: { from_env: "E2E_HOST_SECRET", tools: ["whoami_env"] } },
 });
@@ -32,6 +39,7 @@ function startAgent(cfg: string) {
   const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", cfg], {
     cwd: REPO_ROOT, env: { ...process.env, SENTINEL_WS_TOKEN: TOKEN, E2E_HOST_SECRET: SECRET, SENTINEL_AGENT_PASSTHROUGH: "E2E_HOST_SECRET" },
   });
+  forwardStderr(p, "agent boundary.spec");
   let buf = "";
   const waiters: ((r: { is_error: boolean; text: string }) => void)[] = [];
   p.stdout.on("data", (d) => {

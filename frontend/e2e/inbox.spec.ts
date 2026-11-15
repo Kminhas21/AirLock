@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { API_PORT, REPO_ROOT } from "./helpers/traces";
+import { forwardStderr } from "./helpers/stderr";
 
 // The proxy inbox in a real browser, against the real backend hub, a REAL stdio proxy subprocess and a real downstream MCP server
 // (stage "browser inbox" of scripts/verify.sh; skipped in every other stage). The 'agent' is tests/proxy/agent_cli.py (the SDK's own
@@ -27,6 +28,7 @@ const AGENT_ENV = { ...process.env, SENTINEL_WS_TOKEN: TOKEN };
 /** ONE long-lived proxy session (so the hub's denied-effect history persists across calls): `agent_cli.py --serve`. */
 function startAgent() {
   const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", CFG], { cwd: REPO_ROOT, env: AGENT_ENV });
+  forwardStderr(p, "agent inbox.spec");
   let buf = "";
   const waiters: ((r: { is_error: boolean; text: string }) => void)[] = [];
   p.stdout.on("data", (d) => {
@@ -51,6 +53,7 @@ function startAgent() {
 function agentCall(tool: string, args: unknown): Promise<{ is_error: boolean; text: string }> {
   return new Promise((resolve, reject) => {
     const p = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), CFG, tool, JSON.stringify(args)], { cwd: REPO_ROOT, env: AGENT_ENV });
+    forwardStderr(p, "agent inbox.spec");
     let out = "";
     p.stdout.on("data", (d) => (out += d));
     p.on("error", reject);
