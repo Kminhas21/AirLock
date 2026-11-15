@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
@@ -121,3 +121,87 @@ test("an auto-approved tool is held with a critical alert when it repeats a deni
   expect(calls().length).toBe(before);
   agent.stop();
 });
+
+test("a symlinked path on a held call shows where it leads as a plain-text hint, never as the enforced path; no symlink, no note", async ({ page }) => {
+  // a real allowed directory (an absolute arg of the server, so the proxy's precheck walks values beneath it) with real symlinks
+  const root = mkdtempSync(path.join(dir, "links-"));
+  const allowed = path.join(root, "work");
+  mkdirSync(path.join(allowed, "real"), { recursive: true });
+  mkdirSync(path.join(root, "far"));
+  writeFileSync(path.join(allowed, ".env"), "x");
+  writeFileSync(path.join(allowed, "plain.txt"), "x");
+  writeFileSync(path.join(allowed, "b"), "x");
+  writeFileSync(path.join(root, "b"), "x");
+  symlinkSync(".env", path.join(allowed, "notes.txt"));
+  symlinkSync(path.join(root, "far"), path.join(allowed, "lnk"));               // lnk/../b: the kernel says root/b, Node says work/b
+  const hostile = "x<img src=x onerror=window.__pwned=1>\nsecond line";
+  symlinkSync(".env", path.join(allowed, hostile));
+  const cfg = path.join(dir, "links.json");
+  writeFileSync(cfg, JSON.stringify({
+    session_id: "pw-inbox-links", backend: `ws://127.0.0.1:${API_PORT}/proxy/ws`,
+    servers: { fs: { command: "python", args: [DOWNSTREAM, allowed], env: { FAKE_DOWNSTREAM_LOG: LOG } } },
+  }));
+  const agent = spawn("python", [path.join(REPO_ROOT, "tests/proxy/agent_cli.py"), "--serve", cfg], { cwd: REPO_ROOT, env: AGENT_ENV });
+  forwardStderr(agent, "agent inbox.spec links");
+  let buf = "";
+  const waiters: (() => void)[] = [];
+  agent.stdout.on("data", (d) => {
+    buf += d;
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); if (l.trim()) waiters.shift()?.(); }
+  });
+  const hold = (args: unknown) => { agent.stdin.write(JSON.stringify({ tool: "read_file", args }) + "\n"); return new Promise<void>((r) => waiters.push(r)); };
+
+  await page.goto("/");
+  await page.click('[data-testid="tab-inbox"]');
+  await expect(page.locator('[data-testid="inbox-connection"]')).toHaveAttribute("data-state", "connected");
+  const card = page.locator('[data-testid="inbox-pending"]').first();
+  const deny = async (done: Promise<void>) => { await card.locator('[data-testid="inbox-deny"]').click(); await done; await expect(page.locator('[data-testid="inbox-pending"]')).toHaveCount(0); };
+  try {
+    // 1. no symlink: no note
+    let done = hold({ path: "plain.txt" });
+    await expect(card).toBeVisible({ timeout: 30_000 });
+    await expect(card.locator('[data-testid="inbox-links"]')).toHaveCount(0);
+    await deny(done);
+
+    // 2. notes.txt -> .env: "written → real", worded as the proxy's view, not as what will be enforced
+    done = hold({ path: "notes.txt" });
+    await expect(card.locator('[data-testid="inbox-links"]')).toBeVisible({ timeout: 30_000 });
+    const note = card.locator('[data-testid="inbox-links"]');
+    const real = path.join(fs_real(allowed), ".env");
+    await expect(note).toContainText(`notes.txt → ${real}`);
+    const t = (await note.textContent()) ?? "";   // textContent: the hint label is upper-cased by CSS
+    expect(t).toContain("(as the proxy resolves it; the server may differ)");
+    expect(t).not.toContain("depending on how the server handles");
+    expect(t).not.toMatch(/enforce|confined to|will be (read|used)|allowed/i);
+    await deny(done);
+
+    // 3. lnk/../b: two resolutions, both shown, and the human-approved-call caveat
+    done = hold({ path: "lnk/../b" });
+    await expect(card.locator('[data-testid="inbox-links"]')).toBeVisible({ timeout: 30_000 });
+    const t3 = (await card.locator('[data-testid="inbox-links"]').textContent()) ?? "";
+    expect(t3).toContain(`lnk/../b → ${path.join(fs_real(root), "b")} (or ${path.join(fs_real(allowed), "b")}, depending on how the server handles ..)`);
+    expect(t3).toContain("a human-approved call is not confined");
+    await deny(done);
+
+    // 4. hostile name: text only, no element, one line
+    done = hold({ path: hostile });
+    await expect(card.locator('[data-testid="inbox-links"]')).toBeVisible({ timeout: 30_000 });
+    const box = card.locator('[data-testid="inbox-links"]');
+    await expect(box.locator("img")).toHaveCount(0);
+    await expect(card.locator("img")).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();
+    const entry = box.locator("> div").first();
+    const et = (await entry.textContent()) ?? "";
+    expect(et).toContain("<img src=x onerror=window.__pwned=1>");
+    expect(et.includes("\n"), "the entry is one line").toBe(false);
+    expect(await entry.locator("*").count(), "plain text: no child elements").toBe(0);
+    await deny(done);
+  } finally {
+    agent.stdin.end();
+  }
+});
+
+function fs_real(p: string): string {
+  return realpathSync(p);
+}
