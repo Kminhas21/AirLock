@@ -7,6 +7,7 @@ from websockets.asyncio.server import serve
 
 from conftest import FakeBackend, agent, make_config, run_proxy_exit
 from test_proxy_integration import _raw_agent
+pytestmark = pytest.mark.slow  # GATE_TIER=pr: a slow, process-based file (scripts/gate_lib.sh, docs/TESTING_REALITY.md "CI tiers")
 
 TOK = "agent-tok-9f3c1d7a"
 LEG = "legacy-tok-55aa12"

@@ -16,6 +16,7 @@ from eval import run_eval_v2 as R2
 from eval.embed import StubEmbedder
 from eval.run_eval import split_for
 from server.registry import Registry, default_registry
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 
 # ------------------------------------------------------------------ registry conditions

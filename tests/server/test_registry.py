@@ -22,6 +22,7 @@ from registry import (
     destinations,
     merge,
 )
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 SERVER_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "server")
 

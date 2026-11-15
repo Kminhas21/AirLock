@@ -3,8 +3,14 @@
 For each known bug, re-introduce it into a THROWAWAY copy of the repo and run the backend
 tests. The check passes only if the suite goes RED for every mutant. Also fails if a
 mutation's target text is not found (a stale mutation would silently prove nothing).
+
+    python scripts/mutation_check.py                          every mutant (GATE_TIER=full)
+    python scripts/mutation_check.py --check-targets          only check that every target is current (seconds; no test runs)
+    python scripts/mutation_check.py --changed-since REF      only the mutants whose target file changed since REF: committed on this
+                                                              branch (git diff REF...HEAD) plus staged, unstaged and untracked files
+                                                              (GATE_TIER=pr, DECISIONS.md D30); none changed = a quick pass that says so
 """
-import shutil, subprocess, sys, tempfile
+import argparse, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -199,6 +205,49 @@ MUTANTS = [
      '          if [ "${SENTINEL_DOCKER_NETWORK_HOST:-}" != 1 ]; then', '          if false; then', 1),
     ("G7 preflight: a directory passes as the build CA", "scripts/gate_lib.sh",
      '[ ! -f "$ca" ] || ', '', 1),
+    # CI tiers (DECISIONS.md D30; tests/test_gate_tiers.py, tests/test_mutation_check.py)
+    ("T1 a tier drops its own stages (rank compared with > instead of >=)", "scripts/gate_lib.sh",
+     '[ "$(gate_tier_rank "${GATE_TIER:-full}")" -ge "$(gate_tier_rank "$1")" ]', '[ "$(gate_tier_rank "${GATE_TIER:-full}")" -gt "$(gate_tier_rank "$1")" ]', 1),
+    ("T2 an unknown GATE_TIER runs anyway (as nothing beyond push)", "scripts/gate_lib.sh",
+     'if [ "$(gate_tier_rank "${GATE_TIER:-full}")" = 0 ]; then', 'if false; then', 1),
+    ("T3 the default tier is push, not full (a bare verify.sh silently runs less)", "scripts/gate_lib.sh",
+     '[ "$(gate_tier_rank "${GATE_TIER:-full}")" -ge', '[ "$(gate_tier_rank "${GATE_TIER:-push}")" -ge', 1),
+    ("T4 slow tests are selected by no tier", "scripts/gate_lib.sh",
+     "GATE_PYTEST_PR='slow and not research", "GATE_PYTEST_PR='slow and research", 1),
+    ("T5 research tests also run in the push stage (selected twice)", "scripts/gate_lib.sh",
+     "GATE_PYTEST_PUSH='not reality and not claude_live and not slow and not research'", "GATE_PYTEST_PUSH='not reality and not claude_live and not slow'", 1),
+    ("T6 the research browser stages run on every PR", "scripts/verify.sh",
+     "    if at_tier weekly; then\n", "    if at_tier pr; then\n", 1),
+    ("T7 the reality stages and the live-coverage proof are skipped at pr", "scripts/verify.sh",
+     'if at_tier pr; then\n  run "reality: hostile', 'if at_tier full; then\n  run "reality: hostile', 1),
+    ("T8 full runs only the changed-files mutants", "scripts/verify.sh",
+     'if at_tier full; then\n  run "mutation check (tests must', 'if at_tier weekly; then\n  run "mutation check (tests must', 1),
+    ("T9 a stage listing exits 0 (could pass for a green gate)", "scripts/verify.sh",
+     'nothing ran)"; exit 2; fi', 'nothing ran)"; exit 0; fi', 1),
+    # T10-T14 mutate this file: their targets are split into adjacent literals so this list does not contain them a second time
+    ("T10 changed-since ignores the branch's commits", "scripts/mutation_check.py",
+     'return (_git(root, "diff", "--name-only", f"{ref}.' '..HEAD") | ', 'return (', 1),
+    ("T11 changed-since ignores untracked files", "scripts/mutation_check.py",
+     '            | _git(root, "ls-files", "--others", ' '"--exclude-standard"))', '            )', 1),
+    ("T12 changed-since counts the base branch's own later commits (two-dot diff)", "scripts/mutation_check.py",
+     'f"{ref}.' '..HEAD"', 'f"{ref}..HEAD"', 1),
+    ("T13 changed-since selects every mutant", "scripts/mutation_check.py",
+     "    return [m for m in mutants if m[1] in changed or (gate_tests and m[1].startswith(GATE_" "SCRIPTS))]", "    return list(mutants)", 1),
+    ("T14 an unknown ref selects nothing and passes", "scripts/mutation_check.py",
+     '        raise SystemExit(f"mutation ' 'check: git', '        return set()\n        raise SystemExit(f"mutation ' 'check: git', 1),
+    ("T15 gate-script mutants run the whole serial suite before the gate's own tests (minutes per mutant instead of seconds)",
+     "scripts/mutation_check.py", 'if rel.startswith(GATE_' 'SCRIPTS) else []', 'if False else []', 1),
+    ("T16 a changed test file selects only the mutants whose target changed (a weakened killer slips through)", "scripts/mutation_check.py",
+     "    if tests - gate_" "tests:\n        return list(mutants)\n", "", 1),
+    ("T17 a changed gate test selects none of the gate-script mutants it kills", "scripts/mutation_check.py",
+     "(gate_tests and m[1].startswith(GATE_" "SCRIPTS))", "False", 1),
+    ("T18 no origin default branch silently diffs against HEAD (nothing selected) instead of failing", "scripts/mutation_check.py",
+     '    raise SystemExit("mutation check: no origin/' 'HEAD', '    return "HEAD"\n    raise SystemExit("mutation check: no origin/' 'HEAD', 1),
+    ("T19 the sandbox trampoline ignores TMPDIR (the boundary leak checks would look in the wrong place)", "sentinel_proxy/sandbox_exec.py",
+     'home = tempfile.mkdtemp(prefix="sentinel-sbx-")', 'home = tempfile.mkdtemp(prefix="sentinel-sbx-", dir="/tmp")', 1),
+    ("T20 sandbox tests skip silently although SENTINEL_SANDBOX_REQUIRED=1 (CI)", "tests/no_skip_plugin.py",
+     'missing and os.environ.get("SENTINEL_SANDBOX_' 'REQUIRED") != "1"', "missing", 1),
+    ("T21 the Claude key stays in the environment of every stage", "scripts/gate_lib.sh", "  unset SENTINEL_CLAUDE_API_KEY\n", "", 1),
 ]
 
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.
@@ -213,10 +262,18 @@ FRONTEND_MUTANTS = [
 ]
 
 
-def run_suite(tree: Path) -> int:
-    p = subprocess.run([sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider"],
-                       cwd=tree, capture_output=True, text=True, timeout=600)
-    return p.returncode
+def run_suite(tree: Path, rel: str = "") -> int:
+    """The default suite, serial, stopping at the first failure. A mutant of a gate script (scripts/*, tests/*.py) first meets the top-level
+    tests/test_*.py, the gate's own tests (seconds): its only killers sit at the END of the collection order, so the whole suite would
+    otherwise run before them. A mutant that survives that quick pass still has to survive the whole suite. (Not pytest-xdist: with
+    workers, -x does not stop early, each worker drains its queue.)"""
+    quick = [str(f.relative_to(tree)) for f in sorted((tree / "tests").glob("test_*.py"))] if rel.startswith(GATE_SCRIPTS) else []
+    for paths in ([quick] if quick else []) + [[]]:
+        p = subprocess.run([sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", *paths],
+                           cwd=tree, capture_output=True, text=True, timeout=600)
+        if p.returncode != 0:
+            return p.returncode
+    return 0
 
 
 def check_targets() -> int:
@@ -237,11 +294,52 @@ def check_targets() -> int:
     return 1 if stale else 0
 
 
-def main() -> int:
-    if "--check-targets" in sys.argv[1:]:
-        return check_targets()
-    survivors, stale = [], []
-    for name, rel, old, new, count in MUTANTS:
+def _git(root: Path, *args: str) -> set[str]:
+    p = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+    if p.returncode != 0:
+        raise SystemExit(f"mutation check: git {' '.join(args)} failed: {p.stderr.strip()}")
+    return {line for line in p.stdout.splitlines() if line}
+
+
+def changed_files(ref: str, root: Path = ROOT) -> set[str]:
+    """Files (repo-relative) changed on this branch since its merge base with `ref`, plus staged, unstaged and untracked ones.
+    An unknown ref is an error (SystemExit), never an empty set: a typo must not turn into "nothing to check"."""
+    return (_git(root, "diff", "--name-only", f"{ref}...HEAD") | _git(root, "diff", "--name-only", "HEAD")
+            | _git(root, "ls-files", "--others", "--exclude-standard"))
+
+
+def resolve_base(ref: str, root: Path = ROOT) -> str:
+    """`@origin` = origin's default branch (refs/remotes/origin/HEAD, else origin/main); any other ref is used as given. No such branch is an
+    error (SystemExit), never "nothing changed": set GATE_BASE."""
+    if ref != "@origin":
+        return ref
+    for args in (["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], ["rev-parse", "-q", "--verify", "--abbrev-ref", "origin/main"]):
+        p = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True)
+        if p.returncode == 0 and p.stdout.strip():
+            return p.stdout.strip()
+    raise SystemExit("mutation check: no origin/HEAD and no origin/main to diff against (git fetch origin, or set GATE_BASE to a ref)")
+
+
+GATE_SCRIPTS = ("scripts/", "tests/")   # mutants of these are killed by the top-level tests/test_*.py (the gate's own tests)
+
+
+def _is_gate_test(f: str) -> bool:
+    return f.startswith("tests/test_") and f.endswith(".py") and "/" not in f[len("tests/"):]
+
+
+def select_changed(mutants: list, changed: set[str]) -> list:
+    """Mutants whose target changed. A changed or deleted test file, fixture, helper or pytest.ini can weaken any mutant's killer and there
+    is no cheap, reliable mutant -> killer mapping, so it selects EVERY mutant; a changed top-level gate test (tests/test_*.py) selects the
+    gate-script mutants it kills."""
+    tests = {f for f in changed if f.startswith("tests/") or f == "pytest.ini"}
+    gate_tests = {f for f in tests if _is_gate_test(f)}
+    if tests - gate_tests:
+        return list(mutants)
+    return [m for m in mutants if m[1] in changed or (gate_tests and m[1].startswith(GATE_SCRIPTS))]
+
+
+def run_backend(mutants: list, survivors: list, stale: list) -> None:
+    for name, rel, old, new, count in mutants:
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp) / "repo"
             shutil.copytree(ROOT, tree, ignore=IGNORE)
@@ -256,11 +354,14 @@ def main() -> int:
             if name.startswith("B15"):
                 text = text.replace("except Exception:\n        # Details", "except Exception as exc:\n        # Details")
             f.write_text(text.replace(old, new))
-            rc = run_suite(tree)
+            rc = run_suite(tree, rel)
             print(f"{'KILLED  ' if rc != 0 else 'SURVIVED'}  {name}")
             if rc == 0:
                 survivors.append(name)
-    for name, rel, old, new, count in FRONTEND_MUTANTS:
+
+
+def run_frontend(mutants: list, survivors: list, stale: list) -> None:
+    for name, rel, old, new, count in mutants:
         with tempfile.TemporaryDirectory() as tmp:
             tree = Path(tmp) / "repo"
             shutil.copytree(ROOT / "frontend", tree / "frontend",
@@ -281,12 +382,37 @@ def main() -> int:
             print(f"{'KILLED  ' if rc != 0 else 'SURVIVED'}  {name}")
             if rc == 0:
                 survivors.append(name)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="re-introduce known bugs; the suite must catch every one")
+    ap.add_argument("--check-targets", action="store_true", help="only check that every mutant's target text is current")
+    ap.add_argument("--changed-since", metavar="REF", help="only the mutants whose target file (or any test) changed since REF (plus the "
+                    "working tree); @origin = origin's default branch")
+    a = ap.parse_args(argv)
+    if a.check_targets:
+        return check_targets()
+    backend, frontend = MUTANTS, FRONTEND_MUTANTS
+    if a.changed_since:
+        base = resolve_base(a.changed_since)
+        changed = changed_files(base)
+        backend, frontend = select_changed(MUTANTS, changed), select_changed(FRONTEND_MUTANTS, changed)
+        if not backend and not frontend:
+            print(f"mutation check: no mutant targets changed since {base} ({len(changed)} file(s) changed): nothing to run")
+            return 0
+        tests = sorted(f for f in changed if f.startswith("tests/") or f == "pytest.ini")
+        print(f"mutation check: {len(backend) + len(frontend)} of {len(MUTANTS) + len(FRONTEND_MUTANTS)} mutants selected by the changes "
+              f"since {base} (targets: {sorted({m[1] for m in backend + frontend} & changed)}; tests changed: {tests[:10]}"
+              f"{' ...' if len(tests) > 10 else ''})")
+    survivors, stale = [], []
+    run_backend(backend, survivors, stale)
+    run_frontend(frontend, survivors, stale)
     for s in stale:
         print("STALE   ", s)
     if survivors or stale:
         print(f"\nmutation check FAILED: {len(survivors)} survivor(s), {len(stale)} stale")
         return 1
-    print(f"\nmutation check OK: all {len(MUTANTS) + len(FRONTEND_MUTANTS)} re-introduced bugs were caught by the suite")
+    print(f"\nmutation check OK: all {len(backend) + len(frontend)} re-introduced bugs were caught by the suite")
     return 0
 
 

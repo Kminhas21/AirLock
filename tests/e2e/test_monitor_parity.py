@@ -152,10 +152,18 @@ def assert_frame_order(events):
 
 
 # ------------------------------------------------------------------ the tests
-CASES = [(tid, mode) for mode in MODE_TO_ID for tid in V2_IDS + V1_IDS]
+# The shipped default (action_sim, D3) runs on every PR (slow: real MiniLM, minutes); the opt-in learned monitor (D7) is research and runs
+# weekly (DECISIONS.md D30).
+def _tier(*values):
+    mode = values[-1]
+    return pytest.param(*values, marks=pytest.mark.slow if mode == "action_sim" else pytest.mark.research)
 
 
-@pytest.mark.parametrize("mode", sorted(MODE_TO_ID))
+MODES = [_tier(mode) for mode in sorted(MODE_TO_ID)]
+CASES = [_tier(tid, mode) for mode in MODE_TO_ID for tid in V2_IDS + V1_IDS]
+
+
+@pytest.mark.parametrize("mode", MODES)
 def test_selection_covers_categories_and_is_not_vacuous(mode):
     assert len(V2_IDS) == 12 and len({V2[t]["category"] for t in V2_IDS}) == 6
     assert len(V1_IDS) == 6 and len({V1[t]["category"] for t in V1_IDS}) == 6
@@ -181,7 +189,7 @@ def test_live_alerts_equal_offline_alerts_on_the_raw_trace(tid, mode, monkeypatc
     assert live_ordinals(events) == offline_ordinals(ALL[tid], mode), tid
 
 
-@pytest.mark.parametrize("mode", sorted(MODE_TO_ID))
+@pytest.mark.parametrize("mode", MODES)
 def test_concurrent_sessions_do_not_leak_into_each_other(mode, monkeypatch, fake_models):
     _select(monkeypatch, mode)
     ids = [t for t in V2_IDS if offline_ordinals(ALL[t], mode, live_view=True)][:2]
@@ -210,10 +218,10 @@ def test_concurrent_sessions_do_not_leak_into_each_other(mode, monkeypatch, fake
 
 
 # ------------------------------------------------------------------ RAW == LIVE view, offline, all 200 traces
-def test_raw_and_live_views_agree_offline_on_all_traces_for_both_detectors(monkeypatch):
+@pytest.mark.parametrize("mode", MODES)
+def test_raw_and_live_views_agree_offline_on_all_traces(mode, monkeypatch):
     """No detector reads the step index any more: message-only steps cannot change any alert (regression test for the
     old D7 steps_since_denial skew, which made 7/200 traces differ)."""
     monkeypatch.setattr(get_shared_embedder(), "cache_size", 50_000)   # raw and live view embed the same strings
-    for mode in MODE_TO_ID:
-        differ = sorted(t["id"] for t in ALL.values() if offline_ordinals(t, mode) != offline_ordinals(t, mode, live_view=True))
-        assert differ == [], (mode, differ)
+    differ = sorted(t["id"] for t in ALL.values() if offline_ordinals(t, mode) != offline_ordinals(t, mode, live_view=True))
+    assert differ == [], (mode, differ)

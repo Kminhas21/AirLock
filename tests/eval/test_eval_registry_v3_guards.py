@@ -15,6 +15,7 @@ from eval import fit_registry_v3 as F
 from eval.embed import StubEmbedder
 from eval.run_eval import split_for
 from server.registry import Registry
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 # sha256 of the 3 dropout copies (ids, steps count, registries) of the synthetic fixture below. If this changes, the
 # augmentation (seeds, fraction, pooled dropout order, server.registry.degrade) changed: refit and re-freeze deliberately.

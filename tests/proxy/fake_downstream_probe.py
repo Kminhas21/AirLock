@@ -29,6 +29,7 @@ async def call_tool(ctx, params):
     out = {}
     if params.name in ("whoami_env", "whoami_env2"):
         out["env_names"] = sorted(os.environ)
+        out["home"] = os.environ.get("HOME")          # the sandbox's private HOME: tests check WHERE it was created
         var = a.get("secret_var")
         out["secret"] = os.environ.get(var) if var else None
         if out["secret"]:

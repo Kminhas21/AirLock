@@ -91,3 +91,12 @@ def test_nothing_collected_is_still_exit_code_5(tmp_path):
     """verify.sh's run() treats any non-zero exit as a failure; an empty reality stage must not turn green."""
     r = _run(tmp_path, "def helper():\n    pass\n", "1")
     assert r.returncode == 5, r.stdout + r.stderr
+
+
+def test_sandbox_skips_become_failures_where_the_sandbox_is_required(monkeypatch):
+    """CI sets SENTINEL_SANDBOX_REQUIRED=1: a runner that cannot sandbox must FAIL the sandbox tests, not skip them silently."""
+    from tests.no_skip_plugin import sandbox_skipif
+    monkeypatch.delenv("SENTINEL_SANDBOX_REQUIRED", raising=False)
+    assert sandbox_skipif(True, "no landlock").args == (True,) and sandbox_skipif(False, "ok").args == (False,)
+    monkeypatch.setenv("SENTINEL_SANDBOX_REQUIRED", "1")
+    assert sandbox_skipif(True, "no landlock").args == (False,)

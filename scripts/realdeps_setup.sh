@@ -18,8 +18,13 @@ if [ ! -x "$D/node_modules/.bin/mcp-server-filesystem" ] || [ ! -x "$D/node_modu
   (cd "$D" && npm ci --ignore-scripts --no-audit --no-fund --loglevel=error)
   cp "$LOCK" "$D/.installed.lock"
 fi
-if [ ! -x "$D/tv/bin/mcp-server-time" ]; then
+# PyPI time server, pinned (its own dependencies are not: there is no lockfile for them). Rebuilt when the venv's interpreter no longer runs
+# (a restored cache from another Python) or the installed version is not the pin.
+TIME_PIN=2026.11.4
+if ! "$D/tv/bin/python" -c "import importlib.metadata as m, sys; sys.exit(m.version('mcp-server-time') != '$TIME_PIN')" 2>/dev/null \
+   || [ ! -x "$D/tv/bin/mcp-server-time" ]; then
+  rm -rf "$D/tv"
   python -m venv "$D/tv"
-  "$D/tv/bin/pip" install -q mcp-server-time
+  "$D/tv/bin/pip" install -q "mcp-server-time==$TIME_PIN"
 fi
 echo "realdeps ready: $D"

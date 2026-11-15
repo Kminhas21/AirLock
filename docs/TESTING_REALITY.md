@@ -138,8 +138,82 @@ and three switches close that gap (`scripts/gate_lib.sh`, tested by `tests/test_
 * **`GATE_ON_FAIL=<command>`.** Runs once per failed stage with `GATE_STAGE` set, for example
   `GATE_ON_FAIL='curl -fsS -m 10 -d "gate stage failed: $GATE_STAGE" "$WEBHOOK_URL"'`. Its exit code is ignored, so a broken hook
   never changes the verdict. A hook without a timeout can stall the gate; give it one, like `-m 10` above.
-* **`GATE_FAIL_FAST=1`.** Stops at the first failed stage instead of running the rest. Useful while iterating; the full run stays
-  the verdict before a commit.
+* **`GATE_FAIL_FAST=1`.** Stops at the first failed stage instead of running the rest. Useful while iterating; the `GATE_TIER=pr`
+  run (below) stays the verdict before a commit.
 
 Sandbox settings for the Docker stage (docs/DOCKER.md): `SENTINEL_DOCKER_NETWORK_HOST=1 SENTINEL_DOCKER_FORWARD_PROXY=1
 SENTINEL_DOCKER_EMBEDDINGS=0 SENTINEL_DOCKER_BUILD_CA=/root/.ccr/ca-bundle.crt`.
+
+## CI tiers (D30): what runs where
+
+The full gate took about 69 minutes serially on 4 cores (mutation check 25 min, backend pytest 16 min, browser stages about 25 min). That is
+too long for every commit, and it grows with every test. `GATE_TIER` (read by `scripts/verify.sh`, logic in `scripts/gate_lib.sh`) runs a
+subset; the tiers nest, each runs everything the one before it runs. `.github/workflows/ci.yml` picks the tier from the trigger.
+
+| Tier | Trigger | Adds | Measured here (4 cores) |
+|---|---|---|---|
+| `push` | every push | preflight, mutation targets current, static live-coverage map, **backend pytest, fast** (every test without a `slow`/`research`/`reality`/`claude_live` marker, pytest-xdist), seismograph script, frontend typecheck/lint/unit/build | 66 s wall |
+| `pr` | pull request; **the local pre-commit gate** | **backend pytest, slow** (`slow` marker: the process-based files and the action_sim parity), the four reality stages + live coverage proven, browser e2e, action_sim replay parity, browser inbox/policy/operator/boundary/identity, **changed-files mutants** (`mutation_check.py --changed-since $GATE_BASE`) | 777 s (13 min) to the mutation stage; mutants: 182 s for a change to gate files only (22 mutants), 1538 s when tests/ changed (all 149: the review-round run took 2328 s, about 39 min) |
+| `full` | nightly | the whole mutation check (replaces the changed-files one); Docker (`RUN_DOCKER_TESTS=1`), journeys (`RUN_JOURNEY_TESTS=1`) and the real Claude Code client (`RUN_CLAUDE_TESTS=1`) when opted in, as before | about 45 min (estimate, not run: pr without its mutants ~12.5 min + mutation check ~25 min + Docker, journeys, Claude ~5 min) |
+| `weekly` | weekly | **research** (below): `backend pytest, research`, the five non-default replay-parity stages (learned D7, registry D8, registry_learned D9, registry_learned_e D9b, union D9c), the three registry-UI stages and the two "replay registry is current" checks | about 58 min (estimate, not run: full + research pytest ~1 min + research browser stages ~12 min) |
+
+* **Default is `full`.** A bare `bash scripts/verify.sh` runs what it ran before, minus the research stages (now `weekly`). An unknown tier
+  is RED before any stage runs. `GATE_LIST=1 GATE_TIER=pr bash scripts/verify.sh` prints the stages a tier would run with their commands
+  and exits 2 (never 0, so a listing cannot pass for a green gate).
+* **Run a tier locally:** `GATE_TIER=push bash scripts/verify.sh`, `GATE_TIER=pr bash scripts/verify.sh` (add `GATE_EVENTS=/tmp/ev.log` for
+  per-stage times).
+* **Changed-files mutants (`pr`).** `GATE_BASE` is the ref to diff against; the default `@origin` means origin's default branch
+  (`refs/remotes/origin/HEAD`, else `origin/main`; run `git fetch origin` once). CI sets `origin/<PR base>` on pull requests and
+  `origin/<default branch>` otherwise. What counts as changed: commits since the merge base, plus staged, unstaged and untracked files
+  (deletions included). Selection: a changed mutant target selects its mutants; a changed top-level gate test (`tests/test_*.py`) selects
+  every mutant of a gate script (`scripts/*`, `tests/*.py`), whose killers those tests are; **any other changed file under `tests/`, or
+  `pytest.ini`, selects EVERY mutant**: there is no cheap, reliable mutant-to-killer mapping, and a weakened test must not slip through
+  because its mutants' targets did not change (so a PR that edits ordinary tests runs the whole mutation check, about 25 min). Nothing
+  selected = a quick pass that says so. A missing or unknown base ref is RED, never "nothing changed".
+* **Pre-commit gate: `GATE_TIER=pr` locally.** `full` and `weekly` run in CI (nightly and weekly), not before every commit. That is a real
+  trade: a change that breaks only a research detector, a mutant of a file the change did not touch, Docker or a journey is found the next
+  night or week, not before the commit.
+* **Every push runs `push`** (about a minute), including pushes to a branch with an open PR, which also runs `pr`. Left as is on purpose:
+  it is cheap, and it is the only CI signal for a branch without a PR.
+* **One place for pytest selection.** Markers `slow` and `research` (`pytestmark` in each file, or per test / per parameter; no new
+  conftest; `--strict-markers` makes a misspelt marker an error) and three `-m` expressions `GATE_PYTEST_PUSH|PR|WEEKLY` in
+  `scripts/gate_lib.sh`. `tests/test_gate_tiers.py` collects every test (`-m ""`) and proves each is selected by some stage of some tier
+  (the backend stages by marker, reality and claude stages by marker and directory) and that no test runs in two backend stages; it also
+  pins each tier's stage list. A new test file is `push` by default; mark it `slow` if it starts real processes for many seconds.
+* **What is `research`** (tests of ONLY the opt-in detectors D7-D9c, their registry and their tooling): tests/e2e/test_registry_parity.py,
+  test_registry_parity_union.py, test_registry_parity_v3.py, test_ws_registry_decisions.py; the `learned` parameters of
+  tests/e2e/test_monitor_parity.py; tests/server/test_registry.py, test_proposal_monitor_registry.py, test_proposal_monitor_registry_v3.py;
+  tests/eval/test_eval_registry_detectors.py, test_eval_registry_run.py, test_eval_registry_v3_detectors.py, test_eval_registry_v3_fit.py,
+  test_eval_registry_v3_guards.py, test_make_replay_registry.py; and in tests/eval/test_dump_expectations.py the D7, D8/D9, registry-CLI
+  and D9b/D9c tests. Left in `push` because they also cover the default path or shared code: tests/eval/test_eval_v2_*.py (D3 is a v2
+  detector), test_eval_detectors.py, test_eval_d5_control.py, test_eval_run_v3.py, test_check_v3_integrity.py, test_trace_schema_v3.py,
+  tests/server/test_alert_message_safety.py (mixed parameters), and `test_frozen_option_supports_d6_and_d7` (D4-D7).
+* **Live coverage.** The reality stages and `live coverage proven` start at `pr` and always run together (`--junit` only where the
+  reality stages ran; tested). Every live spec still runs in `pr` (replay-traces is the action_sim stage).
+* **Parallel backend tests.** `pytest-xdist` (`requirements-dev.txt`), `GATE_PYTEST_WORKERS` (local default 4, CI `auto`),
+  `OMP_NUM_THREADS=1` per worker (4 workers x 4 torch threads made MiniLM setup take 61 s instead of 5 s; the fast set went from 281 s to
+  48 s). Proven by two clean runs of each set at `-n 4`. Fixed for it: random parametrize ids (test_identity.py generated RSA keys at import:
+  xdist workers must collect the same ids) and five sandbox leak checks (tests/proxy/test_boundary.py x4, tests/e2e/test_boundary_end_to_end.py)
+  that diffed the GLOBAL `/tmp/sentinel-sbx-*` set, which another worker's sandbox polluted. Each test now gives its proxy and its server's
+  trampoline a private `TMPDIR`, asserts that the sandbox HOME it saw (the probe server reports `HOME`) was created under that root, and
+  then that none is left there. Tried: with sandbox-HOME removal disabled, and with a trampoline that ignores `TMPDIR` (mutant T19), all
+  five fail. The mutation check stays serial: under xdist `-x` does not stop early.
+* **Sandbox tests never skip silently in CI.** `SENTINEL_SANDBOX_REQUIRED=1` (set by the workflow) turns the Landlock / network-namespace
+  skips (`needs_sandbox`, `needs_landlock`, `needs_landlock_net`, `needs_netns`, via `sandbox_skipif` in tests/no_skip_plugin.py) into
+  runs that FAIL where the sandbox is missing. Root-only tests (`needs_root`) still skip on a non-root runner.
+* **Mutation speed.** EVERY mutant whose target is under `scripts/` or `tests/` first meets the top-level `tests/test_*.py` (the gate's own
+  tests, seconds), because those mutants' killers sit at the end of the collection order; a mutant that survives that quick pass still has
+  to survive the whole suite to count as a survivor. Other mutants run the whole suite directly, as before.
+* **CI** (`.github/workflows/ci.yml`, not run here: validated with actionlint 1.7.7 and a YAML load; tracked although `.gitignore` ignores
+  dotfiles, via `!.github/`, tested): one job, tier from the trigger, concurrency group per trigger and ref (a newer run cancels the
+  superseded one), timeouts 25 / 50 / 240 min, pip / npm / MiniLM / Playwright / `.realdeps` caches (the `.realdeps` key includes the exact
+  Python version and `scripts/realdeps_setup.sh`; the script pins `mcp-server-time` and rebuilds its venv when the interpreter does not run
+  or the version is not the pin; that server's own dependencies are not pinned), `HF_HUB_OFFLINE=1` after the one model fetch, CPU torch,
+  Chromium via `npx playwright install` with `CHROMIUM_PATH` from Playwright, the events file and junit (`GATE_JUNIT_DIR`: backend stages
+  write there; the reality junit is copied there after the proof, which always reads a fresh temp dir) uploaded as an artifact. Nightly and
+  weekly set `RUN_DOCKER_TESTS=1` and `RUN_JOURNEY_TESTS=1` on the runner's own Docker (no proxy variables). Weekly sets
+  `RUN_CLAUDE_TESTS=1` only when the `ANTHROPIC_API_KEY` secret exists and passes it as `SENTINEL_CLAUDE_API_KEY`: verify.sh moves it out
+  of the environment before the first stage and hands it, as `ANTHROPIC_API_KEY`, to the Claude stage alone (never in argv; tested).
+  Unverified until it runs on GitHub: the Landlock + network-namespace tests on `ubuntu-24.04` (the workflow lifts the AppArmor
+  restriction on unprivileged user namespaces; a failure there now fails the job), the Docker stage's build time without cached layers,
+  and the Claude stage's sign-in by key.

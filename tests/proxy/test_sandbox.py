@@ -21,6 +21,7 @@ import pytest
 
 from sentinel_proxy import sandbox, sandbox_exec
 from sentinel_proxy.sandbox import SandboxSpecError, sandbox_params, validate_spec
+from tests.no_skip_plugin import sandbox_skipif
 
 ROOT = str(Path(__file__).resolve().parents[2])
 PROBE = sandbox.probe()
@@ -31,10 +32,10 @@ TMPROOT = tempfile.mkdtemp(prefix="sbx-test-homes-")
 atexit.register(shutil.rmtree, TMPROOT, ignore_errors=True)
 IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
-needs_landlock = pytest.mark.skipif(ABI < 1, reason=f"Landlock is unavailable on this host (probe landlock_abi={ABI}): "
+needs_landlock = sandbox_skipif(ABI < 1, reason=f"Landlock is unavailable on this host (probe landlock_abi={ABI}): "
                                                     "filesystem enforcement cannot be tested")
-needs_landlock_net = pytest.mark.skipif(ABI < 4, reason=f"Landlock TCP rules need ABI >= 4 (probe landlock_abi={ABI})")
-needs_netns = pytest.mark.skipif(not NS, reason="cannot create a network namespace on this host (probe unshare_net=False)")
+needs_landlock_net = sandbox_skipif(ABI < 4, reason=f"Landlock TCP rules need ABI >= 4 (probe landlock_abi={ABI})")
+needs_netns = sandbox_skipif(not NS, reason="cannot create a network namespace on this host (probe unshare_net=False)")
 needs_root = pytest.mark.skipif(not IS_ROOT, reason="needs root to drop to another user")
 
 PRE = ("import os, sys, json, errno, socket\nR = {}\n"

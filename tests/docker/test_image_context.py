@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import pytest
+pytestmark = pytest.mark.slow  # GATE_TIER=pr: a slow, process-based file (scripts/gate_lib.sh, docs/TESTING_REALITY.md "CI tiers")
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = (ROOT / "Dockerfile").read_text()

@@ -14,6 +14,7 @@ import main
 import proposal_monitor as pm
 from fakes import FakeClient, call, decision, of, run_session, turn
 from test_ws_session import install_llm, single_terminal
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 PARTNER_EMAIL = call("send_email", {"to": "dana.whitlock@acme-corp.example", "subject": "Q3 pricing",
                                     "body": "Attached: Q3 tier pricing sheet pricing_q3.csv for Acme procurement"}, "e1")

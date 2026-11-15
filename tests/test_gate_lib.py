@@ -181,3 +181,23 @@ def test_docker_test_sh_forwards_the_same_proxy_variable_the_preflight_checks():
 def test_missing_frontend_or_browser_goes_through_run_so_it_is_reported_as_a_failed_stage():
     v = (LIB.parent / "verify.sh").read_text()
     assert "fail=1" not in v.replace("fail=0", "")
+
+
+# --- the Claude API key reaches only the Claude stage (DECISIONS.md D30) ---
+
+def test_the_claude_key_reaches_only_the_command_that_asks_for_it(tmp_path):
+    r = sh("gate_take_claude_key; echo \"other=$(printenv SENTINEL_CLAUDE_API_KEY ANTHROPIC_API_KEY | wc -l)\";"
+           " echo \"stage=$(gate_with_claude_key printenv ANTHROPIC_API_KEY)\"", tmp_path, SENTINEL_CLAUDE_API_KEY="k-123")
+    assert "other=0" in r.stdout and "stage=k-123" in r.stdout, r.stdout + r.stderr
+
+
+def test_without_a_claude_key_the_stage_keeps_the_callers_own_environment(tmp_path):
+    r = sh("gate_take_claude_key; echo \"stage=$(gate_with_claude_key printenv ANTHROPIC_API_KEY)\"", tmp_path, ANTHROPIC_API_KEY="own")
+    assert "stage=own" in r.stdout
+
+
+def test_verify_sh_takes_the_key_before_any_stage_and_gives_it_only_to_the_claude_stage():
+    v = (LIB.parent / "verify.sh").read_text()
+    assert v.index("gate_take_claude_key") < v.index('run "preflight')
+    uses = [l for l in v.splitlines() if "gate_with_claude_key" in l]
+    assert len(uses) == 1 and 'run "claude code:' in uses[0]

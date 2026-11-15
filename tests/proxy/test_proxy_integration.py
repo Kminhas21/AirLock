@@ -6,6 +6,7 @@ import sys
 import pytest
 
 from conftest import DOWNSTREAM, agent, free_port, make_config, run_proxy_exit
+pytestmark = pytest.mark.slow  # GATE_TIER=pr: a slow, process-based file (scripts/gate_lib.sh, docs/TESTING_REALITY.md "CI tiers")
 
 
 

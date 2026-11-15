@@ -15,6 +15,7 @@ import pytest
 
 import live_drift
 import proposal_monitor as pm
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from tests.contract.test_events_contract import CONTRACT, keyset_problems  # noqa: E402

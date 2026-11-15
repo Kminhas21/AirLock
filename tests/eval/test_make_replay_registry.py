@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 REPO = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location("make_replay_registry", REPO / "scripts" / "make_replay_registry.py")

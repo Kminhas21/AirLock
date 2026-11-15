@@ -13,6 +13,7 @@ from eval import run_eval as R
 from eval.detectors import MessageDriftCorrected, ActionSimilarity, run_trace
 from eval.embed import StubEmbedder
 from eval.metrics import calibrate_threshold
+pytestmark = pytest.mark.slow  # GATE_TIER=pr: a slow, process-based file (scripts/gate_lib.sh, docs/TESTING_REALITY.md "CI tiers")
 
 REPO = Path(__file__).resolve().parents[2]
 EXAMPLE = REPO / "eval" / "traces" / "example.json"

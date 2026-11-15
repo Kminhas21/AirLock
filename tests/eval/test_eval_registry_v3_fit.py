@@ -12,6 +12,7 @@ from eval import detectors_registry as DR
 from eval import detectors_registry_v3 as V3
 from eval.embed import StubEmbedder
 from eval.run_eval import split_for
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 
 def make_inputs(tmp_path):

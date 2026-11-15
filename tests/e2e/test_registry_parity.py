@@ -21,6 +21,7 @@ import live_drift
 import main
 import proposal_monitor as pm
 from fakes import FakeClient, call, decision, of, run_session, start_msg, turn, validate_event
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / "tests" / "browser"))

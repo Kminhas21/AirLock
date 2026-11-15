@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import websockets
+pytestmark = pytest.mark.slow  # GATE_TIER=pr: a slow, process-based file (scripts/gate_lib.sh, docs/TESTING_REALITY.md "CI tiers")
 
 ROOT = Path(__file__).resolve().parents[2]
 _spec = importlib.util.spec_from_file_location("proxy_helpers", ROOT / "tests/proxy/conftest.py")
@@ -94,22 +95,25 @@ def config(tmp_path, port, sid, **server_over):
     return path, allowed
 
 
-def agent(path):
-    return H.agent(path, {"SENTINEL_WS_TOKEN": TOKEN, "E2E_HOST_SECRET": SECRET})
+def agent(path, **env):
+    return H.agent(path, {"SENTINEL_WS_TOKEN": TOKEN, "E2E_HOST_SECRET": SECRET, **env})
 
 
 def out(res):
     return json.loads("".join(c.text for c in res.content))
 
 
-def sbx_dirs():
-    return {p for p in Path(tempfile.gettempdir()).glob("sentinel-sbx-*")}
+def sbx_dirs(root=None):
+    return {p for p in Path(root or tempfile.gettempdir()).glob("sentinel-sbx-*")}
 
 
 async def test_boundary_secrets_and_enforcement_end_to_end(tmp_path, backend):
     port = backend()
-    path, allowed = config(tmp_path, port, "bnd-1")
-    before = sbx_dirs()
+    # this test's own TMPDIR for the proxy (it removes sandbox HOMEs only inside its temp dir) and the server's trampoline (it creates them
+    # there): the leak check below sees only this test's sandboxes, not those of proxies other pytest-xdist workers run at the same time
+    root = tmp_path / "tmproot"
+    root.mkdir()
+    path, allowed = config(tmp_path, port, "bnd-1", env={"TMPDIR": str(root)})
     seen_frames = []
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
@@ -118,7 +122,7 @@ async def test_boundary_secrets_and_enforcement_end_to_end(tmp_path, backend):
     async with ui(port) as u:
         snap_task = asyncio.create_task(next_event(u, "inbox_snapshot"))
         await snap_task
-        async with agent(path) as a:
+        async with agent(path, TMPDIR=str(root)) as a:
             sess = await next_event(u, "inbox_session", session_id="bnd-1", state="open")
             # what the operator sees about the boundary: names and layers, never values
             snap2 = None
@@ -136,6 +140,7 @@ async def test_boundary_secrets_and_enforcement_end_to_end(tmp_path, backend):
             assert p["secrets_used"] == ["API_TOKEN"] and p["tool"] == "whoami_env"
             await decide(u, p, "approve")
             r = out(await asyncio.wait_for(t, 60))
+            assert os.path.dirname(r["home"]) == str(root)                          # the worker's HOME is under this test's TMPDIR (leak check below)
             assert r["secret"] == SECRET and "API_TOKEN" in r["env_names"]          # inside the approved call, the worker had it...
             assert "E2E_HOST_SECRET" not in r["env_names"], "the host variable the secret came from is not forwarded"
             assert set(r["env_names"]) - {"LC_CTYPE"} == {"API_TOKEN", "HOME", "LANG", "PATH", "TMPDIR"}, r["env_names"]   # nothing else of the proxy's environment
@@ -157,7 +162,7 @@ async def test_boundary_secrets_and_enforcement_end_to_end(tmp_path, backend):
     # the credential never travelled to the hub, and no private sandbox directory is left behind
     assert SECRET not in json.dumps(seen_frames)
     time.sleep(0.5)
-    assert sbx_dirs() - before == set(), "private sandbox HOME directories were left behind"
+    assert sbx_dirs(root) == set(), "private sandbox HOME directories were left behind"
 
 
 async def test_a_server_that_cannot_run_inside_its_sandbox_is_never_run_unsandboxed(tmp_path, backend):

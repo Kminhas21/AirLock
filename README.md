@@ -70,4 +70,4 @@ Identity, tenancy and escalation (operators, agents, roles, tenants, webhooks; D
 
 Full walkthrough of everything built, with workflows: `docs/COURSE.md`.
 
-Verify everything: `pip install -r requirements-dev.txt && scripts/verify.sh` (exit 0 = green). See `DECISIONS.md`.
+Verify: `pip install -r requirements-dev.txt && GATE_TIER=pr scripts/verify.sh` (exit 0 = green; the pre-commit gate). `GATE_TIER=push` is the quick check, the default `full` (nightly) and `weekly` (research detectors) run in CI: docs/TESTING_REALITY.md "CI tiers", `DECISIONS.md` D30.

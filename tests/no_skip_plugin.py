@@ -48,3 +48,9 @@ def pytest_make_collect_report(collector):
 
 def pytest_report_header(config):
     return "SENTINEL_NO_SKIP=1: skips and xfails are failures" if _on() else None
+
+
+def sandbox_skipif(missing: bool, reason: str):
+    """`skipif(missing)` for tests that need the host's sandbox (Landlock, network namespaces), except with SENTINEL_SANDBOX_REQUIRED=1
+    (CI): then the test runs and FAILS where the sandbox is missing, instead of skipping silently (DECISIONS.md D30)."""
+    return pytest.mark.skipif(missing and os.environ.get("SENTINEL_SANDBOX_REQUIRED") != "1", reason=reason)

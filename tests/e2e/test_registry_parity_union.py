@@ -19,6 +19,7 @@ from fakes import of
 
 from test_registry_parity import (TRIGGER, assert_frame_order, fake_models, live_ordinals, merged_trace,  # noqa: F401
                                   run_live)
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 REPO = Path(__file__).resolve().parents[2]
 from eval.detectors import run_trace  # noqa: E402

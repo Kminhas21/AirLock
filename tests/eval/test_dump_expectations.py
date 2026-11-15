@@ -142,6 +142,7 @@ def test_frozen_option_supports_d6_and_d7():
         assert build_detector(did, None, "stub", frozen=FROZEN).id == did
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 def test_frozen_cli_writes_expectations_for_d7(tmp_path):
     import json
     from eval.dump_expectations import main
@@ -174,6 +175,7 @@ def minilm(real_embedder):
     return real_embedder
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 @pytest.mark.parametrize("did", ["D8", "D9"])
 def test_registry_detectors_are_accepted_and_use_the_registry(did, tmp_path, minilm):
     reg = tmp_path / "reg.json"
@@ -185,6 +187,7 @@ def test_registry_detectors_are_accepted_and_use_the_registry(did, tmp_path, min
     assert de.expectations(did, [relay_trace()])["rl-1"]["alert_steps"] == []
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 @pytest.mark.parametrize("did", ["D8", "D9"])
 def test_registry_expectations_equal_the_frozen_detector_run_directly(did, tmp_path, minilm):
     from eval.detectors import run_trace
@@ -196,6 +199,7 @@ def test_registry_expectations_equal_the_frozen_detector_run_directly(did, tmp_p
     assert de.expectations(did, [relay_trace()], registry=str(reg))["rl-1"]["alert_steps"] == direct == [2]
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 def test_cli_registry_option_writes_expectations(tmp_path, minilm):
     f, reg, out = tmp_path / "t.json", tmp_path / "reg.json", tmp_path / "o.json"
     f.write_text(json.dumps([relay_trace()]))
@@ -204,6 +208,7 @@ def test_cli_registry_option_writes_expectations(tmp_path, minilm):
     assert json.loads(out.read_text())["rl-1"]["alert_steps"] == [2]
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 def test_cli_registry_option_rejects_bad_input(tmp_path):
     f, out = tmp_path / "t.json", tmp_path / "o.json"
     f.write_text(json.dumps([relay_trace()]))
@@ -220,6 +225,7 @@ def test_cli_registry_option_rejects_bad_input(tmp_path):
     assert not out.exists()
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 def test_cli_registry_detector_with_a_stub_embedder_is_refused(tmp_path):
     f = tmp_path / "t.json"
     f.write_text(json.dumps([relay_trace()]))
@@ -231,6 +237,7 @@ def test_cli_registry_detector_with_a_stub_embedder_is_refused(tmp_path):
 FROZEN_V3 = "eval/results_registry_v3/frozen_registry_models_v3.json"
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 @pytest.mark.parametrize("did", ["D9b", "D9c"])
 def test_frozen_v3_expectations_equal_the_frozen_v3_detector_run_directly(did, tmp_path, minilm):
     from eval.detectors import run_trace
@@ -244,6 +251,7 @@ def test_frozen_v3_expectations_equal_the_frozen_v3_detector_run_directly(did, t
     assert got["alert_ordinals"] == [{2: 1}[i] for i in direct]
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 def test_cli_frozen_v3_writes_expectations_and_differs_from_v2_file(tmp_path, minilm):
     f, reg, out = tmp_path / "t.json", tmp_path / "reg.json", tmp_path / "o.json"
     f.write_text(json.dumps([relay_trace()]))
@@ -253,6 +261,7 @@ def test_cli_frozen_v3_writes_expectations_and_differs_from_v2_file(tmp_path, mi
     assert json.loads(out.read_text())["rl-1"]["detector"] == "D9b"
 
 
+@pytest.mark.research  # D7-D9c only: GATE_TIER=weekly (DECISIONS.md D30)
 def test_v3_detectors_need_frozen_v3_and_refuse_other_combinations(tmp_path):
     f, out = tmp_path / "t.json", tmp_path / "o.json"
     f.write_text(json.dumps([relay_trace()]))

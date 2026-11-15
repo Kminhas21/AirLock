@@ -777,7 +777,9 @@ class TestJwtKeys:
         assert s.authenticate("operator", mint(RSA1)) is not None
 
     @pytest.mark.parametrize("content", [b"", b"garbage", b"-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n", b"\x00\xff" * 100,
-                                         _pem_priv(RSA1), _pem_pub(RSA_SMALL), b"x" * (ID.MAX_KEY_FILE + 10)])
+                                         _pem_priv(RSA1), _pem_pub(RSA_SMALL), b"x" * (ID.MAX_KEY_FILE + 10)],
+                             # explicit ids: the keys are generated at import, and pytest-xdist needs every worker to collect the same ids
+                             ids=["empty", "garbage", "bad_pem", "binary", "private_key", "small_rsa", "oversized"])
     def test_corrupt_or_unsuitable_key_file(self, tmp_path, content):
         kf = tmp_path / "bad.pem"
         kf.write_bytes(content)

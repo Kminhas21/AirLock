@@ -20,12 +20,14 @@ from sentinel_proxy.config import ConfigError, parse_config
 
 from conftest import ROOT, agent, make_config
 from test_proxy_integration import _raw_agent
+from tests.no_skip_plugin import sandbox_skipif
+pytestmark = pytest.mark.slow  # GATE_TIER=pr: a slow, process-based file (scripts/gate_lib.sh, docs/TESTING_REALITY.md "CI tiers")
 
 PROBE_SERVER = str(Path(__file__).with_name("fake_downstream_probe.py"))
 HERE = str(Path(__file__).resolve().parent)
 _P = sandbox.probe()
 CAN_SANDBOX = _P["landlock_abi"] >= 1 and (_P["unshare_net"] or _P["landlock_abi"] >= 4)
-needs_sandbox = pytest.mark.skipif(not CAN_SANDBOX, reason=f"host cannot enforce the sandbox (probe={_P})")
+needs_sandbox = sandbox_skipif(not CAN_SANDBOX, reason=f"host cannot enforce the sandbox (probe={_P})")
 SECRET = "TOPSECRET-value-8c1f"
 
 
@@ -33,8 +35,24 @@ def text(res):
     return "".join(c.text for c in res.content)
 
 
-def sbx_dirs():
-    return set(glob.glob(os.path.join(tempfile.gettempdir(), "sentinel-sbx-*")))
+def sbx_dirs(root=None):
+    return set(glob.glob(os.path.join(root or tempfile.gettempdir(), "sentinel-sbx-*")))
+
+
+def made_in(root, home):
+    """The sandbox HOME a worker reported was created under `root`: proves a leak check of `root` is not vacuous (a HOME made in /tmp
+    instead would be missed by it)."""
+    return isinstance(home, str) and os.path.dirname(home) == root and os.path.basename(home).startswith("sentinel-sbx-")
+
+
+@pytest.fixture
+def sbx_root(tmp_path):
+    """This test's own temp root, given as TMPDIR to its proxy (which removes sandbox HOMEs only inside its own temp dir) and to its server's
+    sandbox trampoline (which creates them there): a leak check then sees only this test's sandboxes, not those of the proxies other
+    pytest-xdist workers run at the same time."""
+    d = tmp_path / "tmproot"
+    d.mkdir()
+    return str(d)
 
 
 def pids(pidfile):
@@ -63,13 +81,15 @@ async def wait_until(fn, timeout=15):
     return True
 
 
-def server_cfg(tmp_path, *, network="none", **over):
+def server_cfg(tmp_path, *, network="none", tmp_root=None, **over):
     allowed = tmp_path / "allowed"
     allowed.mkdir(exist_ok=True)
     pidfile = allowed / "pids.txt"
     sc = {"command": sys.executable, "args": [PROBE_SERVER], "env": {"FAKE_PID_FILE": str(pidfile)},
           "sandbox": {"read": [HERE], "write": [str(allowed)], "network": network, "env_allow": ["FAKE_PID_FILE"],
                       "require": True}}
+    if tmp_root:     # the trampoline creates the server's private HOME under the TMPDIR it is given (see the sbx_root fixture)
+        sc["env"]["TMPDIR"] = tmp_root
     sc.update(over)
     return sc, allowed, pidfile
 
@@ -131,17 +151,17 @@ async def test_unsandboxed_server_boundary_and_empty_secrets_used(tmp_path, back
 
 
 @needs_sandbox
-async def test_session_sandbox_enforced_for_real(tmp_path, backend):
-    sc, allowed, pidfile = server_cfg(tmp_path)
+async def test_session_sandbox_enforced_for_real(tmp_path, backend, sbx_root):
+    sc, allowed, pidfile = server_cfg(tmp_path, tmp_root=sbx_root)
     cfg, _ = make_config(tmp_path, backend.url, servers={"p": sc})
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(5)
     port = listener.getsockname()[1]
-    before = sbx_dirs()
     try:
-        async with agent(cfg, {"CANARY_PROXY_ENV": "canary-value"}) as s:
+        async with agent(cfg, {"CANARY_PROXY_ENV": "canary-value", "TMPDIR": sbx_root}) as s:
             who = json.loads(text(await s.call_tool("whoami_env", {})))
+            assert len(sbx_dirs(sbx_root)) == 1 and made_in(sbx_root, who["home"]), "the server's private HOME is not under this test's TMPDIR"
             outside = json.loads(text(await s.call_tool("try_write", {"path": str(tmp_path / "outside.txt")})))
             inside = json.loads(text(await s.call_tool("try_write", {"path": str(allowed / "in.txt")})))
             net = json.loads(text(await s.call_tool("try_net", {"port": port})))
@@ -155,7 +175,7 @@ async def test_session_sandbox_enforced_for_real(tmp_path, backend):
     assert b["lifecycle"] == "session" and b["network"] == "none" and b["missing"] == [] and b["secrets"] == []
     assert "landlock_fs" in b["layers"] and "env" in b["layers"] and ("netns" in b["layers"] or "landlock_net" in b["layers"])
     assert await wait_until(lambda: not any(alive(p) for p in pids(pidfile)))
-    assert sbx_dirs() <= before, "private HOME of the session server was not removed"
+    assert sbx_dirs(sbx_root) == set(), "private HOME of the session server was not removed"
 
 
 # ---------------------------------------------------------------------------- per-call workers and secrets
@@ -169,13 +189,12 @@ def secret_server(tmp_path, **over):
 
 
 @needs_sandbox
-async def test_secret_only_for_listed_tool_only_during_call_and_never_leaks(tmp_path, backend):
-    sc, _, pidfile = secret_server(tmp_path)
+async def test_secret_only_for_listed_tool_only_during_call_and_never_leaks(tmp_path, backend, sbx_root):
+    sc, _, pidfile = secret_server(tmp_path, tmp_root=sbx_root)
     cfg, _ = make_config(tmp_path, backend.url, servers={"p": sc})
     errfile = tmp_path / "proxy.stderr"
-    before = sbx_dirs()
     with open(errfile, "w") as el:
-        async with agent(cfg, {"HOST_API_KEY": SECRET, "CANARY_PROXY_ENV": "c"}, errlog=el) as s:
+        async with agent(cfg, {"HOST_API_KEY": SECRET, "CANARY_PROXY_ENV": "c", "TMPDIR": sbx_root}, errlog=el) as s:
             assert sorted(t.name for t in (await s.list_tools()).tools) == sorted(
                 ["whoami_env", "whoami_env2", "try_write", "try_net", "sleep"])
             assert len(pids(pidfile)) == 1 and not await wait_until(lambda: alive(pids(pidfile)[0]), 0.5)  # startup worker closed
@@ -183,6 +202,7 @@ async def test_secret_only_for_listed_tool_only_during_call_and_never_leaks(tmp_
             second = json.loads(text(await s.call_tool("whoami_env2", {"secret_var": "API_KEY"})))
             third = json.loads(text(await s.call_tool("whoami_env", {})))
             await backend.wait_for("proxy_result", n=3)
+    assert all(made_in(sbx_root, r["home"]) for r in (first, second, third)), "worker HOMEs not under this test's TMPDIR"
     assert first["secret"] == SECRET and "API_KEY" in first["env_names"]
     assert second["secret"] is None and "API_KEY" not in second["env_names"]
     assert "CANARY_PROXY_ENV" not in first["env_names"] and "HOST_API_KEY" not in first["env_names"]
@@ -195,7 +215,7 @@ async def test_secret_only_for_listed_tool_only_during_call_and_never_leaks(tmp_
         ("whoami_env", ["API_KEY"]), ("whoami_env2", []), ("whoami_env", ["API_KEY"])]
     assert len(pids(pidfile)) == 4  # startup worker + one fresh worker per approved call
     assert await wait_until(lambda: not any(alive(p) for p in pids(pidfile))), "a worker outlived its call"
-    assert sbx_dirs() <= before, "worker HOME dirs left behind"
+    assert sbx_dirs(sbx_root) == set(), "worker HOME dirs left behind"
     # names only in frames; the value never reaches the hub or our stderr
     assert SECRET not in json.dumps(backend.frames)
     results = backend.of("proxy_result")
@@ -221,18 +241,19 @@ async def test_missing_host_secret_denies_and_starts_no_worker(tmp_path, backend
 
 
 @needs_sandbox
-async def test_call_timeout_kills_worker(tmp_path, backend):
-    sc, _, pidfile = secret_server(tmp_path, call_timeout_s=1)
+async def test_call_timeout_kills_worker(tmp_path, backend, sbx_root):
+    sc, _, pidfile = secret_server(tmp_path, call_timeout_s=1, tmp_root=sbx_root)
     cfg, _ = make_config(tmp_path, backend.url, servers={"p": sc})
-    before = sbx_dirs()
-    async with agent(cfg, {"HOST_API_KEY": SECRET}) as s:
+    async with agent(cfg, {"HOST_API_KEY": SECRET, "TMPDIR": sbx_root}) as s:
         t0 = time.monotonic()
-        res = await asyncio.wait_for(s.call_tool("sleep", {"seconds": 60}), 30)
+        call = asyncio.create_task(s.call_tool("sleep", {"seconds": 60}))
+        assert await wait_until(lambda: sbx_dirs(sbx_root)), "the hung worker's HOME was not created under this test's TMPDIR"
+        res = await asyncio.wait_for(call, 30)
         took = time.monotonic() - t0
     assert res.is_error and "worker timed out" in text(res) and took < 20
     assert backend.of("proxy_result")[0]["status"] == "error"
     assert await wait_until(lambda: not any(alive(p) for p in pids(pidfile)))
-    assert sbx_dirs() <= before
+    assert sbx_dirs(sbx_root) == set()
 
 
 @needs_sandbox
@@ -265,14 +286,14 @@ async def test_denied_call_starts_no_worker(tmp_path, backend):
 
 
 @needs_sandbox
-async def test_no_sandbox_home_dirs_left_after_many_calls(tmp_path, backend):
-    sc, _, _ = secret_server(tmp_path)
+async def test_no_sandbox_home_dirs_left_after_many_calls(tmp_path, backend, sbx_root):
+    sc, _, _ = secret_server(tmp_path, tmp_root=sbx_root)
     cfg, _ = make_config(tmp_path, backend.url, servers={"p": sc})
-    before = sbx_dirs()
-    async with agent(cfg, {"HOST_API_KEY": SECRET}) as s:
+    async with agent(cfg, {"HOST_API_KEY": SECRET, "TMPDIR": sbx_root}) as s:
         for _ in range(4):
-            assert not (await s.call_tool("whoami_env2", {})).is_error
-    assert sbx_dirs() <= before
+            res = await s.call_tool("whoami_env2", {})
+            assert not res.is_error and made_in(sbx_root, json.loads(text(res))["home"])
+    assert sbx_dirs(sbx_root) == set()
 
 
 # ---------------------------------------------------------------------------- fail closed

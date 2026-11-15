@@ -14,6 +14,7 @@ from eval import detectors_v2 as D2
 from eval.detectors import Detector, run_trace
 from eval.embed import StubEmbedder
 from server.registry import Registry
+pytestmark = pytest.mark.research  # GATE_TIER=weekly: an opt-in research detector, not the shipped default (DECISIONS.md D30)
 
 
 @pytest.fixture(scope="module")
