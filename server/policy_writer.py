@@ -137,6 +137,8 @@ def build_rule(verdict, scope, server, tool, args, *, note="") -> dict:
         when["arg_keys"] = sorted(args)
         right = "list" if tool in P.LIST_TOOLS else "read"        # the directory-listing tools of the starter get `list`
         confine = {k: right for k in sorted(args) if (k in P.PATH_SLOTS or k in PATH_KEYS) and isinstance(args[k], str)}
+        if any(isinstance(k, str) and P.is_path_like(k) and k not in confine for k in args):
+            raise ValueError(CANNOT_BUILD)     # `confine: {}` + a path-like argument would run the call UNCONFINED in the session process
     rule = {"verdict": verdict, "when": when}
     rule_id = f"ui-{verdict}-{hashlib.sha256(_identity(rule).encode('ascii')).hexdigest()[:8]}"
     out = {"id": rule_id, "verdict": verdict}

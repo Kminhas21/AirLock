@@ -331,6 +331,8 @@ class Proxy:
         try:
             res = await d.session.call_tool(orig, args)
         except MCPError as e:
+            if _is_closed(e):                                    # the SDK reports a dead pipe as an MCP error: the downstream is gone
+                d.dead = True
             await self.link.send_result(call_id, "error", summarize(e.error.message))
             return _error(f"Downstream server {server!r} returned an error: {summarize(e.error.message, 500)}")
         except Exception as e:  # process died / pipe closed
@@ -374,14 +376,18 @@ class Proxy:
                     timed_out = True
         except TimeoutError:
             timed_out = True
-        except MCPError as e:
-            msg = scrub(summarize(e.error.message, 500), vals)
-            await self.link.send_result(call_id, "error", msg[:300])
-            return _error(f"Downstream server {sc.name!r} returned an error: {msg}")
-        except Exception as e:
-            log(f"worker for {sc.name!r} failed: {type(e).__name__}")
-            await self.link.send_result(call_id, "error", f"worker failed: {type(e).__name__}")
-            return _error(f"Downstream server {sc.name!r} failed: {type(e).__name__}")
+        except Exception as exc:
+            e = _unwrap(exc)                  # the worker's JSON-RPC error arrives wrapped in the transport's task-group ExceptionGroup
+            if isinstance(e, TimeoutError):
+                timed_out = True
+            elif isinstance(e, MCPError):
+                msg = scrub(summarize(e.error.message, 500), vals)
+                await self.link.send_result(call_id, "error", msg[:300])
+                return _error(f"Downstream server {sc.name!r} returned an error: {msg}")
+            else:
+                log(f"worker for {sc.name!r} failed: {type(e).__name__}")
+                await self.link.send_result(call_id, "error", f"worker failed: {type(e).__name__}")
+                return _error(f"Downstream server {sc.name!r} failed: {type(e).__name__}")
         if unconfined:                       # the worker was killed when the session closed; call_tool was never sent
             log(f"worker for {sc.name!r}: its status does not prove the confinement; call refused")
             await self.link.send_result(call_id, "error", "confine_failed")
@@ -391,6 +397,18 @@ class Proxy:
             return _error(f"Downstream server {sc.name!r}: worker timed out")
         await self.link.send_result(call_id, "error" if res.is_error else "ok", scrub(_summary(res), vals))
         return res
+
+
+def _unwrap(exc: BaseException) -> BaseException:
+    """The one real exception inside (nested) ExceptionGroups, or the group itself when there is more than one."""
+    while isinstance(exc, BaseExceptionGroup) and len(exc.exceptions) == 1:
+        exc = exc.exceptions[0]
+    return exc
+
+
+def _is_closed(e: MCPError) -> bool:
+    """The SDK's error for a downstream whose pipe closed (the process died); an ordinary tool error is not this."""
+    return e.error.message.strip().lower() == "connection closed"
 
 
 async def _precheck(args: dict[str, Any], sc: ServerConfig, server_ok: bool) -> dict[str, Any]:

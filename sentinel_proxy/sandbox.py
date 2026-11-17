@@ -144,7 +144,7 @@ def _grants(v: Any) -> list:
         _paths("grants base", [base])
         if not isinstance(value, str) or not value or len(value) > MAX_PATH_LEN or "\x00" in value:
             raise SandboxSpecError("grants: a value must be a non-empty string without NUL")
-        if right not in GRANT_RIGHTS:
+        if not isinstance(right, str) or right not in GRANT_RIGHTS:
             raise SandboxSpecError(f"grants: right must be one of {', '.join(GRANT_RIGHTS)}")
         out.append([base, value, right])
     return out
@@ -355,6 +355,18 @@ def fs_mask(abi: int) -> int:
     return m
 
 
+def rule_access(rights: int, abi: int, *, is_dir: bool) -> int:
+    """The access bits ONE Landlock rule gets: `rights` limited to what this ABI handles (a bit the kernel does not know is dropped, never
+    passed on) and, for a non-directory, to the rights that make sense for a file. 0 = no rule is added: a right is only ever narrowed here,
+    never widened (a directory-only right on a file gives nothing). Pure: `restrict_landlock` calls it, the tests pin it for every ABI.
+    It does NOT know `handle_fs`: when a ruleset handles no filesystem access (`handle_fs=False`), the guard against adding rules stays at the
+    call sites in `restrict_landlock`; do not move it in here."""
+    allowed = rights & fs_mask(abi)
+    if not is_dir:
+        allowed &= _FILE_RIGHTS
+    return allowed
+
+
 def apply_rlimits(rl: dict) -> None:
     import resource
     table = {"cpu_s": (resource.RLIMIT_CPU, 1), "mem_mb": (resource.RLIMIT_AS, 1 << 20), "nofile": (resource.RLIMIT_NOFILE, 1),
@@ -454,9 +466,7 @@ def restrict_landlock(abi: int, rules: list, *, deny_tcp: bool, handle_fs: bool 
         raise OSError(ctypes.get_errno(), "landlock_create_ruleset failed")
     try:
         def add(fd: int, rights: int, what: str) -> None:
-            allowed = rights & handled_fs
-            if not stat.S_ISDIR(os.fstat(fd).st_mode):
-                allowed &= _FILE_RIGHTS
+            allowed = rule_access(rights, abi, is_dir=stat.S_ISDIR(os.fstat(fd).st_mode))
             if not allowed:
                 return
             rule = ctypes.create_string_buffer(struct.pack("<Qi", allowed, fd), 12)

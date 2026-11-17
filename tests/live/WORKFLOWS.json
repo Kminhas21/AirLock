@@ -58,6 +58,7 @@
                     "tests/live/test_kernel_confine_live.py::test_desktop_commander_plain_read_is_auto_allowed_and_a_forced_link_read_is_denied_by_the_kernel",
                     "tests/live/test_kernel_confine_live.py::test_K6_PINNED_KNOWN_GAP_a_hard_link_to_a_secret_is_readable",
                     "tests/live/test_kernel_confine_live.py::test_prediction_code_is_gone",
+                    "tests/live/test_write_matrix_live.py",
                     "tests/live/test_starter_b3b4_live.py"]},
     "L1": {"title": "auditor: eventlog_cli verify / show / export",
            "live": ["tests/live/test_eventlog_live.py::test_L1_verify_show_and_export_agree_with_what_the_human_did"],

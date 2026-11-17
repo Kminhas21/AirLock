@@ -59,6 +59,12 @@ LIST_TOOLS = frozenset({"list_directory", "list_directory_with_sizes", "director
 _PATH_LIKE = frozenset({"file_path", "filepath", "filename", "dir", "src", "dest", "uri", "url", "name"})   # custom names that look like paths
 _PATH_LIKE_END = ("path", "paths", "file", "dir")
 
+
+def is_path_like(key: str) -> bool:
+    """An argument NAME that looks like a path (custom names such as file_path), whether or not it is a PATH_SLOT."""
+    k = key.lower()
+    return k in _PATH_LIKE or k.endswith(_PATH_LIKE_END)
+
 _ID_RE = re.compile(r"[A-Za-z0-9._-]{1,60}")
 _TOP_KEYS = {"version", "default", "rules"}
 _RULE_KEYS = {"id", "verdict", "note", "when", "confine"}
@@ -789,7 +795,7 @@ class Policy:
                 if out:
                     warns.append(f"rule {r.id}: a call with {', '.join(out)} is asked: add it to \"confine\"")
                 if not r.confine:
-                    like = sorted(k for k in r.arg_keys - PATH_SLOTS if k.lower() in _PATH_LIKE or k.lower().endswith(_PATH_LIKE_END))
+                    like = sorted(k for k in r.arg_keys - PATH_SLOTS if is_path_like(k))
                     if like:
                         warns.append(f"rule {r.id}: \"confine\": {{}} says no argument is a path, but {', '.join(like)} looks like one: the "
                                      f"proxy would run the call UNCONFINED. Give each a \"confine\" entry (\"read\" or \"list\"), or keep {{}} "

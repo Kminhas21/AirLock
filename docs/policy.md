@@ -40,7 +40,8 @@ path-slot argument. A custom argument name (`file_path`) is a path only if the r
 knows the tool) when `confine: {}` is paired with an `arg_keys` entry that looks like a path (`file_path`, `filepath`, `filename`, `dir`, `src`, `dest`, `uri`, `url`,
 `name`, or anything ending in `path`, `paths`, `file`, `dir`): such a call would otherwise run unconfined in the session process. A write cannot be confined (only `read` and
 `list` exist): auto-allow writes with `confine` and they fail with EACCES; keep writes on `ask`. Standing rules made from a card ("Always allow")
-get `arg_keys` = the call's argument names and `confine` = `read` on its path arguments.
+get `arg_keys` = the call's argument names and `confine` = `read` on its path arguments. An "Always allow" for a call with a path-like argument
+that is not a confine slot (Desktop Commander's `edit_block` `file_path`) is refused (`cannot_build`; the card stays a normal card): `confine: {}` would run it unconfined.
 
 ## How a decision is made
 1. `deny` beats `ask` beats `allow`; none matching => `default` (`ask` unless you set it). The rule shown is the most specific one of the winning class.

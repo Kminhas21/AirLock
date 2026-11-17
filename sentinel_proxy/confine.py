@@ -92,7 +92,7 @@ def precheck(args: Any, sc: Any) -> tuple[bool, dict, dict]:
         ok, links, lexical, bases = len(values) <= MAX_VALUES, {}, {}, bases_for(sc)
         for label, _key, value in values[:MAX_VALUES]:
             walks = _walks(value, bases)
-            if walks is None:
+            if walks is None or "\x00" in value:             # the walk would truncate the name at the NUL (C string)
                 ok = False
                 continue
             for base, v in walks:
