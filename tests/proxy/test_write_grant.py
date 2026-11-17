@@ -125,7 +125,9 @@ def test_a_confined_spec_still_has_no_data_directory_rule_with_a_write_grant():
 
 
 def spec_with(grant):
-    return {**BASE, "grants": [list(grant)]}
+    # network "host": this is about the Landlock ABI check, so it must not depend on whether the
+    # machine can build a network namespace (an unprivileged CI runner cannot, a root host can)
+    return {**BASE, "network": "host", "grants": [list(grant)]}
 
 
 def test_below_abi_3_the_trampoline_never_adds_a_ruleset_and_never_runs_the_command(monkeypatch, capfd, tmp_path):
