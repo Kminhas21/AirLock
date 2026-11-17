@@ -73,6 +73,11 @@ def cmd_lint(ns) -> int:
     if pol is None:
         return code
     warnings = pol.lint()
+    if (os.environ.get("SENTINEL_POLICY_WRITABLE") or "").strip() == "1":
+        for r in pol.rules:
+            if r.confine and "write" in r.confine.values():
+                warnings.append(f"rule {r.id}: a write rule next to SENTINEL_POLICY_WRITABLE=1: keep the policy file, its backups and the event log "
+                                f"outside every sandbox.write directory, or an auto-allowed write could rewrite the policy itself")
     for w in warnings:
         print(f"WARN:  {w}")
     print(f"OK: {len(pol.rules)} rules, default {pol.default}, {len(warnings)} warning(s), digest {pol.digest()}")
@@ -90,7 +95,8 @@ def cmd_explain(ns) -> int:
     reg, err = _load_registry(ns.registry)
     if err:
         return _err(err)
-    d = pol.evaluate_call(ns.server, ns.tool, args, confinable=not ns.unconfinable, registry=reg, alerts_present=ns.alert)
+    d = pol.evaluate_call(ns.server, ns.tool, args, confinable=not ns.unconfinable, write_confinable=not ns.unconfinable, registry=reg,
+                         alerts_present=ns.alert)
     print(f"verdict: {d.verdict}")
     print(f"rule:    {d.rule_id or '(none)'}")
     print(f"reason:  {d.reason}")
@@ -135,14 +141,16 @@ def _read_traces(path: str):
     return props
 
 
-def run_replay(pol, proposals, registry=None, server: str = "", confinable: bool = True) -> dict:
-    """Each proposal as the hub decides it, assuming a confinable server (sandboxed with `runtime`) unless `confinable` is False."""
+def run_replay(pol, proposals, registry=None, server: str = "", confinable: bool = True, write_confinable: bool = False) -> dict:
+    """Each proposal as the hub decides it, assuming a confinable server (sandboxed with `runtime`) unless `confinable` is False. A write is
+    assumed NOT confinable unless `write_confinable` (the replay cannot know a file exists; True is the ceiling, D32)."""
     verdicts = {"allow": 0, "deny": 0, "ask": 0}
     by_label: dict = {}
     hits: dict = {}
     viol_allowed = benign_asked = 0
     for p in proposals:
-        d = pol.evaluate_call(server, p.get("tool"), p.get("args"), confinable=confinable, registry=registry, alerts_present=False)
+        d = pol.evaluate_call(server, p.get("tool"), p.get("args"), confinable=confinable, write_confinable=write_confinable,
+                              registry=registry, alerts_present=False)
         label = p.get("label")
         label = label if isinstance(label, str) else "unlabeled"
         verdicts[d.verdict] += 1

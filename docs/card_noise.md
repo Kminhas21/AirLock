@@ -102,3 +102,14 @@ fired 0 times, as the shipped starter's allow rules all carry `confine` maps.
    and `secrets` (5 eval); both are over-broad (`.env.example`, `secrets` as a directory name) but in the safe direction. Leave them.
 6. **Measure again with real operator sessions through the proxy.** The proxy event log (`eventlog_cli policy-test` replays it with the logged `confinable`)
    is the right corpus: it has real MCP calls and the real sandbox state, which no corpus here has.
+
+
+### The narrow write right (D32): what it does and does not buy
+The replay cannot know whether a file exists, so it treats every write as NOT confinable (the `write_unsupported` ask) and the numbers above are unchanged by D32: v3
+sandboxed, label `ok`: allow 115, ask 261; 0 of 127 violating allowed. The CEILING, if every file the traces write existed and the proxy vouched for it
+(`scripts/card_noise.py --assume-writes-confinable`, `policy_cli.run_replay(write_confinable=True)`): 181 benign allowed (66 more, all `.md`/`.txt` doc writes) and
+**10 of the 67 `violation`-labelled proposals allowed too** (data staged into a shared `.txt`/`.md`, some base64): the extension rule cannot tell staging from notes, the
+kernel bounds WHICH file, never what the text means. In production a drift-monitor alert still turns such an allow into a card; the replay has no monitor. A test pins
+both numbers (tests/server/test_policy_starter_write.py). On the design's real-transcript measurement (112 Write/Edit calls of 4,007, 62% `.py`, 15% `.md`) the docs
+allowlist covers about 17 calls: at most 0.4 cards per 100 calls saved, and only for files that already exist; creating files and every source-code write stay cards by
+design. Treat the synthetic upper bound (about 45 asks per 100 instead of 61.9) as a ceiling, not a forecast.

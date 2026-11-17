@@ -250,7 +250,14 @@ def _describe(e: EL.Event) -> "list[str]":
         return [f"{head} DECISION call {_safe(e.call_id, 80)}: {_safe(p.get('decision'), 20).upper()} "
                 f"(reason {_safe(p.get('reason'), 40)}, by {_safe(p.get('actor'), 20)}){extra}"]
     if e.kind == "call_result":
-        return [f"{head} RESULT call {_safe(e.call_id, 80)}: {_safe(p.get('status'), 20)} {_safe(p.get('summary'), 200)}"]
+        lines = [f"{head} RESULT call {_safe(e.call_id, 80)}: {_safe(p.get('status'), 20)} {_safe(p.get('summary'), 200)}"]
+        for w in p.get("writes") if isinstance(p.get("writes"), list) else []:         # D32: an auto-allowed write: what, which inode, digests, the undo copy
+            if isinstance(w, dict):
+                lines.append(f"      auto-written: {_safe(w.get('path'), 200)} (inode {_safe(w.get('dev'), 20)}:{_safe(w.get('ino'), 20)}, "
+                             f"{_safe(w.get('size_before'), 20)} -> {_safe(w.get('size_after'), 20)} bytes, "
+                             f"before sha256 {_safe(w.get('sha256_before'), 80)[:12]}, after sha256 {_safe(w.get('sha256_after'), 80)[:12]}"
+                             f"{', REPLACED: the name now leads to another file' if w.get('replaced') else ''}, undo: {_safe(w.get('undo'), 200)})")
+        return lines
     if e.kind == "proxy_hello":
         return [f"{head} SESSION START servers={_safe(p.get('servers'), 200)} auto_approve={_safe(p.get('auto_approve'), 10)} "
                 f"monitor={_safe(p.get('monitor_mode'), 40)} policy={_safe(p.get('policy_digest'), 20)}"]
@@ -324,8 +331,8 @@ def run_policy_test(pol, store, registry=None, session=None) -> dict:
         server = p.get("server") if isinstance(p.get("server"), str) else ""
         args = p.get("args")
         # as the hub decides it: the logged `confinable` (absent in logs from before D31 = false: path allows ask)
-        d = pol.evaluate_call(server, p.get("tool"), args, confinable=p.get("confinable") is True, registry=registry,
-                              alerts_present=bool(p.get("alerts")))
+        d = pol.evaluate_call(server, p.get("tool"), args, confinable=p.get("confinable") is True,
+                              write_confinable=p.get("write_confinable") is True, registry=registry, alerts_present=bool(p.get("alerts")))
         dec = decisions.get((e.session_id, e.call_id))
         human = dec.get("decision") if isinstance(dec, dict) and dec.get("actor") == "human" else None
         label = {"approve": "ok", "deny": "violation"}.get(human, "unlabeled")

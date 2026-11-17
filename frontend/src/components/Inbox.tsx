@@ -9,7 +9,7 @@ import { useEffect, useId, useState } from "react";
 import { useInboxStore } from "../stores/inboxStore";
 import { callKey, MAX_PENDING_RENDERED, type InboxDecision, type PathLink, type PendingCall, type ResolvedCall } from "../lib/inboxRoute";
 import { panelView, singleLine } from "../lib/safeText";
-import { forbiddenText, ruleToast, type Scope, type Verdict } from "../lib/inboxView";
+import { forbiddenText, ruleToast, WRITE_OK_TEXT, WRITE_WHY_TEXT, type Scope, type Verdict } from "../lib/inboxView";
 import { formatAge, pendingAge } from "../lib/inboxAge";
 import { AgentText } from "./AgentText";
 import { BoundaryChips, SessionSoFar, SignInPanel, StandingRules, WhyFlagged } from "./InboxPanels";
@@ -118,6 +118,13 @@ function PendingCard({
       {call.secrets_used.length > 0 && (
         <div className="inbox-secrets" role="alert" data-testid="inbox-secrets-warning">
           This call will receive credentials: {call.secrets_used.join(", ")} (exist only during this call)
+        </div>
+      )}
+      {call.write && (
+        <div className="inbox-write" data-testid="inbox-write" role="note">
+          <strong>WRITE</strong>{" "}
+          <span data-testid="inbox-write-why">{call.write.confinable ? WRITE_OK_TEXT : WRITE_WHY_TEXT[call.write.why ?? "unsupported"]}</span>
+          <div className="detail-label">a human-approved call is not confined: the server writes with all of its own access</div>
         </div>
       )}
       {(call.links ?? []).length > 0 && (
@@ -236,6 +243,15 @@ function ResolvedRow({ item }: { item: ResolvedCall }) {
         <span className="inbox-result">
           {item.result.status === "ok" ? "ok" : "error"}: {singleLine(item.result.summary, 200)}
         </span>
+      )}
+      {item.result?.writes && (
+        <div className="inbox-writes" data-testid="inbox-writes">
+          {item.result.writes.map((w, i) => (
+            <div key={i}>
+              {`auto-written: ${singleLine(w.path, 300)} (before sha256 ${w.sha256_before.slice(0, 12)}, ${w.size_before} -> ${w.size_after ?? "?"} bytes${w.replaced ? ", the name now leads to another file" : ""}, undo: ${singleLine(w.undo, 300)})`}
+            </div>
+          ))}
+        </div>
       )}
     </li>
   );

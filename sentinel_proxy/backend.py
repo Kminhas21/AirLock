@@ -44,7 +44,7 @@ class Decision:
     approved: bool
     reason: str
     note: str = ""  # sanitised operator note; only ever set on a human deny
-    confine: dict | None = None  # a policy approval's {argument: "read" | "list"}: run it in a kernel-confined worker (D31)
+    confine: dict | None = None  # a policy approval's {argument: "read" | "list" | "write"}: run it in a kernel-confined worker (D31, D32)
 
 
 class BackendLink:
@@ -219,17 +219,21 @@ class BackendLink:
                 pass
             return False
 
-    async def send_result(self, call_id: str, status: str, summary: str) -> None:
+    async def send_result(self, call_id: str, status: str, summary: str, writes: list | None = None) -> None:
+        """`writes` (D32): the audit record of each auto-allowed write the call made (path, inode, digests, before-image); omitted when there is none."""
         ws = self._ws
         if ws is None:
             return
-        await self._send(ws, json.dumps({"event": "proxy_result", "call_id": call_id, "status": status, "summary": summary}))
+        frame = {"event": "proxy_result", "call_id": call_id, "status": status, "summary": summary}
+        if writes:
+            frame["writes"] = writes
+        await self._send(ws, json.dumps(frame))
 
 
 def _confine_map(v: Any) -> dict[str, str] | None:
     if not isinstance(v, dict) or not 0 < len(v) <= 20:
         return None
-    if not all(isinstance(k, str) and 0 < len(k) <= 200 and x in ("read", "list") for k, x in v.items()):
+    if not all(isinstance(k, str) and 0 < len(k) <= 200 and x in ("read", "list", "write") for k, x in v.items()):
         return None
     return dict(v)
 

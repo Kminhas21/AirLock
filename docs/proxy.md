@@ -48,6 +48,21 @@ before `call_tool` and the agent gets `Denied by SENTINEL: confine_failed`. A po
 filesystem server 1.0.0 and 0.8 s for Desktop Commander. Test knob: `SENTINEL_CONFINE_PRECHECK=force_true` makes the precheck say true (the kernel still
 decides); used by the live tests only. Ship hub and proxy together: an old proxy's path allows ask, an old hub's policy approvals of path calls are refused.
 
+## An auto-allowed OVERWRITE is one-inode confined, logged and undoable (DECISIONS D32)
+A `proxy_call` whose arguments look like a write of one file (a string `path` plus `content` or `edits`) also carries `write_confinable` (bool) and, when false,
+`write_why` (one of `unsupported`, `bad_path`, `outside_write_dir`, `new_file`, `symlink`, `not_regular`, `hard_link`, `executable`, `too_large`, `no_before_image`, `edits_too_large`). It is
+true only for an existing regular file with one name (`st_nlink == 1`), no exec bit, at most 256 KiB, found by `openat2` with no symlink beneath one of the server's
+`sandbox.write` directories, on Landlock ABI >= 3, when a before-image can be kept (the top-level `undo_dir`, default `$SENTINEL_PROXY_STATE_DIR/undo`, else
+`$XDG_STATE_HOME/sentinel-proxy/undo`, else `~/.local/state/sentinel-proxy/undo`). A policy approval with `"confine": {"path": "write"}` makes the proxy (1) refuse the
+call (`Denied by SENTINEL: write_unsupported`) unless it vouched for the write itself, (2) copy the file to `<undo_dir>/<call_id>/0` (0600) and hash it, (3) run a
+one-shot worker whose Landlock rules grant READ_FILE | WRITE_FILE | TRUNCATE on that one inode (the worker re-checks the file kind and the link count, and a 8 MiB file-size
+limit applies), (4) kill it before `call_tool` unless its status names the same device and inode with one name (`confine_failed`), and (5) report `writes` in the result
+frame: `path`, `dev`, `ino`, `size_before`, `sha256_before`, `size_after`, `sha256_after`, `replaced` (the name now leads to another inode), `undo`. `writes` is sent after a
+success, a tool error, a timeout and a crash alike (the worker may have written); the hub logs it in `call_result`. The undo is `cp <undo> <path>`. An older hub never
+sends a write confine (its write allows ask); an older proxy sends no `write_confinable` (the hub asks).
+
+**Upgrade note (D32).** A config that loaded before can now fail to load: for a server WITH `sandbox.runtime`, a `sandbox.write` directory may not be, contain or lie inside the undo store (default `$XDG_STATE_HOME/sentinel-proxy/undo`, e.g. `write: ["/home/me"]`), nor contain the proxy config file (a symlinked config is judged by the file it names too). The error names the undo store and the fix: add `"undo_dir": "/dir/outside/every/write/dir"` to proxy.json (or set `SENTINEL_PROXY_STATE_DIR`), or narrow the write directory. Servers without `runtime` are not checked. The undo directory must be owned by the proxy user and not group/world-writable, or writes ask (`no_before_image`). Retention: before-images are removed only when older than 30 days; a store of 1000 calls or 64 MiB is FULL and the next write asks instead of evicting.
+
 ## Compatibility with real MCP servers (measured, DECISIONS D26)
 Each server below was run DIRECTLY and THROUGH the proxy and hub with the same MCP client, and everything the client can observe was diffed
 (`docs/TESTING_REALITY.md`, rung 2): filesystem 1.0.0, memory 1.0.0, sequential-thinking 1.0.0, the protocol-coverage `everything` 1.0.0 (all npm), Microsoft

@@ -12,7 +12,7 @@ DEFAULT_BACKEND = "ws://127.0.0.1:8080/proxy/ws"
 _ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 _PREFIX_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}$")
 _AUTO_RE = re.compile(r"^([A-Za-z0-9._-]{1,40}):(\*|[^:*\s][^:\s]*)$")
-_TOP_KEYS = {"session_id", "backend", "servers", "auto_approve"}
+_TOP_KEYS = {"session_id", "backend", "servers", "auto_approve", "undo_dir"}
 _SERVER_KEYS = {"command", "args", "env", "cwd", "prefix", "trust_read_only_hint", "sandbox", "lifecycle", "secrets",
                 "call_timeout_s"}
 _SECRET_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
@@ -49,6 +49,57 @@ class ProxyConfig:
     backend: str
     servers: dict[str, ServerConfig]
     auto_approve: tuple[str, ...] = ()
+    undo_dir: str = ""          # where the before-images of auto-allowed writes are kept (D32); outside every confinable server's `sandbox.write`
+
+
+def posixpath_norm(p: str) -> str:
+    import posixpath
+    return posixpath.normpath(p)
+
+
+def default_undo_dir() -> str:
+    """`<state>/undo`: $SENTINEL_PROXY_STATE_DIR, else $XDG_STATE_HOME/sentinel-proxy, else ~/.local/state/sentinel-proxy."""
+    state = os.environ.get("SENTINEL_PROXY_STATE_DIR")
+    if state and os.path.isabs(state):
+        return os.path.join(os.path.normpath(state), "undo")
+    xdg = os.environ.get("XDG_STATE_HOME")
+    base = xdg if xdg and os.path.isabs(xdg) else os.path.join(os.path.expanduser("~"), ".local", "state")
+    return os.path.join(os.path.normpath(base), "sentinel-proxy", "undo")
+
+
+def _undo_dir_error(v: Any) -> str:
+    if not isinstance(v, str) or not v or not v.startswith("/") or "\x00" in v or ".." in v.split("/") or os.path.normpath(v) == "/":
+        return "undo_dir: must be an absolute directory path (not '/', no '..')"
+    return ""
+
+
+def _covers(a: str, b: str) -> bool:
+    """`a` equals `b` or is an ancestor of it (normalised absolute paths)."""
+    return a == "/" or b == a or b.startswith(a + "/")
+
+
+def _write_guard(servers: dict, undo_dir: str, config_path: "str | tuple | None", errors: list[str]) -> None:
+    """A `sandbox.write` directory of a CONFINABLE server (one with `runtime`: its auto-allowed writes are real) may not be, contain or lie
+    inside the undo store, and may not contain the proxy's own config file: an auto-write of either is privilege escalation. A server that
+    cannot be confined has no auto-write, so its (possibly broad) write directories are not judged."""
+    import posixpath
+    undo = posixpath.normpath(undo_dir)
+    if isinstance(config_path, str):
+        config_path = (config_path,)
+    for name, sc in servers.items():
+        sb = sc.sandbox
+        if not sb or not sb.get("runtime"):
+            continue
+        for d in sb.get("write") or []:
+            n = posixpath.normpath(d)
+            if _covers(n, undo) or _covers(undo, n):
+                errors.append(f"servers.{name}.sandbox.write: {n!r} is, contains or lies inside the undo store {undo!r} (before-images of auto-allowed "
+                              f"writes; this server has `runtime`, so its writes can be auto-allowed). Fix: add \"undo_dir\": \"/some/directory/outside/every/"
+                              f"write/directory\" at the top level of proxy.json (or set SENTINEL_PROXY_STATE_DIR to such a directory), or narrow this write "
+                              f"directory; a server without `runtime` is not checked")
+            if config_path and any(_covers(n, c) for c in config_path):
+                errors.append(f"servers.{name}.sandbox.write: {n!r} contains the proxy config file {config_path[0]!r} (an auto-allowed write of it "
+                              f"would be privilege escalation; a symlinked config is judged by the file it names too); keep the config outside every write directory")
 
 
 def valid_session_id(value: Any) -> bool:
@@ -83,7 +134,8 @@ def strip_query(url: str) -> str:
     return url.split("?", 1)[0]
 
 
-def parse_config(raw: Any, *, session_id_override: str | None = None, backend_override: str | None = None) -> ProxyConfig:
+def parse_config(raw: Any, *, session_id_override: str | None = None, backend_override: str | None = None,
+                 config_path: str | None = None) -> ProxyConfig:
     errors: list[str] = []
     if not isinstance(raw, dict):
         raise ConfigError("config: top level must be a JSON object")
@@ -127,9 +179,18 @@ def parse_config(raw: Any, *, session_id_override: str | None = None, backend_ov
             else:
                 auto.append(e)
 
+    undo_dir = default_undo_dir()
+    if "undo_dir" in raw:
+        why = _undo_dir_error(raw["undo_dir"])
+        if why:
+            errors.append(why)
+        else:
+            undo_dir = os.path.normpath(raw["undo_dir"])
+    if not errors:
+        _write_guard(servers, undo_dir, tuple(dict.fromkeys(posixpath_norm(x) for x in (os.path.abspath(config_path), os.path.realpath(config_path)))) if config_path else None, errors)
     if errors:
         raise ConfigError("\n".join(errors))
-    return ProxyConfig(session_id=sid, backend=backend, servers=servers, auto_approve=tuple(auto))
+    return ProxyConfig(session_id=sid, backend=backend, servers=servers, auto_approve=tuple(auto), undo_dir=undo_dir)
 
 
 def _parse_server(name: str, s: Any, errors: list[str]) -> ServerConfig | None:
@@ -230,7 +291,7 @@ def load_config_file(path: str, **overrides: Any) -> ProxyConfig:
         raise ConfigError(f"cannot read config {path!r}: {e.strerror or e}") from None
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise ConfigError(f"config {path!r} is not valid JSON: {e}") from None
-    return parse_config(raw, **overrides)
+    return parse_config(raw, config_path=path, **overrides)
 
 
 # ---------------------------------------------------------------- routing

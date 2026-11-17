@@ -11,6 +11,7 @@ Counts allow / ask / deny per tool and per rule, cards per 100 calls and per ses
   rule:<id>      an explicit ask rule (the starter's sensitive-path rules)        default       no rule matched, the policy default is ask
   unconfined     an allow floored because its rule has no `confine` map or the call has a path argument outside it
   unconfinable   an allow floored because the server cannot be confined (unsandboxed server)
+  write_unsupported   a doc write floored because the replay cannot know the file exists (D32; --assume-writes-confinable is the ceiling)
   alert / secrets / engine_error / rule_error:<id>   escalations and fail-closed paths
 
 Claude Code tool names are MAPPED to the MCP-style tools the starter knows (MAPPING below); this is an approximation, not the MCP filesystem server:
@@ -166,14 +167,15 @@ def _bump(d, k, n=1):
     d[k] = d.get(k, 0) + n
 
 
-def measure(pol, sessions, *, confinable):
+def measure(pol, sessions, *, confinable, write_confinable=False):
     verdicts = {"allow": 0, "ask": 0, "deny": 0}
     by_tool, causes, ask_rules, allow_rules, deny_rules, unconfinable_by_rule, by_fid = {}, {}, {}, {}, {}, {}, {}
     per_session, calls_n = [], 0
     for _sid, calls in sessions:
         asks = 0
         for c in calls:
-            d = pol.evaluate_call(c["server"], c["tool"], c["args"], confinable=confinable, registry=None, alerts_present=False)
+            d = pol.evaluate_call(c["server"], c["tool"], c["args"], confinable=confinable, write_confinable=write_confinable, registry=None,
+                                  alerts_present=False)
             calls_n += 1
             verdicts[d.verdict] += 1
             t = by_tool.setdefault(c["display"], {"allow": 0, "ask": 0, "deny": 0})
@@ -235,11 +237,12 @@ def render(report):
     return "\n".join(out)
 
 
-def build_report(pol, corpora):
+def build_report(pol, corpora, write_confinable=False):
     rep = {"policy_digest": pol.digest(), "corpora": []}
     for name, sessions, excluded in corpora:
         rep["corpora"].append({"name": name, "sessions": len(sessions), "calls": sum(len(c) for _, c in sessions), "excluded": excluded,
-                               "sandboxed": measure(pol, sessions, confinable=True), "unsandboxed": measure(pol, sessions, confinable=False)})
+                               "sandboxed": measure(pol, sessions, confinable=True, write_confinable=write_confinable),
+                               "unsandboxed": measure(pol, sessions, confinable=False, write_confinable=write_confinable)})
     return rep
 
 
@@ -249,6 +252,8 @@ def main(argv=None):
     ap.add_argument("--claude-projects", help="a Claude Code projects directory of *.jsonl transcripts (read locally, aggregate output only)")
     ap.add_argument("--policy", default="builtin:starter")
     ap.add_argument("--only-label", help="eval traces: keep only proposals with this label (ok = benign)")
+    ap.add_argument("--assume-writes-confinable", action="store_true",
+                    help="the CEILING for D32: assume every file a write names exists and the proxy vouched for it (default: no write is confinable)")
     ap.add_argument("--json", action="store_true")
     ns = ap.parse_args(argv)
     if not ns.traces and not ns.claude_projects:
@@ -267,7 +272,7 @@ def main(argv=None):
     except (ValueError, P.PolicyError) as e:
         print(f"card_noise: {e}", file=sys.stderr)
         return 2
-    rep = build_report(pol, corpora)
+    rep = build_report(pol, corpora, ns.assume_writes_confinable)
     print(json.dumps(rep, indent=2) if ns.json else render(rep))
     return 0
 

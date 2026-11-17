@@ -81,6 +81,11 @@ BOUNDARY_NETWORK = frozenset({"none", "loopback", "host"})
 BOUNDARY_LIFECYCLE = frozenset({"session", "per_call"})
 _BOUNDARY_KEYS = frozenset({"lifecycle", "layers", "missing", "network", "secrets", "confinable", "confine_why"})
 MAX_LINKS = 64             # proxy_call.links entries (display only)
+MAX_WRITES = 64            # proxy_result.writes entries (the proxy confines at most MAX_VALUES values per call)
+# why a write-shaped call is not confinable, as the proxy says it (closed set; = sentinel_proxy/confine.py WRITE_WHYS, a test keeps them equal)
+WRITE_WHYS = ("unsupported", "bad_path", "outside_write_dir", "new_file", "symlink", "not_regular", "hard_link", "executable", "too_large",
+              "no_before_image", "edits_too_large")
+_HEX64 = re.compile(r"[0-9a-f]{64}")
 MAX_LINK = 4096
 NOTIFY_TIMEOUT_S = 30.0    # hard bound on one notification send (the notifier has its own, shorter, timeouts)
 AUTH_FRAME_TIMEOUT_S = 5.0
@@ -153,6 +158,29 @@ def validate_links(v: Any) -> dict | None:
     if not all(_is_str(k, MAX_SHORT, min_len=1) and _is_str(x, MAX_LINK, min_len=1) for k, x in v.items()):
         return None
     return {k: safe_text.clean_field(x, MAX_LINK) for k, x in v.items()}
+
+
+def _int(v: Any, *, none_ok: bool = False) -> bool:
+    return (v is None and none_ok) or (isinstance(v, int) and not isinstance(v, bool) and 0 <= v < 1 << 63)
+
+
+def validate_writes(v: Any) -> list | None:
+    """proxy_result.writes (D32): the audit record of each auto-allowed write: where, which inode, size and sha256 before and after, whether the
+    name now leads to another inode, and where the before-image is. Anything malformed => None (dropped, never fatal)."""
+    if not isinstance(v, list) or not v or len(v) > MAX_WRITES:
+        return None
+    out = []
+    for w in v:
+        if not (isinstance(w, dict) and set(w) == {"path", "dev", "ino", "size_before", "sha256_before", "size_after", "sha256_after",
+                                                    "replaced", "undo"}):
+            return None
+        if not (_is_str(w["path"], MAX_LINK, min_len=1) and _is_str(w["undo"], MAX_LINK, min_len=1) and _int(w["dev"]) and _int(w["ino"])
+                and _int(w["size_before"]) and _int(w["size_after"], none_ok=True) and isinstance(w["replaced"], bool)
+                and isinstance(w["sha256_before"], str) and _HEX64.fullmatch(w["sha256_before"])
+                and (w["sha256_after"] is None or (isinstance(w["sha256_after"], str) and _HEX64.fullmatch(w["sha256_after"])))):
+            return None
+        out.append({**w, "path": safe_text.clean_field(w["path"], MAX_LINK), "undo": safe_text.clean_field(w["undo"], MAX_LINK)})
+    return out
 
 
 def clean_note(v: Any) -> str | None:
@@ -266,6 +294,7 @@ class _Pending:
     operator: str | None = None   # principal id of the human who decided (identity mode)
     links: dict | None = None     # where symlinked path values lead, as the proxy resolves them (display only, D31)
     links_lexical: dict | None = None     # the same with `..` resolved before the links, where that differs (display only)
+    write: dict | None = None     # a write-shaped call: {"confinable": bool, "why"?: str}, what the proxy found (display only, D32)
 
     def claim(self, decision: str, reason: str) -> bool:
         """Once-only: the first claim wins (sync, so there is no await between check and set)."""
@@ -569,6 +598,8 @@ class InboxHub:
             d["links"] = p.links                   # where a symlinked path value leads (the server may differ; nothing evaluates it)
             if p.links_lexical:
                 d["links_lexical"] = p.links_lexical
+        if p.write is not None:
+            d["write"] = p.write                   # a write call is shown as one: what it overwrites or why it was held (display only)
         d["session_summary"], d["session_history"], d["earlier_denied"] = p.summary, p.history, p.earlier_denied
         if p.session.identity_mode:
             d["agent_id"], d["tenant"] = p.session.agent_id, p.session.tenant
@@ -774,6 +805,13 @@ class InboxHub:
         secrets_used = validate_secrets_used(frame.get("secrets_used"))     # names only; invalid => []
         # D31: only an exact `true` says the proxy can have the kernel confine this call (an old proxy, a malformed value: false)
         confinable = frame.get("confinable") is True
+        # D32: only an exact `true` says the proxy can confine THIS write (an existing plain file it holds a before-image of); anything else asks
+        write_confinable = frame.get("write_confinable") is True
+        write_info = None
+        if "write_confinable" in frame:
+            write_info = {"confinable": write_confinable}
+            if isinstance(frame.get("write_why"), str) and frame["write_why"] in WRITE_WHYS and not write_confinable:
+                write_info["why"] = frame["write_why"]
         links = validate_links(frame.get("links"))
         links_lexical = validate_links(frame.get("links_lexical")) if links else None     # the same values with `..` resolved first
         alerts: list = []
@@ -809,6 +847,7 @@ class InboxHub:
             if session.policy is not None:
                 try:
                     dec = await asyncio.to_thread(session.policy.evaluate_call, server, tool, args, confinable=confinable,
+                                                  write_confinable=write_confinable,
                                                   registry=session.policy_registry, alerts_present=bool(alerts),
                                                   secrets_used=bool(secrets_used))
                     verdict, rule_id = dec.verdict, dec.rule_id
@@ -839,7 +878,9 @@ class InboxHub:
             while len(session.secrets) > 200:
                 session.secrets.pop(next(iter(session.secrets)))
         # write-ahead: call_proposed is on disk before inbox_pending / any auto or policy reply
-        res_fields = {"confinable": confinable, **({"links": links} if links else {}),
+        res_fields = {"confinable": confinable, **({"write_confinable": write_confinable} if write_info is not None else {}),
+                      **({"write_why": write_info["why"]} if write_info and "why" in write_info else {}),
+                      **({"links": links} if links else {}),
                       **({"links_lexical": links_lexical} if links_lexical else {})}
         res = await self._append("call_proposed", session.log_sid, call_id,
                                  {"server": server, "tool": tool, "args": args, "auto": auto,
@@ -874,7 +915,7 @@ class InboxHub:
 
         # held for a human: not auto, or auto with an alert, or auto with a degraded monitor (fail closed)
         p = _Pending(session, call_id, server, tool, args, auto, alerts, rule_id=rule_id, policy_digest=digest,
-                     policy_mode=session.policy_mode, secrets_used=secrets_used, links=links, links_lexical=links_lexical)
+                     policy_mode=session.policy_mode, secrets_used=secrets_used, links=links, links_lexical=links_lexical, write=write_info)
         p.summary, p.history, p.earlier_denied = session.views()        # state BEFORE this call
         session.pending[call_id] = p
         session.starting.discard(call_id)
@@ -928,15 +969,20 @@ class InboxHub:
             return
         summary = safe_text.clean_field(frame.get("summary", "") if isinstance(frame.get("summary"), str) else "",
                                         SUMMARY_LIMIT)
+        writes = validate_writes(frame.get("writes")) if "writes" in frame else None
+        if "writes" in frame and writes is None:
+            logger.warning("inbox: dropping a malformed `writes` record from %s", session.session_id)
         if self.store is not None:         # best effort: never raises into the call path
             # the tool OUTPUT is free text and often echoes the arguments: by default only its status and length are logged;
             # SENTINEL_LOG_RESULTS=1 also stores the summary, scrubbed of this call's secret argument values
             rec = {"status": status, "summary_len": len(summary)}
+            if writes is not None:
+                rec["writes"] = writes                 # D32: audit record of an auto-allowed write (digests and the before-image's place, never content)
             if os.environ.get("SENTINEL_LOG_RESULTS") == "1":
                 rec["summary"] = eventlog.scrub(summary, session.secrets.get(call_id, frozenset()))
             await self._append("call_result", session.log_sid, call_id, rec)
         await self._broadcast({"event": "inbox_result", "session_id": session.session_id, "call_id": call_id,
-                               "status": status, "summary": summary}, session.tenant)
+                               "status": status, "summary": summary, **({"writes": writes} if writes is not None else {})}, session.tenant)
 
     async def proxy_closed(self, session: ProxySession) -> None:
         """The proxy went away: every pending call of the session is a deny/disconnected."""

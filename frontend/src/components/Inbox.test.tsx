@@ -369,6 +369,69 @@ describe("Inbox", () => {
     });
   });
 
+  describe("write calls (D32)", () => {
+    it("a held write is shown as a write, with what the proxy found, next to the rule that held it", () => {
+      state.pending = [call({ rule_id: "allow-write-docs", write: { confinable: false, why: "new_file" } })];
+      const html = render();
+      expect(html).toContain('data-testid="inbox-write"');
+      expect(html).toContain("WRITE");
+      expect(html).toContain("creates a new file");
+      expect(html).toContain("a human-approved call is not confined");
+    });
+
+    it("every reason of the closed set has its own words", () => {
+      const seen = new Set<string>();
+      for (const why of ["unsupported", "bad_path", "outside_write_dir", "new_file", "symlink", "not_regular", "hard_link", "executable", "too_large", "no_before_image", "edits_too_large"]) {
+        state.pending = [call({ write: { confinable: false, why } })];
+        const m = render().match(/data-testid="inbox-write-why">([^<]*)</);
+        expect(m, why).not.toBeNull();
+        seen.add(m![1]);
+      }
+      expect(seen.size).toBe(11);
+    });
+
+    it("a write the proxy could have confined says so; an old proxy's write (no field) is not labelled", () => {
+      state.pending = [call({ write: { confinable: true } })];
+      expect(render()).toContain("an existing file the proxy can confine");
+      state.pending = [call({ write: null })];
+      expect(render()).not.toContain("inbox-write");
+      state.pending = [call()];
+      expect(render()).not.toContain("inbox-write");
+    });
+
+    it("a reason outside the closed set is not shown as text from the proxy", () => {
+      state.pending = [call({ write: { confinable: false, why: "<img src=x onerror=alert(1)>" } })];
+      const html = render();
+      expect(html).not.toContain("<img");
+      expect(html).toContain('data-testid="inbox-write"');
+    });
+
+    it("an auto-allowed write is listed on the resolved row with the file, the short hash before and the undo copy", () => {
+      const w = { path: "/w/notes.md", dev: 1, ino: 2, size_before: 6, sha256_before: "ab".repeat(32), size_after: 12, sha256_after: "cd".repeat(32), replaced: false, undo: "/state/undo/c1/0" };
+      state.resolved = [{ session_id: "s", call_id: "1", server: "fs", tool: "write_file", decision: "approve", reason: "policy", rule_id: "allow-write-docs", policy_digest: null, result: { status: "ok", summary: "ok", writes: [w] } }];
+      const html = render();
+      expect(html).toContain('data-testid="inbox-writes"');
+      expect(html).toContain("auto-written: /w/notes.md");
+      expect(html).toContain("abababababab");
+      expect(html).not.toContain("ab".repeat(32));
+      expect(html).toContain("undo: /state/undo/c1/0");
+    });
+
+    it("a replaced name is flagged on the resolved row", () => {
+      const w = { path: "/w/notes.md", dev: 1, ino: 2, size_before: 6, sha256_before: "ab".repeat(32), size_after: null, sha256_after: null, replaced: true, undo: "/u/0" };
+      state.resolved = [{ session_id: "s", call_id: "1", server: "fs", tool: "write_file", decision: "approve", reason: "policy", rule_id: null, policy_digest: null, result: { status: "error", summary: "x", writes: [w] } }];
+      expect(render()).toContain("now leads to another file");
+    });
+
+    it("a hostile path is collapsed to one line and has its bidi controls stripped", () => {
+      const w = { path: "/w/a\n‮.md", dev: 1, ino: 2, size_before: 6, sha256_before: "ab".repeat(32), size_after: 1, sha256_after: "cd".repeat(32), replaced: false, undo: "/u/0" };
+      state.resolved = [{ session_id: "s", call_id: "1", server: "fs", tool: "write_file", decision: "approve", reason: "policy", rule_id: null, policy_digest: null, result: { status: "ok", summary: "x", writes: [w] } }];
+      const html = render();
+      expect(html).not.toContain("‮");
+      expect(html.match(/data-testid="inbox-writes">([^]*?)<\/div>/)![1]).not.toContain("\n");
+    });
+  });
+
   describe("operator panels", () => {
     const hist = (over: Record<string, unknown> = {}) => ({ call_id: "h", server: "fs", tool: "rm", args_preview: '{"path":"/etc"}', decision: "deny", reason: "human", rule_id: null, note: null, ts: 1, ...over });
 

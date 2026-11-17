@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -318,10 +319,16 @@ class Proxy:
         call_id = uuid.uuid4().hex
         frame = {"event": "proxy_call", "call_id": call_id, "server": server, "tool": orig, "args": args, "auto": auto,
                  "secrets_used": secrets_used}
-        frame.update(await _precheck(args, sc, d.confinable))
+        frame.update(await _precheck(args, sc, d.confinable, self.cfg.undo_dir))
         decision = await self.link.decide(frame)
         if not decision.approved:
             return _denied(decision.reason, decision.note)
+        if decision.reason == "policy" and decision.confine and "write" in decision.confine.values():
+            # belt and braces (D32): a write the PROXY did not vouch for itself (an existing plain file with one name, beneath a write directory, a
+            # before-image possible) is never run, whatever the hub says: confinable can only make a decision stricter
+            if set(decision.confine) != {"path"} or frame.get("write_confinable") is not True or not d.confinable:
+                await self.link.send_result(call_id, "error", "write_unsupported")
+                return _denied("write_unsupported")
         if decision.reason == "policy" and not decision.confine and confine.has_path_values(args):
             # belt and braces against a hub that auto-allows a path call without a confine map: never run it unconfined
             await self.link.send_result(call_id, "error", "unconfined")
@@ -346,22 +353,38 @@ class Proxy:
     async def _call_worker(self, sc: ServerConfig, call_id: str, tool: str, args: dict[str, Any],
                            secret_names: list[str], confine_map: dict | None = None) -> types.CallToolResult:
         """One approved call = one fresh sandboxed worker that holds only this call's secrets and is always killed. With `confine_map`
-        (a policy approval, D31) the worker's spec is narrowed to the exact grants, and its status must prove it before `call_tool`."""
+        (a policy approval, D31) the worker's spec is narrowed to the exact grants, and its status must prove it before `call_tool`. A `write`
+        grant (D32) is made only after the proxy has copied the file (the before-image) and the status must name the same inode, one name."""
         spec = None
+        snaps: list = []
         if confine_map:
             if not self.downstreams[sc.name].confinable:
                 await self.link.send_result(call_id, "error", "confine_failed")
                 return _denied("confine_failed")
-            spec = confine.confined_spec(sc.sandbox, confine.grant_specs(args, confine_map, sc))
+            grants = confine.grant_specs(args, confine_map, sc)
+            write_grants = [g for g in grants if g[2] == "write"]
+            if ("write" in confine_map.values()) != bool(write_grants):
+                await self.link.send_result(call_id, "error", "write_unsupported")
+                return _denied("write_unsupported")
+            if write_grants:
+                try:
+                    snaps = await asyncio.to_thread(self._take_snapshots, write_grants, args, call_id)
+                except confine.SnapshotError as e:
+                    if os.environ.get(confine.FORCE_ENV) != "force_true":       # test knob: the kernel decides; the status check still holds
+                        log(f"no before-image for {sc.name!r} ({e}); call refused")
+                        await self.link.send_result(call_id, "error", "confine_failed")
+                        return _denied("confine_failed")
+            spec = confine.confined_spec(sc.sandbox, grants)
         values: dict[str, str] = {}
         for n in secret_names:  # read NOW, from the proxy's own environment
             v = os.environ.get(sc.secrets[n]["from_env"])
             if not v:
+                self._drop_undo(snaps, call_id)
                 await self.link.send_result(call_id, "error", "secret_unavailable")
                 return _denied("secret_unavailable")
             values[n] = v
         vals = list(values.values())
-        timed_out = unconfined = False
+        timed_out = unconfined = sent = False
         try:
             async with self.open_session(sc, secrets=values, label=f"{sc.name}:call", spec=spec) as (session, tap):
                 try:  # caught INSIDE the transport's task group, or it would surface as an ExceptionGroup
@@ -369,8 +392,9 @@ class Proxy:
                         await session.initialize()
                         if spec is not None:
                             await tap.wait_status()
-                            unconfined = not confine.status_ok(tap.status)
+                            unconfined = not (confine.status_ok(tap.status) and confine.write_status_ok(tap.status, snaps))
                         if not unconfined:
+                            sent = True
                             res = await session.call_tool(tool, args)
                 except TimeoutError:
                     timed_out = True
@@ -382,21 +406,51 @@ class Proxy:
                 timed_out = True
             elif isinstance(e, MCPError):
                 msg = scrub(summarize(e.error.message, 500), vals)
-                await self.link.send_result(call_id, "error", msg[:300])
+                await self._send_result(call_id, "error", msg[:300], snaps, sent)
                 return _error(f"Downstream server {sc.name!r} returned an error: {msg}")
             else:
                 log(f"worker for {sc.name!r} failed: {type(e).__name__}")
-                await self.link.send_result(call_id, "error", f"worker failed: {type(e).__name__}")
+                await self._send_result(call_id, "error", f"worker failed: {type(e).__name__}", snaps, sent)
                 return _error(f"Downstream server {sc.name!r} failed: {type(e).__name__}")
         if unconfined:                       # the worker was killed when the session closed; call_tool was never sent
             log(f"worker for {sc.name!r}: its status does not prove the confinement; call refused")
-            await self.link.send_result(call_id, "error", "confine_failed")
+            await self._send_result(call_id, "error", "confine_failed", snaps, False)
             return _denied("confine_failed")
         if timed_out:
-            await self.link.send_result(call_id, "error", "worker timed out")
+            await self._send_result(call_id, "error", "worker timed out", snaps, sent)
             return _error(f"Downstream server {sc.name!r}: worker timed out")
-        await self.link.send_result(call_id, "error" if res.is_error else "ok", scrub(_summary(res), vals))
+        await self._send_result(call_id, "error" if res.is_error else "ok", scrub(_summary(res), vals), snaps, sent)
         return res
+
+    def _take_snapshots(self, write_grants: list, args: dict, call_id: str) -> list:
+        """The before-image of every write grant, taken by the proxy before the worker exists (all or nothing)."""
+        snaps: list = []
+        try:
+            confine.prune_undo(self.cfg.undo_dir, protect=call_id)          # only what is past the retention window
+            for n, (base, rel, _right) in enumerate(write_grants):
+                snaps.append(confine.take_snapshot(base, rel, args.get("path"), self.cfg.undo_dir, call_id, n))
+        except confine.SnapshotError:
+            self._drop_undo(snaps, call_id)
+            raise
+        return snaps
+
+    def _drop_undo(self, snaps: list, call_id: str) -> None:
+        """The copy of a call that never ran is not an audit record: remove it (only this call's own directory)."""
+        if snaps and re.fullmatch(r"[A-Za-z0-9_-]{1,64}", call_id):
+            shutil.rmtree(os.path.join(self.cfg.undo_dir, call_id), ignore_errors=True)
+
+    async def _send_result(self, call_id: str, status: str, summary: str, snaps: list, sent: bool) -> None:
+        """The result for the hub. After a write grant: `writes`, the record of what the name leads to now, whether or not the call returned (a
+        timed out or crashed worker may have written); when `call_tool` was never sent nothing was written and the copy is removed."""
+        writes = None
+        if snaps and sent:
+            writes = await asyncio.to_thread(lambda: [confine.write_record(s, confine.after_image(s)) for s in snaps])
+        elif snaps:
+            self._drop_undo(snaps, call_id)
+        if writes:
+            await self.link.send_result(call_id, status, summary, writes=writes)
+        else:
+            await self.link.send_result(call_id, status, summary)
 
 
 def _unwrap(exc: BaseException) -> BaseException:
@@ -411,7 +465,7 @@ def _is_closed(e: MCPError) -> bool:
     return e.error.message.strip().lower() == "connection closed"
 
 
-async def _precheck(args: dict[str, Any], sc: ServerConfig, server_ok: bool) -> dict[str, Any]:
+async def _precheck(args: dict[str, Any], sc: ServerConfig, server_ok: bool, undo_dir: str = "") -> dict[str, Any]:
     """proxy_call fields (D31): `confinable` (the server can be confined and the precheck found no symlink, escape or excess), `links` and
     `links_lexical` (where a symlinked value leads in the kernel's order / with `..` resolved first; display only). A slow filesystem cannot stall the call: past PRECHECK_TIMEOUT_S it is `confinable: false` (a human is asked). The
     thread is not stopped by the timeout; that only costs a thread, never an allow."""
@@ -419,8 +473,17 @@ async def _precheck(args: dict[str, Any], sc: ServerConfig, server_ok: bool) -> 
         ok, links, lexical = await asyncio.wait_for(asyncio.to_thread(confine.precheck, args, sc), PRECHECK_TIMEOUT_S)
     except Exception:
         ok, links, lexical = False, {}, {}
-    return {"confinable": bool(server_ok and ok), **({"links": links} if links else {}),
-            **({"links_lexical": lexical} if links and lexical else {})}
+    out = {"confinable": bool(server_ok and ok), **({"links": links} if links else {}),
+           **({"links_lexical": lexical} if links and lexical else {})}
+    if confine.is_write_shaped(args):                       # D32: can THIS write be an overwrite of one existing plain file with a before-image
+        try:
+            wok, why = await asyncio.wait_for(asyncio.to_thread(confine.write_check, args, sc, undo_dir), PRECHECK_TIMEOUT_S)
+        except Exception:
+            wok, why = False, "bad_path"
+        out["write_confinable"] = bool(server_ok and wok)
+        if not out["write_confinable"]:
+            out["write_why"] = why if why in confine.WRITE_WHYS else "unsupported"
+    return out
 
 
 PRECHECK_TIMEOUT_S = 2.0

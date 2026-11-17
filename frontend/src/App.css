@@ -708,6 +708,8 @@
 .inbox-boundary-chip { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; border: 1px solid #4b5563; color: #d1d5db; overflow-wrap: anywhere; }
 .inbox-boundary-chip.unsandboxed { color: #fecaca; border-color: #ef4444; background: rgba(239, 68, 68, 0.2); }
 .inbox-boundary-chip.weak { color: #fde68a; border-color: #f59e0b; background: rgba(245, 158, 11, 0.2); }
+.inbox-write { margin-bottom: 8px; padding: 8px 10px; border: 2px solid #8b5cf6; border-radius: 6px; background: rgba(139, 92, 246, 0.16); color: #ddd6fe; font-size: 13px; overflow-wrap: anywhere; }
+.inbox-writes { margin-top: 4px; font-size: 12px; color: #c4b5fd; overflow-wrap: anywhere; }
 .inbox-secrets { margin-bottom: 8px; padding: 10px 12px; border: 2px solid #f59e0b; border-radius: 6px; background: rgba(245, 158, 11, 0.18); color: #fde68a; font-weight: 700; font-size: 13px; overflow-wrap: anywhere; }
 
 /* ===== IDENTITY ===== */

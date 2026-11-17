@@ -38,10 +38,33 @@ to add); a call with a path-slot argument (`path`, `paths`, `source`, `destinati
 `confine` asks; a non-empty `confine` on a server the proxy cannot confine asks (reason `unconfinable`); a `default: allow` asks for a call with a
 path-slot argument. A custom argument name (`file_path`) is a path only if the rule lists it in `confine`; `lint` WARNS (it does not reject: only the operator
 knows the tool) when `confine: {}` is paired with an `arg_keys` entry that looks like a path (`file_path`, `filepath`, `filename`, `dir`, `src`, `dest`, `uri`, `url`,
-`name`, or anything ending in `path`, `paths`, `file`, `dir`): such a call would otherwise run unconfined in the session process. A write cannot be confined (only `read` and
-`list` exist): auto-allow writes with `confine` and they fail with EACCES; keep writes on `ask`. Standing rules made from a card ("Always allow")
-get `arg_keys` = the call's argument names and `confine` = `read` on its path arguments. An "Always allow" for a call with a path-like argument
+`name`, or anything ending in `path`, `paths`, `file`, `dir`): such a call would otherwise run unconfined in the session process. `read` and `list` cannot write: an
+auto-allow with only those fails with EACCES on a write. The one write that can be confined is the NARROW `write` right (below, DECISIONS D32). Standing rules made
+from a card ("Always allow") get `arg_keys` = the call's argument names and `confine` = `read` on its path arguments (never `write`: an "Always allow" on a write card
+builds a rule whose writes fail with EACCES, which a test pins). An "Always allow" for a call with a path-like argument
 that is not a confine slot (Desktop Commander's `edit_block` `file_path`) is refused (`cannot_build`; the card stays a normal card): `confine: {}` would run it unconfined.
+
+**The `write` right (DECISIONS D32).** `{"path": "write"}` lets an allow rule OVERWRITE one existing plain file: READ_FILE | WRITE_FILE | TRUNCATE on exactly that
+inode (the filesystem server's `write_file` and `edit_file` open an existing file read-write, truncate and write it in place; neither uses a temp file and a rename).
+It is deliberately narrow and a rule that is not is a policy ERROR at load (so every call is held until fixed): `confine` must be exactly `{"path": "write"}`, the rule
+must name its `tool`, narrow `path` with a `glob` that names something literal (a single pattern or a LIST of patterns, any of which may match; `*` alone is refused),
+and bound what is written with `max_len` on `content` or `edits` (the engine cannot examine a string longer than 20,000 characters, so a larger one never matches).
+Create, move, mkdir and delete are not offered: they need directory rights, and a directory grant would let `rename`, `link` and `unlink` escape an exact grant. The hub
+allows a write only when the PROXY says `write_confinable: true` (an exact `true`; an older proxy sends nothing and its writes ask, reason `write_unsupported`), which it
+does only for an existing regular file with one name (`st_nlink == 1`), no exec bit, at most 256 KiB, found by `openat2` with no symlink beneath one of the server's
+`sandbox.write` directories (the ceiling), on a kernel with Landlock ABI >= 3, with a before-image that can be kept. Anything else is a card (`write_why` on the card says
+which). The proxy copies the file BEFORE the worker starts (`<undo_dir>/<call_id>/<n>`, mode 0600, outside every write directory) and reports `writes` (path, inode,
+sha256 and size before and after, `replaced`, the copy's place) in the result, which the hub logs in `call_result` and `eventlog_cli show` prints. The documented undo is
+`cp <undo> <path>`. A human-approved write is NOT confined, as before.
+
+Starter rules (`allow-write-docs` for `write_file`, `allow-edit-docs` for `edit_file`): extensions `.md .txt .rst .csv .log` only, `arg_keys` exactly `path`+`content`
+(`path`+`edits`+`dryRun`), content at most 20,000 characters; edits: at most 50 of them (counted by the policy) and at most 20,000 characters of text in all of them together (checked by the proxy precheck: the policy language cannot measure text inside a list, a larger edit is a card with reason `edits_too_large`). `ask-sensitive-write-path` beats them for `write_file`/`edit_file` whose `path` contains, in
+any case, `.git/`, `.github/`, `.gitlab-ci`, `.circleci`, `jenkinsfile`, `.husky`, `.vscode`, `.claude`, `.cursor`, `claude.md`, `agents.md`, `gemini.md`,
+`copilot-instructions`, `.bashrc`, `.zshrc`, `.profile`, `.bash_profile`, `.zprofile`, `.envrc`, `authorized_keys`, `crontab`, `.ssh`, `.env`, `requirements`, `constraints`, `cmakelists`, `skill.md`, `agent.md`, `conventions.md`, `.windsurf`, `.clinerules`, `.roo`, `.continue` or `.aider` (files a package manager, a build or a coding agent obeys; plus the older sensitive-path needles). The
+needles are advice-grade (a renamed file passes them); the kernel's one-inode, one-name, no-exec rules and the extension list carry the safety. Do NOT widen the
+extensions to `.json .yaml .toml .py .js .sh`: a written `package.json`, workflow, hook or `conftest.py` is code a human or a build RUNS later, which the kernel cannot judge.
+Desktop Commander's `write_file` (extra `mode`) and `edit_block` (`file_path`) stay asks. `lint` warns about a write rule next to `SENTINEL_POLICY_WRITABLE=1`: keep the policy
+file and the event log outside every `sandbox.write` directory. `policy_cli explain/test` honour `--unconfinable`; `test` assumes writes are NOT confinable (the replay cannot know a file exists).
 
 ## How a decision is made
 1. `deny` beats `ask` beats `allow`; none matching => `default` (`ask` unless you set it). The rule shown is the most specific one of the winning class.
@@ -138,3 +161,12 @@ cover UDP or pathname unix sockets. (6) The threat model is a trusted server dri
 (7) Human-approved calls and the legacy `auto_approve` list (no policy) are not confined; the card's link target is a hint and can differ from what the server
 opens: for `lnk/../b` it shows both resolutions (`..` after the link, and `..` resolved first as Node does) and says a human-approved call is not confined. (8) A one-shot worker does not see a session server's in-memory state (use it for stateless path tools) and costs a server start per auto-allowed read
 (about 0.2 s for the filesystem server, 0.8 s for Desktop Commander, measured).
+
+**Write confinement limits (DECISIONS D32).** The kernel names WHICH inode may be written, never WHAT the bytes mean. (1) An allowed doc can still steer a later reader
+(prompt injection into a `.md` the agent re-reads) and a granted file can be truncated to empty (undo: the before-image). (2) PINNED GAPS, each with a test that
+asserts the bad outcome: a hard link made by another process of the same user between the worker's `fstat` and the server's `open` (a build step, an approved shell,
+the window is one worker start, ~0.2-1 s) names the granted inode a second time; a bind mount of a sensitive file under a harmless name is one file with one name; `chmod`,
+`chown`, `utimes` and xattrs are not Landlock rights; the file may change between the snapshot and the call (the after-image records whoever wrote last). (3) A file that is
+legitimately multiply linked (backup farms, pnpm stores) always asks. (4) A write directory that holds something else sensitive under a harmless name is writable
+if the name passes the needles: pick narrow write directories. (5) A `sandbox.write` entry of a confinable server may not be, contain or lie inside the undo store, and may not
+contain the proxy's config file (refused at config load); the hub's policy file and DB are the operator's to keep outside write directories.

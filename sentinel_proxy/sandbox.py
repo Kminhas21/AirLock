@@ -39,7 +39,8 @@ RLIMIT_KEYS = ("cpu_s", "mem_mb", "nofile", "nproc", "fsize_mb")
 SPEC_KEYS = ("read", "write", "runtime", "network", "env_allow", "rlimits", "require")
 GRANTS_KEY = "grants"                  # internal: set by the proxy for a confined worker, never accepted from operator config
 MAX_GRANTS = 256                       # 64 values x 4 bases
-GRANT_RIGHTS = {"read": 1 << 2, "list": 1 << 3}       # FS_READ_FILE on exactly that file; FS_READ_DIR beneath that directory
+WRITE_MIN_ABI = 3                      # TRUNCATE is ABI 3 (kernel 6.2): below it truncate(2) of any file the uid may write is not mediated
+WRITE_MAX_BYTES = 256 * 1024           # a file larger than this has no before-image, so no write grant (DECISIONS D32)
 MAX_PATHS = 200
 MAX_PATH_LEN = 4096
 MAX_ENV_NAMES = 200
@@ -58,6 +59,9 @@ FS_MAKE_CHAR, FS_MAKE_DIR, FS_MAKE_REG, FS_MAKE_SOCK, FS_MAKE_FIFO, FS_MAKE_BLOC
                                                                                                  1 << 11, 1 << 12)
 FS_REFER, FS_TRUNCATE, FS_IOCTL_DEV = 1 << 13, 1 << 14, 1 << 15            # ABI 2, 3, 5
 NET_BIND_TCP, NET_CONNECT_TCP = 1 << 0, 1 << 1                              # ABI 4
+# FS_READ_FILE on exactly that file; FS_READ_DIR beneath that directory; `write` = READ + WRITE + TRUNCATE on exactly one existing regular file
+# (O_RDWR needs READ_FILE; the filesystem server opens an existing file read-write and ftruncates it). No EXECUTE, MAKE_*, REMOVE_*, REFER.
+GRANT_RIGHTS = {"read": FS_READ_FILE, "list": FS_READ_DIR, "write": FS_READ_FILE | FS_WRITE_FILE | FS_TRUNCATE}
 _FS_BASE = (FS_EXECUTE | FS_WRITE_FILE | FS_READ_FILE | FS_READ_DIR | FS_REMOVE_DIR | FS_REMOVE_FILE | FS_MAKE_CHAR | FS_MAKE_DIR |
             FS_MAKE_REG | FS_MAKE_SOCK | FS_MAKE_FIFO | FS_MAKE_BLOCK | FS_MAKE_SYM)
 _FILE_RIGHTS = FS_EXECUTE | FS_WRITE_FILE | FS_READ_FILE | FS_TRUNCATE | FS_IOCTL_DEV      # rights that make sense for a non-directory
@@ -146,6 +150,8 @@ def _grants(v: Any) -> list:
             raise SandboxSpecError("grants: a value must be a non-empty string without NUL")
         if not isinstance(right, str) or right not in GRANT_RIGHTS:
             raise SandboxSpecError(f"grants: right must be one of {', '.join(GRANT_RIGHTS)}")
+        if right == "write" and (value.startswith("/") or ".." in value.split("/")):
+            raise SandboxSpecError("grants: a write grant: the value must be a relative path beneath its base (no leading '/', no '..')")
         out.append([base, value, right])
     return out
 
@@ -294,7 +300,7 @@ def _openat2(dirfd: int, path: str, flags: int, resolve: int) -> int:
     return int(fd)
 
 
-def open_beneath(base: str, value: str) -> int:
+def open_beneath(base: str, value: str, flags: int = os.O_PATH) -> int:
     """O_PATH fd of the object the kernel finds by walking `value` beneath `base` with no symlink anywhere (RESOLVE_GRANT). An absolute
     value is walked from '/'. Raises OSError: ELOOP (a symlink), EXDEV (escapes the base), ENOENT, ... The base itself is operator
     config (a server's directory argument) and is opened normally."""
@@ -302,20 +308,38 @@ def open_beneath(base: str, value: str) -> int:
         base, value = "/", value.lstrip("/") or "."
     bfd = os.open(base, os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
-        return _openat2(bfd, value, os.O_PATH | os.O_CLOEXEC, RESOLVE_GRANT)
+        return _openat2(bfd, value, flags | os.O_CLOEXEC, RESOLVE_GRANT)
     finally:
         os.close(bfd)
 
 
+def write_abi_ok(abi: int) -> bool:
+    return abi >= WRITE_MIN_ABI
+
+
+def write_grant_ok(st: Any) -> bool:
+    """May a `write` grant cover this object (an os.stat result)? A regular file (no directory, FIFO, device, link), exactly one name
+    (st_nlink == 1: a grant is on the INODE, so a second name, say a hard link to a credential, would be writable under it), no execute bit
+    for anyone (what is written is never a program), and small enough to have a before-image."""
+    return (stat.S_ISREG(st.st_mode) and st.st_nlink == 1 and not st.st_mode & 0o111 and st.st_size <= WRITE_MAX_BYTES)
+
+
 def open_grant(base: str, value: str, right: str) -> int | None:
     """-> O_PATH fd to grant `right` on, or None (no grant): the walk failed, or the object is the wrong kind (`read` is for a
-    non-directory only, so it never covers what is beneath; `list` is for a directory only)."""
+    non-directory only, so it never covers what is beneath; `list` is for a directory only; `write` is for an existing plain file with one
+    name, see `write_grant_ok`, and its value is always walked beneath its base, never from `/`)."""
+    if right == "write" and (value.startswith("/") or ".." in value.split("/")):
+        return None
     try:
         fd = open_beneath(base, value)
     except (OSError, ValueError):
         return None
     try:
-        if stat.S_ISDIR(os.fstat(fd).st_mode) == (right == "list"):
+        st = os.fstat(fd)
+        if right == "write":
+            if write_grant_ok(st):
+                return fd
+        elif stat.S_ISDIR(st.st_mode) == (right == "list"):
             return fd
     except OSError:
         pass

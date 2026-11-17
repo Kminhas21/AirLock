@@ -1,7 +1,7 @@
 // inboxView.ts — pure helpers for the Inbox cards: the score bar, outcome words, outgoing frames and toast texts.
 // The UI never composes a policy rule: it only asks the hub for a (verdict, scope) on a call the hub has seen.
 
-import type { Forbidden, RuleResult } from "./inboxRoute";
+import type { Forbidden, RuleResult, WriteWhy } from "./inboxRoute";
 import { singleLine } from "./safeText";
 
 export const MAX_NOTE = 200;
@@ -119,3 +119,19 @@ export function signInErrorText(reason: "unauthorized" | "throttled" | null): st
   if (reason === "unauthorized") return "Sign-in failed: the token was not accepted.";
   return null;
 }
+
+/** D32: the words for what the proxy found about a write-shaped call (a closed set; the card never shows the proxy's own text). */
+export const WRITE_OK_TEXT = "overwrites an existing file the proxy can confine (a rule or the operator held it)";
+export const WRITE_WHY_TEXT: Record<WriteWhy, string> = {
+  unsupported: "this server or kernel cannot confine a write (needs a sandbox with runtime, a write directory and Landlock ABI 3)",
+  bad_path: "the path is not an absolute, normalised path",
+  outside_write_dir: "the file is outside the server's write directories",
+  new_file: "creates a new file (only overwriting an existing file can be confined)",
+  symlink: "the name is, or goes through, a symbolic link",
+  not_regular: "the target is not a regular file (a directory, FIFO or device)",
+  hard_link: "the file has more than one name (a hard link)",
+  executable: "the file is executable",
+  too_large: "the file is larger than 256 KiB, too big to keep a before-image",
+  no_before_image: "no before-image could be kept (undo store missing, not private, full or the disk is)",
+  edits_too_large: "the edits carry more than 20,000 characters of text in total",
+};

@@ -73,7 +73,7 @@ FIXTURE = [("s1", [_call("read_file", {"path": "/project/a.txt"}),
 def test_counts_sandboxed_by_verdict_tool_rule_and_cause():
     r = _measure(FIXTURE, True)
     assert r["calls"] == 6 and r["verdicts"] == {"allow": 3, "ask": 3, "deny": 0}
-    assert r["causes"] == {"rule:ask-sensitive-path": 1, "default": 2}
+    assert r["causes"] == {"rule:ask-sensitive-path": 1, "default": 1, "write_unsupported": 1}       # a doc write: the replay cannot know the file exists
     assert r["by_tool"]["read_file"] == {"allow": 1, "ask": 1, "deny": 0}
     assert r["by_tool"]["list_directory"] == {"allow": 1, "ask": 1, "deny": 0}
     assert r["ask_rules"] == {"ask-sensitive-path": 1}
@@ -82,9 +82,9 @@ def test_counts_sandboxed_by_verdict_tool_rule_and_cause():
 
 def test_unsandboxed_servers_add_unconfinable_asks_only_where_a_path_is_confined():
     sb, un = _measure(FIXTURE, True), _measure(FIXTURE, False)
-    assert un["causes"] == {"rule:ask-sensitive-path": 1, "default": 2, "unconfinable": 2}
+    assert un["causes"] == {"rule:ask-sensitive-path": 1, "default": 1, "unconfinable": 3}
     assert un["verdicts"] == {"allow": 1, "ask": 5, "deny": 0}          # only get_current_time ({} confine) stays allowed
-    assert un["unconfinable_by_rule"] == {"allow-read-file": 1, "allow-read-only-fs": 1}
+    assert un["unconfinable_by_rule"] == {"allow-read-file": 1, "allow-read-only-fs": 1, "allow-write-docs": 1}
     assert sb["causes"].get("unconfinable", 0) == 0
 
 
@@ -206,3 +206,24 @@ def test_starter_replay_agrees_with_policy_cli_replay():
     props = [p for f in sorted((ROOT / "eval" / "traces_v3").glob("*.json")) for p in policy_cli._read_traces(str(f))]
     theirs = policy_cli.run_replay(pol, props, None, "", confinable=True)["verdicts"]
     assert mine == theirs
+
+
+# ---- D32: the narrow write right -------------------------------------------------------------------------------------------
+
+def test_a_doc_write_is_asked_as_write_unsupported_by_default_and_allowed_at_the_ceiling():
+    """The replay cannot know a file exists: by default no write is confinable (the starter's `write_unsupported` ask); the ceiling assumes
+    every file exists and the proxy vouched for it."""
+    s = [("s", [_call("write_file", {"path": "/project/notes.md", "content": "x"}), _call("write_file", {"path": "/project/a.py", "content": "x"}),
+                _call("write_file", {"path": "/project/.github/x.md", "content": "x"})])]
+    lo, hi = _measure(s, True), cn.measure(cn.load_policy(STARTER), s, confinable=True, write_confinable=True)
+    assert lo["verdicts"] == {"allow": 0, "ask": 3, "deny": 0} and lo["causes"] == {"write_unsupported": 1, "default": 1, "rule:ask-sensitive-write-path": 1}
+    assert hi["verdicts"] == {"allow": 1, "ask": 2, "deny": 0} and hi["allow_rules"] == {"allow-write-docs": 1}
+
+
+def test_the_cli_flag_assumes_writes_confinable(tmp_path, capsys):
+    f = tmp_path / "t.json"
+    f.write_text(json.dumps([{"id": "t", "steps": [{"proposal": {"tool": "write_file", "args": {"path": "/p/a.md", "content": "x"}, "label": "ok"}}]}]))
+    assert cn.main(["--traces", str(f), "--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["corpora"][0]["sandboxed"]["verdicts"]["allow"] == 0
+    assert cn.main(["--traces", str(f), "--json", "--assume-writes-confinable"]) == 0
+    assert json.loads(capsys.readouterr().out)["corpora"][0]["sandboxed"]["verdicts"]["allow"] == 1

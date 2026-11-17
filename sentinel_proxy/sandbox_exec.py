@@ -159,16 +159,21 @@ def main(argv=None, *, execve=os.execve) -> int:
     if give_up():
         return EXIT_FAIL_CLOSED
     # (e) Landlock: filesystem (+ TCP deny-all when it stands in for the netns), with a confined worker's exact grants opened right before it
-    grants, granted = spec.get(sandbox.GRANTS_KEY), []
+    grants, granted, write_granted = spec.get(sandbox.GRANTS_KEY), [], []
     grant_fds: list = []
 
     def landlock() -> None:
+        if any(g[2] == "write" for g in grants or []) and not sandbox.write_abi_ok(abi):
+            raise OSError(0, f"a write grant needs Landlock ABI {sandbox.WRITE_MIN_ABI} (truncate is not mediated below it); this host has {abi}")
         for base, value, right in grants or []:
             fd = sandbox.open_grant(base, value, right)
             if fd is None:
                 continue                                         # no grant for this value: never a wider one
             grant_fds.append((fd, sandbox.GRANT_RIGHTS[right]))
             granted.append(value)
+            if right == "write":                                 # the proxy compares this with its before-image (same inode, one name)
+                o = os.fstat(fd)
+                write_granted.append({"value": value, "dev": o.st_dev, "ino": o.st_ino, "nlink": o.st_nlink})
         sandbox.restrict_landlock(abi, sandbox.fs_rules(spec, home), deny_tcp=deny_tcp, fd_rules=grant_fds)
 
     if abi >= 1:
@@ -200,6 +205,8 @@ def main(argv=None, *, execve=os.execve) -> int:
     status = {"layers": layers, "missing": missing, "network": net, "landlock_abi": abi, "home": home if home != "/nonexistent" else None}
     if grants is not None:
         status.update(confined=True, granted=granted)
+        if write_granted:
+            status["write_granted"] = write_granted
     _err("SENTINEL_SANDBOX_STATUS " + json.dumps(status, sort_keys=False))
     os.closerange(3, fd_limit + 1)                               # nothing inherited from the proxy may leak into the server
     try:

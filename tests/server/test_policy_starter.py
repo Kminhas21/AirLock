@@ -56,6 +56,7 @@ def test_starter_lints_clean():
 
 STARTER_CONFINE = {"allow-read-file": {"path": "read"}, "allow-read-multiple": {"paths": "read"}, "allow-read-only-fs": {"path": "list"},
                    "allow-list-sizes": {"path": "list"}, "allow-tree": {"path": "list"}, "allow-search": {"path": "list"},
+                   "allow-write-docs": {"path": "write"}, "allow-edit-docs": {"path": "write"},
                    "allow-read-only-other": {}, "allow-memory-search": {}, "allow-memory-open": {}, "allow-time-now": {},
                    "allow-time-convert": {}}
 
@@ -440,8 +441,8 @@ def test_icontains_any_is_listed_and_explain_prints_it(tmp_path, capsys):
 
 
 def test_starter_is_small_and_hand_editable():
-    assert os.path.getsize(STARTER) < 6144
-    assert len(P.load_policy(STARTER).rules) <= 20
+    assert os.path.getsize(STARTER) < 9216
+    assert len(P.load_policy(STARTER).rules) <= 22          # 20 + the two write allows and the write ask (D32), minus nothing: still one screen per rule
 
 
 # ---------------------------------------------------------------------------------------------------- path spelling variants
@@ -532,4 +533,4 @@ def test_an_explicit_is_url_false_is_held_since_arg_keys(pol, args):
 
 def test_starter_stays_small_with_the_url_rules():
     p = P.load_policy(STARTER)
-    assert len(p.rules) <= 20 and os.path.getsize(STARTER) < 6144
+    assert len(p.rules) <= 22 and os.path.getsize(STARTER) < 9216

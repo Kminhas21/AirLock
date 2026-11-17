@@ -31,7 +31,7 @@ def test_confine_is_accepted_on_allow_rules_and_part_of_the_digest():
 
 @pytest.mark.parametrize("confine, msg", [
     ([], "must be an object"),
-    ({"path": "write"}, "read"),
+    ({"path": "append"}, "read"),
     ({"path": True}, "read"),
     ({"other": "read"}, "arg_keys"),
     ({f"k{i}": "read" for i in range(21)}, "at most 20"),

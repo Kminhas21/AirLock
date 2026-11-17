@@ -56,7 +56,11 @@ verified with 5,879 events. The hub is single-process by design, so this is its 
   (K0-K5: a link, `..` after a linked dir, a Unicode respelling, a kernel-order decoy, a 4th/5th allowed dir, a decoy in another base) is run as is
   (held, or auto-allowed and denied by the kernel) AND with `SENTINEL_CONFINE_PRECHECK=force_true` (auto-allowed, no card, the server gets it, EACCES);
   `SECRET-<uuid>` is in neither the result nor the event log (results logged); plain reads, lists, trees, `read_multiple_files` and Desktop Commander reads
-  are auto-allowed with the right content; a human-approved write still lands through the session process. The starter policy on the real (sandboxed)
+  are auto-allowed with the right content; a human-approved write still lands through the session process. The narrow write right (D32, `test_write_confine_live.py`): an overwrite of an existing
+  `.md`/`.txt` file is auto-allowed with no card, in place (same inode), with a before-image whose sha256 equals the old bytes and a `writes` record in the event log; create, move, mkdir,
+  source code, sensitive names (`.github/`, `CLAUDE.md`, a git hook, `.env`), a second name, a symlink, a file outside the write directory and every Desktop Commander write are held
+  (default) or refused by the proxy / worker / kernel (`force_true`), and the victims (`.env`, a bashrc-like file, a git hook) are compared byte for byte after every case;
+  K1-K5 run again with a write payload. The starter policy on the real (sandboxed)
   filesystem server and on Desktop Commander: a plain read is allowed with no card, `.env` and
   `read_file {isUrl: true}` reach a human, the denied secret is not returned and a local HTTP target gets 0 requests; `replay` agrees. Deny with a
   note: the note reaches the agent and the log; the retry of the same content is still a `denied_effect_match` alert, labelled "You suggested this

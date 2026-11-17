@@ -54,6 +54,28 @@ export interface PathLink {
 }
 export const MAX_LINKS = 64;
 
+/** D32: why the proxy could not confine a write-shaped call (closed set; anything else is dropped). */
+export const WRITE_WHYS = ["unsupported", "bad_path", "outside_write_dir", "new_file", "symlink", "not_regular", "hard_link", "executable", "too_large", "no_before_image", "edits_too_large"] as const;
+export type WriteWhy = (typeof WRITE_WHYS)[number];
+/** What the proxy found for a write-shaped call (display only; the hub decides from `write_confinable`). */
+export interface WriteInfo {
+  confinable: boolean;
+  why?: WriteWhy;
+}
+/** D32: one auto-allowed write as the proxy reports it after the call: which file, which inode, digests and sizes, and the before-image. */
+export interface WriteRecord {
+  path: string;
+  dev: number;
+  ino: number;
+  size_before: number;
+  sha256_before: string;
+  size_after: number | null;
+  sha256_after: string | null;
+  replaced: boolean;
+  undo: string;
+}
+export const MAX_WRITES = 64;
+
 export interface InboxSession {
   session_id: string;
   servers: string[];
@@ -148,6 +170,8 @@ export interface PendingCall {
   secrets_used: string[];
   /** Where symlinked path values lead, as the proxy resolves them (a hint; the server may differ). */
   links: PathLink[];
+  /** D32: a write-shaped call: what the proxy found (null = not reported / not a write). */
+  write: WriteInfo | null;
   session_summary: SessionSummary | null;
   /** Newest first, at most MAX_HISTORY. */
   session_history: HistoryItem[];
@@ -186,7 +210,7 @@ export interface ResolvedCall {
   decision: InboxDecision;
   reason: string;
   /** Filled by inbox_result (display only). */
-  result: { status: "ok" | "error"; summary: string } | null;
+  result: { status: "ok" | "error"; summary: string; writes?: WriteRecord[] } | null;
 }
 
 export interface InboxState {
@@ -405,6 +429,29 @@ function parseLinks(v: unknown, lexical?: unknown): PathLink[] {
   return out;
 }
 
+function parseWrite(v: unknown): WriteInfo | null {
+  if (!isRec(v) || typeof v.confinable !== "boolean") return null;
+  const why = typeof v.why === "string" && (WRITE_WHYS as readonly string[]).includes(v.why) ? (v.why as WriteWhy) : undefined;
+  return why && !v.confinable ? { confinable: false, why } : { confinable: v.confinable };
+}
+
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isInteger(v) && v >= 0;
+const isHex64 = (v: unknown): v is string => typeof v === "string" && /^[0-9a-f]{64}$/.test(v);
+
+function parseWrites(v: unknown): WriteRecord[] | undefined {
+  if (!Array.isArray(v) || v.length === 0 || v.length > MAX_WRITES) return undefined;
+  const out: WriteRecord[] = [];
+  for (const w of v) {
+    if (!isRec(w)) return undefined;
+    const path = str(w.path);
+    const undo = str(w.undo);
+    if (!path || !undo || !isCount(w.dev) || !isCount(w.ino) || !isCount(w.size_before) || !isHex64(w.sha256_before)) return undefined;
+    if (!(w.size_after === null || isCount(w.size_after)) || !(w.sha256_after === null || isHex64(w.sha256_after)) || typeof w.replaced !== "boolean") return undefined;
+    out.push({ path: singleLine(path, 4096), dev: w.dev, ino: w.ino, size_before: w.size_before, sha256_before: w.sha256_before, size_after: w.size_after, sha256_after: w.sha256_after, replaced: w.replaced, undo: singleLine(undo, 4096) });
+  }
+  return out;
+}
+
 function parseServers(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((s): s is string => typeof s === "string").slice(0, 50) : [];
 }
@@ -426,6 +473,7 @@ function parsePending(v: unknown, now: number, sessionFallback?: string): Pendin
     received_at: now,
     secrets_used: parseSecretNames(v.secrets_used),
     links: parseLinks(v.links, v.links_lexical),
+    write: parseWrite(v.write),
     session_summary: parseSummary(v.session_summary),
     session_history: parseHistory(v.session_history, MAX_HISTORY),
     earlier_denied: parseHistory(v.earlier_denied, MAX_EARLIER_DENIED, true),
@@ -545,9 +593,11 @@ export function reduceInbox(state: InboxState, event: unknown, now: number = Dat
       const call_id = id(event.call_id);
       if (session_id === null || call_id === null) return state;
       if (!state.resolved.some((r) => sameCall(r, session_id, call_id))) return state;
+      const writes = parseWrites(event.writes);
       const result = {
         status: event.status === "ok" ? ("ok" as const) : ("error" as const),
         summary: (str(event.summary) ?? "").slice(0, 300),
+        ...(writes ? { writes } : {}),
       };
       return {
         ...state,

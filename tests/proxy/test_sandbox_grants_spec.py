@@ -1,8 +1,8 @@
-"""`write` is refused at EVERY layer today (phase 1 of the "narrow write right" plan): when the right is added these become the acceptance
-tests, flipped on purpose. This file is the sandbox side: the grant list of a confined worker's spec (`sandbox._grants`, reached through
+"""The grant vocabulary at the sandbox layer: `read`, `list` and (phase 2, DECISIONS D32) `write`. Phase 1 pinned `write` as refused everywhere;
+the cases that became allowed were flipped on purpose, the rest stay as the negative control. This file is the sandbox side: the grant list of a confined worker's spec (`sandbox._grants`, reached through
 `validate_spec(..., internal=True)`), `sandbox_params`, the trampoline's `main`, and the exact error text. Other layers:
-  policy        tests/server/test_policy_confine.py, tests/server/test_policy_write_refused.py (load, lint, writer)
-  backend       tests/proxy/test_confine_precheck.py (`_confine_map`), tests/proxy/test_confine_write_refused.py (wire + proxy)
+  policy        tests/server/test_policy_confine.py, tests/server/test_policy_write.py (load, lint, floor), test_policy_starter_write.py
+  backend       tests/proxy/test_confine_precheck.py (`_confine_map`), tests/proxy/test_confine_write_wire.py (wire), test_confined_call_write.py (proxy)
 No process, no kernel feature needed: `sandbox_exec.main` is driven with a stub `execve` that must never be called."""
 import json
 
@@ -25,34 +25,46 @@ def bad(*grants, match, **kw):
 # --------------------------------------------------------------------------- the right
 
 
-@pytest.mark.parametrize("right", ["write", "WRITE", "Write", "read|write", "rw", "w", "create", "append", "truncate", "delete", "execute", "",
-                                   " read", "read ", "read\x00", "list,write", None, 1, True])
-def test_any_right_but_read_and_list_is_rejected_with_the_list_of_valid_ones(right):
-    bad(("/", "/w/a.txt", right), match=r"right must be one of read, list")
+@pytest.mark.parametrize("right", ["WRITE", "Write", "read|write", "rw", "w", "create", "append", "truncate", "delete", "execute", "",
+                                   " read", "read ", " write", "write ", "read\x00", "list,write", None, 1, True])
+def test_any_right_but_read_list_and_write_is_rejected_with_the_list_of_valid_ones(right):
+    bad(("/", "/w/a.txt", right), match=r"right must be one of read, list, write")
 
 
 @pytest.mark.parametrize("right", [["read"], {"read": 1}])
 def test_an_unhashable_right_is_a_spec_error_and_the_trampoline_exits_126(right):
     """`isinstance(right, str)` comes before the membership test, so a list / object is a SandboxSpecError, not a TypeError, and the
     trampoline never gets as far as exec."""
-    bad(("/", "/w/a.txt", right), match=r"right must be one of read, list")
+    bad(("/", "/w/a.txt", right), match=r"right must be one of read, list, write")
     called = []
     rc = sandbox_exec.main(["--spec", sandbox.encode_spec(spec(("/", "/w/a.txt", right))), "--", "/bin/true"], execve=lambda *a: called.append(a))
     assert rc == 126 and called == []
 
 
-def test_the_valid_rights_are_read_and_list_and_come_back_unchanged():
-    out = sandbox.validate_spec(spec(("/", "/w/a.txt", "read"), ("/w", "sub", "list")), internal=True)
-    assert out["grants"] == [["/", "/w/a.txt", "read"], ["/w", "sub", "list"]]
+def test_the_valid_rights_are_read_list_and_write_and_come_back_unchanged():
+    out = sandbox.validate_spec(spec(("/", "/w/a.txt", "read"), ("/w", "sub", "list"), ("/w", "notes.md", "write")), internal=True)
+    assert out["grants"] == [["/", "/w/a.txt", "read"], ["/w", "sub", "list"], ["/w", "notes.md", "write"]]
 
 
-def test_a_write_grant_next_to_valid_ones_rejects_the_whole_spec_not_just_the_entry():
-    bad(("/", "/w/a.txt", "read"), ("/", "/w/b.txt", "write"), ("/", "/w/c.txt", "read"), match="right must be one of")
+@pytest.mark.parametrize("value", ["/w/notes.md", "/notes.md", "../notes.md", "a/../notes.md", "a/..", "..", "./../x", "a\x00b", ""])
+def test_a_write_grant_must_be_a_relative_value_without_dotdot_so_it_is_always_walked_from_its_base(value):
+    """The ceiling: a write value is walked beneath ONE of the operator's write directories, never from `/` (an absolute value would be)."""
+    bad(("/w", value, "write"), match=r"write grant: the value must be a relative path|a value must be a non-empty string")
+
+
+def test_a_write_grant_with_an_absolute_value_is_refused_by_the_trampoline_too(capfd):
+    rc, called = run_main(("/w", "/etc/passwd", "write"))
+    assert rc == 126 and called == [] and "write grant: the value must be a relative path" in capfd.readouterr().err
+
+
+def test_a_bad_write_grant_next_to_valid_ones_rejects_the_whole_spec_not_just_the_entry():
+    bad(("/", "/w/a.txt", "read"), ("/w", "/abs/b.txt", "write"), ("/", "/w/c.txt", "read"), match="write grant")
+    bad(("/", "/w/a.txt", "read"), ("/w", "b.txt", "nope"), ("/", "/w/c.txt", "read"), match="right must be one of")
 
 
 def test_the_operators_write_directories_are_not_grants_and_stay_a_separate_key():
     out = sandbox.validate_spec(spec(("/", "/w/a.txt", "read"), write=["/data/out"]), internal=True)
-    assert out["write"] == ["/data/out"] and all(g[2] in ("read", "list") for g in out["grants"])
+    assert out["write"] == ["/data/out"] and all(g[2] in ("read", "list", "write") for g in out["grants"])
 
 
 # --------------------------------------------------------------------------- shape
@@ -108,16 +120,14 @@ def test_grants_are_internal_an_operators_config_can_never_carry_them():
 # --------------------------------------------------------------------------- the confine layer feeds the same validation
 
 
-def test_a_write_confine_map_produces_a_spec_the_sandbox_refuses():
-    """`confine.grant_specs` passes the right through unjudged (the policy and the wire already refused it); the sandbox is the last gate."""
+def test_a_write_confine_map_is_walked_beneath_the_operators_write_directory_never_from_slash():
     class SC:
-        args, cwd = ["/w"], None
-    specs = confine.grant_specs({"path": "/w/a.md"}, {"path": "write"}, SC())
-    assert specs == [["/", "/w/a.md", "write"]]
-    with pytest.raises(sandbox.SandboxSpecError, match="right must be one of"):
-        sandbox.validate_spec(confine.confined_spec(BASE, specs), internal=True)
-    with pytest.raises(sandbox.SandboxSpecError):
-        sandbox.sandbox_params(confine.confined_spec(BASE, specs), "/bin/true", [])
+        args, cwd, sandbox = ["/w"], None, {**BASE, "write": ["/w/docs", "/data"]}
+    assert confine.grant_specs({"path": "/w/docs/sub/a.md"}, {"path": "write"}, SC()) == [["/w/docs", "sub/a.md", "write"]]
+    assert confine.grant_specs({"path": "/data/a.md"}, {"path": "write"}, SC()) == [["/data", "a.md", "write"]]
+    for outside in ("/w/a.md", "/etc/passwd", "/w/docs", "/w/docs/", "/w/docs/../a.md", "/w/docs/./a.md", "/w/docsx/a.md", "a.md", ""):
+        assert confine.grant_specs({"path": outside}, {"path": "write"}, SC()) == [], outside
+    assert confine.grant_specs({"path": "/w/docs/a.md"}, {"path": "read"}, SC()) == [["/", "/w/docs/a.md", "read"]]
 
 
 # --------------------------------------------------------------------------- the trampoline refuses before it does anything
@@ -130,15 +140,15 @@ def run_main(*grants, **kw):
     return rc, called
 
 
-def test_the_trampoline_fails_closed_on_a_write_grant_and_never_runs_the_command(capfd):
-    rc, called = run_main(("/", "/w/a.md", "write"))
+def test_the_trampoline_fails_closed_on_an_unknown_right_and_never_runs_the_command(capfd):
+    rc, called = run_main(("/", "/w/a.md", "append"))
     err = capfd.readouterr().err
     assert rc == sandbox_exec.EXIT_FAIL_CLOSED == 126 and called == []
-    assert "invalid spec" in err and "right must be one of read, list" in err and "SENTINEL_SANDBOX_STATUS" not in err
+    assert "invalid spec" in err and "right must be one of read, list, write" in err and "SENTINEL_SANDBOX_STATUS" not in err
 
 
 def test_the_trampoline_fails_closed_on_a_nul_value_and_on_a_malformed_entry(capfd):
-    for grants in ([("/", "a\x00b", "read")], [("/",)], [("/", "x", "write"), ("/", "y", "read")]):
+    for grants in ([("/", "a\x00b", "read")], [("/",)], [("/", "x", "append"), ("/", "y", "read")]):
         rc, called = run_main(*grants)
         assert rc == 126 and called == []
     assert "invalid spec" in capfd.readouterr().err

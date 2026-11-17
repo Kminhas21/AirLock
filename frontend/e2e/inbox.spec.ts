@@ -93,6 +93,22 @@ test("a held call appears in the Inbox with exactly what the agent sent; approve
   expect(calls().map((c) => c.tool), "the denied call never reached the downstream").toEqual(["write_file"]);
 });
 
+test("a write call is shown as a write: the card says why the proxy could not confine it (D32); denying it forwards nothing", async ({ page }) => {
+  await page.goto("/");
+  await page.click('[data-testid="tab-inbox"]');
+  await expect(page.locator('[data-testid="inbox-connection"]')).toHaveAttribute("data-state", "connected");
+  const before = calls().length;
+  const res = agentCall("write_file", { path: "/tmp/notes.md", content: "hello" });
+  const card = page.locator('[data-testid="inbox-pending"]').first();
+  await expect(card).toBeVisible({ timeout: 30_000 });
+  // this downstream is not sandboxed, so the proxy says `unsupported`: the card names the write and the reason in words, not the proxy's text
+  await expect(card.locator('[data-testid="inbox-write"]')).toContainText("WRITE");
+  await expect(card.locator('[data-testid="inbox-write-why"]')).toContainText("cannot confine a write");
+  await card.locator('[data-testid="inbox-deny"]').click();
+  expect((await res).is_error).toBe(true);
+  expect(calls().length, "the denied write never reached the downstream").toBe(before);
+});
+
 test("an auto-approved tool is held with a critical alert when it repeats a denied effect, and mobile layout does not scroll", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await page.goto("/");

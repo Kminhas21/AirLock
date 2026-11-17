@@ -1,11 +1,13 @@
-"""LIVE: what an auto-allowed call can WRITE today (phase 1 of the "narrow write right" plan, workflow A4). The REAL filesystem server 1.0.0
+"""LIVE, NEGATIVE CONTROL for the `write` right (DECISIONS D32, workflow A4): what a call auto-allowed with only a `read` grant can WRITE (nothing).
+The positive side, where the grant IS `write`, is tests/live/test_write_confine_live.py. The REAL filesystem server 1.0.0
 behind the real proxy and hub, sandboxed with `runtime`. The policy auto-allows every write tool on files beneath `w/` with `confine: read`
 (exactly what a standing "Always allow" on a write card builds), so each call runs in a worker the kernel confines to READ_FILE on the objects
-the agent NAMED. There is no `write` right yet, so the matrix is: the server gets the call (no card), its own error says EACCES, and the tree
+the agent NAMED. This rule grants no `write` right, so the matrix is: the server gets the call (no card), its own error says EACCES, and the tree
 is byte-for-byte what it was (names, bytes, inodes, link counts), checked from outside. A control proves the same server CAN write: a call
 outside the rule is held, a human approves it, and the session process (its own sandbox) writes the file.
 
-When a `write` right is added, the rows that become allowed flip on purpose; the rest stay as the negative control."""
+Since D32 an overwrite of an existing doc CAN be confined with a `write` grant; a standing rule that grants only `read` (what an "Always allow" on
+a write card builds) still cannot write, which is what this file keeps pinned."""
 import json
 import os
 import stat

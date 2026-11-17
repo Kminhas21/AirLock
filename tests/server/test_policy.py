@@ -170,7 +170,7 @@ class TestFormat:
     @pytest.mark.parametrize("op,value", [
         ("equals", [1]), ("equals", {"a": 1}), ("equals", float("inf")), ("equals", "x" * 1001),
         ("in", "abc"), ("in", []), ("in", [[1]]), ("in", list(range(1001))),
-        ("glob", ["a"]), ("glob", ""), ("glob", "a" * 201), ("glob", 5),
+        ("glob", []), ("glob", [5]), ("glob", ""), ("glob", "a" * 201), ("glob", 5),     # a list of patterns is valid since D32
         ("under", "relative/path"), ("under", ""), ("under", "/a\x00b"), ("under", 3),
         ("contains", ""), ("contains", 5), ("max_len", -1), ("max_len", True), ("max_len", "3"), ("max_len", 1.5),
     ])

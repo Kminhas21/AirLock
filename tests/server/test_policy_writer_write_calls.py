@@ -132,7 +132,7 @@ def test_the_writer_never_emits_a_write_right_for_any_combination_of_tool_and_ar
 
 
 def test_the_only_rights_policy_accepts_in_a_confine_map_are_the_ones_the_writer_emits():
-    assert P.CONFINE_RIGHTS == ("read", "list")
+    assert P.CONFINE_RIGHTS == ("read", "list", "write")        # policy accepts `write` (D32) in a hand-written, bounded rule; the writer never emits it
     for right in ("read", "list"):
         policy_of({"id": "x", "verdict": "allow", "when": {"tool": "t", "arg_keys": ["path"]}, "confine": {"path": right}})
 

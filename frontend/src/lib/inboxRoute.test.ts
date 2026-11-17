@@ -104,6 +104,27 @@ describe("reduceInbox", () => {
     expect(s.pending.map((p) => p.session_id)).toEqual(["s1"]);
   });
 
+  it("write (D32): a pending call keeps the proxy's write finding, a reason outside the closed set is dropped, a malformed value is null", () => {
+    const pend = (write: unknown) => run([{ event: "inbox_pending", session_id: "s1", call_id: "c1", server: "fs", tool: "write_file", args: {}, write }]).pending[0];
+    expect(pend({ confinable: false, why: "new_file" })?.write).toEqual({ confinable: false, why: "new_file" });
+    expect(pend({ confinable: false, why: "edits_too_large" })?.write).toEqual({ confinable: false, why: "edits_too_large" });
+    expect(pend({ confinable: true })?.write).toEqual({ confinable: true });
+    expect(pend({ confinable: false, why: "<script>" })?.write).toEqual({ confinable: false });
+    for (const bad of [null, "x", 5, [], { why: "new_file" }, { confinable: "yes" }]) expect(pend(bad)?.write ?? null).toBeNull();
+    expect(run([{ event: "inbox_pending", session_id: "s1", call_id: "c1", server: "fs", tool: "t", args: {} }]).pending[0].write ?? null).toBeNull();
+  });
+
+  it("write (D32): inbox_result keeps well-formed writes and drops malformed ones, never failing the result", () => {
+    const base = run([{ event: "inbox_resolved", session_id: "s1", call_id: "c1", server: "fs", tool: "write_file", decision: "approve", reason: "policy" }]);
+    const good = { path: "/w/a.md", dev: 1, ino: 2, size_before: 6, sha256_before: "a".repeat(64), size_after: 12, sha256_after: "b".repeat(64), replaced: false, undo: "/u/0" };
+    const ok = run([{ event: "inbox_result", session_id: "s1", call_id: "c1", status: "ok", summary: "x", writes: [good] }], base);
+    expect(ok.resolved[0].result?.writes).toEqual([good]);
+    for (const bad of ["x", 5, [null], [{ ...good, sha256_before: 5 }], [{ ...good, path: "" }], [{ ...good, replaced: "no" }], Array(65).fill(good)]) {
+      const s = run([{ event: "inbox_result", session_id: "s1", call_id: "c1", status: "ok", summary: "x", writes: bad }], base);
+      expect(s.resolved[0].result).toEqual({ status: "ok", summary: "x" });
+    }
+  });
+
   it("inbox_result attaches the outcome to the resolved item and is ignored for unknown calls", () => {
     const base = run([pendingEv(), { event: "inbox_resolved", session_id: "s1", call_id: "c1", decision: "approve", reason: "human" }]);
     const s = run([{ event: "inbox_result", session_id: "s1", call_id: "c1", status: "ok", summary: "x".repeat(1000) }, { event: "inbox_result", session_id: "s1", call_id: "nope", status: "ok", summary: "y" }], base);

@@ -203,7 +203,7 @@ def test_a_policy_approval_carries_its_confine_map():
     assert decide({"decision": "approve", "reason": "human", "confine": {"path": "read"}}).confine is None   # only a policy approval
 
 
-@pytest.mark.parametrize("bad", ["x", [], {"path": "write"}, {"path": 1}, {"": "read"}, {f"k{i}": "read" for i in range(21)}])
+@pytest.mark.parametrize("bad", ["x", [], {"path": "append"}, {"path": 1}, {"": "read"}, {f"k{i}": "read" for i in range(21)}])
 def test_a_malformed_confine_map_denies(bad):
     d = decide({"decision": "approve", "reason": "policy", "confine": bad})
     assert not d.approved and d.reason == "invalid"

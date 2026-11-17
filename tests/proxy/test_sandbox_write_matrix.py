@@ -3,8 +3,9 @@ it holds only `read` / `list` grants. TODAY the answer is: nothing. Create, over
 mkdir, symlink, hard link, a neighbour's content, a name the grant was not for: every one is denied by the kernel, and after each run the
 test re-reads the tree from OUTSIDE and compares bytes, names, link counts and inodes, which is the strongest assertion (a worker could lie).
 
-This pins CURRENT behaviour. When a `write` right is added, the cases that become allowed must be flipped on purpose, and these stay as the
-negative control for every grant that is NOT `write`. The positive control (the private HOME is writable) proves the probe can write at all."""
+This is the NEGATIVE CONTROL for every grant that is NOT `write`: `read` and `list` grants still give no write of any kind (DECISIONS D32 added the
+`write` grant; its own matrix, where the same operations are allowed on exactly one inode, is tests/proxy/test_sandbox_write.py). The positive control
+(the private HOME is writable) proves the probe can write at all."""
 import atexit
 import errno
 import json
@@ -178,7 +179,7 @@ def test_a_hard_link_to_the_granted_inode_is_denied_and_the_link_count_stays_one
 
 def test_a_write_through_a_second_name_of_the_inode_is_a_pinned_read_only_fact(tree):
     """A hard link that already existed when the grant was made names the same inode: the grant is READ_FILE on it, so reading works under
-    either name and writing through either name is denied (the write right will have to refuse nlink > 1; today nothing can write)."""
+    either name and writing through either name is denied (the `write` grant refuses nlink > 1: tests/proxy/test_sandbox_write.py)."""
     os.link(tree / "a.txt", tree / "second.txt")
     before = snapshot(tree)
     ops = [("read", f"{tree}/second.txt", ""), ("overwrite", f"{tree}/second.txt", ""), ("overwrite", f"{tree}/a.txt", ""),

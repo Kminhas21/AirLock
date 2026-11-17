@@ -51,7 +51,7 @@ MAX_ICASE_STR = 4096            # ... of at most this many characters each; anyt
 MAX_FILE_BYTES = 1_000_000      # engine: policy file size
 MAX_ARG_KEYS = 100              # engine: entries of a `when.arg_keys` list
 MAX_CONFINE = 20                # entries of a rule's `confine` map
-CONFINE_RIGHTS = ("read", "list")
+CONFINE_RIGHTS = ("read", "list", "write")
 # argument names that are paths whatever the rule says (the starter's ask rules read them); an allowed call with one of them outside the
 # deciding rule's `confine` asks (DECISIONS D31). sentinel_proxy/confine.py has the same set (a test keeps them equal).
 PATH_SLOTS = frozenset({"path", "paths", "source", "destination", "directory", "file"})
@@ -92,7 +92,7 @@ class Decision:
     verdict: str                  # allow | deny | ask
     rule_id: str | None           # deciding rule; None for the default / a rule error without an ask rule
     matched: tuple                # ids of ALL matching rules, in file order
-    reason: str                   # rule:<id> | default | alert | secrets | rule_error:<id> | engine_error | unconfined | unconfinable
+    reason: str                   # rule:<id> | default | alert | secrets | rule_error:<id> | engine_error | unconfined | unconfinable | write_unsupported
     escalated: bool = False       # allow -> ask because an alert is present
     confine: dict | None = None   # an allow's deciding rule's `confine` map ({} = not paths); None otherwise
 
@@ -212,10 +212,11 @@ def _check_arg(a, where: str, errs: list) -> ArgCond | None:
         else:
             out = tuple(val)
     elif op in ("glob", "not_glob"):
-        pl = _pattern_list(val, f"{where}.value", errs) if isinstance(val, str) else None
-        if not isinstance(val, str):
-            errs.append(f"{where}.value: must be a glob string")
-        out = pl[0] if pl else None
+        if isinstance(val, (str, list)):
+            pl = _pattern_list(val, f"{where}.value", errs)
+            out = (pl[0] if isinstance(val, str) else pl) if pl else None      # a list: any pattern may match (not_glob: none does)
+        else:
+            errs.append(f"{where}.value: must be a glob string or a list of glob strings")
     elif op in ("under", "not_under"):
         if not isinstance(val, str) or not val:
             errs.append(f"{where}.value: must be a non-empty string")
@@ -345,7 +346,37 @@ def _check_when(w, where: str, errs: list):
     return server, tool, args, dest, party, alert, spec, secrets, arg_keys
 
 
-def _check_confine(r: dict, verdict, arg_keys, where: str, errs: list) -> dict | None:
+def _narrow_glob(c: "ArgCond") -> bool:
+    """A glob on `path` that names something literal (an extension, a directory): `*`, `**`, `/*` or `?*` match everything and narrow nothing."""
+    pats = c.value if isinstance(c.value, tuple) else (c.value,)
+    return bool(pats) and all(isinstance(p, str) and re.search(r"[^*?/\[\]]", p) for p in pats)
+
+
+def _check_write(c: dict, tool, args, where: str, errs: list) -> bool:
+    """`write` (DECISIONS D32) overwrites ONE existing file the agent named. It is only for `path`, alone in the map, on a rule that names its
+    tool, narrows `path` with a glob (an extension list) and bounds what is written (`max_len` on `content` or `edits`): an unbounded write rule
+    is refused at load."""
+    ok = True
+    if set(c) != {"path"}:
+        bad = sorted(k for k, v in c.items() if v == "write" and k != "path")
+        if bad:
+            errs.append(f"{where}.confine.{_show(bad[0])}: \"write\" is only for the argument 'path'")
+        else:
+            errs.append(f"{where}.confine: a write rule confines exactly 'path' (and nothing else)")
+        return False
+    if tool is None:
+        errs.append(f"{where}.confine: a write rule needs when.tool (name the tool that writes)")
+        ok = False
+    if not any(a.op == "glob" and a.path == ("path",) and _narrow_glob(a) for a in args):
+        errs.append(f"{where}.confine: a write rule needs a glob on path in when.args that names something literal (an extension list such as *.md)")
+        ok = False
+    if not any(a.op == "max_len" and len(a.path) == 1 and a.path[0] in ("content", "edits") for a in args):
+        errs.append(f"{where}.confine: a write rule needs max_len on content or edits in when.args (how much may be written)")
+        ok = False
+    return ok
+
+
+def _check_confine(r: dict, verdict, arg_keys, where: str, errs: list, args=(), tool=None) -> dict | None:
     if "confine" not in r:
         return None
     c = r["confine"]
@@ -364,11 +395,14 @@ def _check_confine(r: dict, verdict, arg_keys, where: str, errs: list) -> dict |
     ok = True
     for k, v in c.items():
         if not isinstance(v, str) or v not in CONFINE_RIGHTS:
-            errs.append(f"{where}.confine.{_show(k)}: must be \"read\" (exactly that file) or \"list\" (names beneath that directory)")
+            errs.append(f"{where}.confine.{_show(k)}: must be \"read\" (exactly that file), \"list\" (names beneath that directory) "
+                        f"or \"write\" (overwrite that one existing file)")
             ok = False
         elif k not in arg_keys:
             errs.append(f"{where}.confine: {_show(k)} is not in when.arg_keys")
             ok = False
+    if ok and "write" in c.values() and not _check_write(c, tool, args, where, errs):
+        ok = False
     return dict(c) if ok else None
 
 
@@ -425,7 +459,7 @@ def _build(data: Any) -> tuple[list, str, list]:
         if len(errs) > n0 or w is None:
             continue
         server, tool, args, dest, party, alert, spec, secrets, arg_keys = w
-        confine = _check_confine(r, verdict, arg_keys, where, errs)
+        confine = _check_confine(r, verdict, arg_keys, where, errs, args, tool)
         if len(errs) > n0:
             continue
         rules.append(Rule(rid, verdict, note, copy.deepcopy(r.get("when") or {}), server, tool, args, dest, party, alert, spec,
@@ -596,7 +630,9 @@ def _positive(op: str, val, v):
     if op == "in":
         return None if isinstance(v, (list, tuple, Mapping)) else any(_same(v, x) for x in val)
     if op == "glob":
-        return fnmatchcase(v, val) if isinstance(v, str) else None
+        if not isinstance(v, str):
+            return None
+        return any(fnmatchcase(v, x) for x in val) if isinstance(val, tuple) else fnmatchcase(v, val)
     if op == "under":
         return _under(v, val)
     if op == "contains":
@@ -872,12 +908,12 @@ class Policy:
             return Decision("ask", rid, ids, "secrets", True)
         return Decision(verdict, rid, ids, reason, False, confine if verdict == "allow" else None)
 
-    def evaluate_call(self, server, tool, args, *, confinable: bool, **kw) -> Decision:
-        """`evaluate`, then the confinement floors: how the hub decides a proxied call (DECISIONS D31)."""
-        return confinement_floor(self.evaluate(server, tool, args, **kw), args, confinable)
+    def evaluate_call(self, server, tool, args, *, confinable: bool, write_confinable: bool = False, **kw) -> Decision:
+        """`evaluate`, then the confinement floors: how the hub decides a proxied call (DECISIONS D31, D32)."""
+        return confinement_floor(self.evaluate(server, tool, args, **kw), args, confinable, write_confinable)
 
 
-def confinement_floor(d: Decision, args: Any, confinable: bool) -> Decision:
+def confinement_floor(d: Decision, args: Any, confinable: bool, write_confinable: bool = False) -> Decision:
     """Stricter only. An allow stands only when the proxy can make the kernel enforce it: its rule has a `confine` map, every path-slot
     argument of the call is in it, and (for a non-empty map) the server is confinable (`proxy_call.confinable` is exactly true). A default
     allow has no map: it stands for a call without path-slot arguments only."""
@@ -892,6 +928,8 @@ def confinement_floor(d: Decision, args: Any, confinable: bool) -> Decision:
         return Decision("ask", d.rule_id, d.matched, "unconfined", True)
     if d.confine and confinable is not True:
         return Decision("ask", d.rule_id, d.matched, "unconfinable", True)
+    if "write" in d.confine.values() and write_confinable is not True:      # D32: the proxy must say THIS write is one it can confine and keep a before-image of
+        return Decision("ask", d.rule_id, d.matched, "write_unsupported", True)
     return d
 
 

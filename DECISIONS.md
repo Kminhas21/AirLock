@@ -431,3 +431,45 @@ starter test. (10) Standing rules for the directory-listing tools (`policy.LIST_
 Mutants C14-C19 and F8 added.
 Not covered by the kernel (docs/policy.md "Confinement limits"): what was named is granted (hard links, bind mounts), metadata (`stat`, `readlink`), the system
 set / runtime / HOME, human-approved and legacy `auto_approve` calls, the network, a malicious server (D21), a session server's in-memory state.
+
+## D32: the narrow `write` right: an auto-allowed OVERWRITE of one existing doc, kernel-confined, with a before-image
+Headline: Landlock can say WHICH inode a worker may write; it cannot say what the bytes mean. So the only auto-allowed write is `write_file` / `edit_file` on an
+EXISTING `.md .txt .rst .csv .log` file that has one name, and a source-code write, a create, a move, a mkdir and every Desktop Commander write stay cards. Expect at
+most 0.4 cards per 100 calls saved on a coding agent (design measurement), and 10 of the 67 violation-labelled v3 proposals would be allowed IF their files existed
+(the ceiling, pinned): this buys little by design. Approved design: scratchpad `write_right_design.md` (built unchanged except the deviations below).
+Problem: D31 left every write a card ("a write cannot be confined": only `read` and `list` grants existed). The filesystem server's `write_file`/`edit_file` and Desktop
+Commander's append/`edit_block` overwrite an existing file IN PLACE (open read-write, ftruncate, write; no temp file and rename; probed with strace on kernel 6.18, ABI 7),
+so an exact-FILE Landlock grant (READ_FILE | WRITE_FILE | TRUNCATE on the O_PATH fd) suffices; create, rename, unlink and mkdir need directory rights, and a directory
+grant lets `rename`/`link`/`unlink` escape an exact grant, so they are not offered.
+Built: (1) sandbox: grant right `write` (value relative, beneath ONE `sandbox.write` directory of the server, never walked from `/`, no `..`), `write_grant_ok`
+(S_ISREG, `st_nlink == 1`, no exec bit, <= 256 KiB), `write_abi_ok` (ABI >= 3: below it `truncate(2)` is not mediated), the trampoline refuses a write grant on ABI < 3 and
+reports `write_granted: [{value, dev, ino, nlink}]`; the confined spec caps `RLIMIT_FSIZE` at 8 MiB. (2) policy: `write` in `CONFINE_RIGHTS`; a write rule is valid only
+as `{"path": "write"}` on a rule that names its tool, narrows `path` with a literal glob and bounds `content`/`edits` with `max_len` (else the policy is refused at load);
+`glob` accepts a list of patterns (any); `evaluate_call(..., write_confinable)` and the floor `write_unsupported` (stricter only); starter `allow-write-docs`,
+`allow-edit-docs`, `ask-sensitive-write-path` (beats them); `policy_writer` never emits `write` (pinned). (3) hub: `proxy_call.write_confinable` (exact `true`) and
+`write_why` (closed set) -> the decision, the card (`write`) and `call_proposed`; `proxy_result.writes` validated and logged in `call_result`; `eventlog_cli show` prints
+"auto-written ... undo: <path>". (4) proxy: `confine.write_check` (the worker's walk from the write directory as a hint, plus "a before-image can be kept"),
+`take_snapshot` (copy 0600 into `<undo_dir>/<call_id>/<n>`, sha256, inode, BEFORE the worker starts), the worker status must name the same (dev, ino) with one name
+(`write_status_ok`, else `confine_failed` and `call_tool` is never sent), `after_image` (size, sha256, `replaced`) reported even after a timeout or a crash,
+retention BY AGE only (30 days; a store of 1000 calls or 64 MiB is full and the next write asks: nothing is evicted, so later trivial writes cannot push a file's original before-image out), a belt (a write decision the proxy did not vouch for is refused, `write_unsupported`), config `undo_dir` and a load-time guard
+(a confinable server's `sandbox.write` may not be, contain or lie inside the undo store, or contain the proxy's config file). (5) UI: a write call is a distinct card
+("WRITE", the reason in words) and the resolved row lists the auto-written files.
+No before-image, no auto-allow: precheck false, and a snapshot that fails after the decision is `confine_failed` (only the test knob `force_true` hands the decision on).
+Deviations from the design: (a) two starter rules `allow-write-docs` / `allow-edit-docs` instead of one (an `args` condition on `content` never matches `edit_file`, which
+has `edits`); (b) `max_len` 20,000 on `content` (the engine cannot examine a longer string: `MAX_STR`); for `edit_file` the policy bounds only the NUMBER of edits (50) and the proxy precheck bounds the TEXT of all edits together at 20,000 characters (`edits_too_large`), because the language cannot measure strings inside a list; (c) `glob` extended to a list (five extensions in one rule); (d) the
+config guard applies to servers with `runtime` only (a server that cannot be confined has no auto-write, and an existing broad `write` directory keeps loading); (e) the
+proxy has no log directory of its own, so the guard names the undo store and the config file; (f) `policy_writer` keeps emitting `read` for a write tool (pinned in phase 1)
+instead of refusing; (g) content `type` is checked with `glob "*"` / `edits.0 exists` in the starter.
+Pinned gaps (tests assert the BAD outcome): a hard link another same-uid process creates after the worker's `fstat` (test_gap_hard_link_created_after_status), a bind mount of
+a credential under a harmless name (skipped where the host forbids mounting), `chmod` on the granted file, post-write races (the after-image records whoever wrote last),
+and what the text means (the doc steers a later reader). Landlock has no link-count rule; all are listed in docs/boundary.md and docs/policy.md.
+Tests (each red first): tests/proxy/test_landlock_rights.py, test_sandbox_grants_spec.py (flipped from "refused everywhere"), test_write_grant.py, test_write_precheck.py,
+test_sandbox_write.py (the kernel matrix through the real trampoline: overwrite/truncate/append/read of the granted inode only; sibling, new file, rename, unlink, mkdir,
+mkfifo, symlink, hard link to the granted/neighbour/secret inode, into the directory, a subdirectory or HOME, a swap after the grant: all EACCES/EXDEV; plus the gaps),
+test_confined_call_write.py (before-image exists before the worker, swapped inode, second name, forged decisions, timeout, crash, at-most-once, retention),
+test_config_undo.py, test_confine_write_wire.py; tests/server/test_policy_write.py, test_policy_starter_write.py, test_inbox_write.py, test_eventlog_cli_writes.py;
+vitest (Inbox.test.tsx, inboxRoute.test.ts) and one Playwright check; live tests/live/test_write_confine_live.py (23 cases, each twice: default and
+`SENTINEL_CONFINE_PRECHECK=force_true`, victims `.env`, a bashrc-like file and a git hook compared byte for byte) and tests/live/test_write_matrix_live.py kept as the
+negative control for a read-only grant; workflows A2 and A4. Mutants WW1-WW50 and FW1-FW3 added (WR3, WR4, WR9, WR12, WR13, WR19, WR21, C4, C6 retargeted); all killed.
+Replay: v3 115 of 376 benign allowed, 0 of 127 violating (writes not confinable by default); ceiling with every file existing: 181 and 10 of 67 violation-labelled (pinned).
+Review round 1: (1) starter needles added: requirements, constraints, cmakelists, skill.md, agent.md, conventions.md, .windsurf, .clinerules, .roo, .continue, .aider (`Makefile` and similar names cannot match the doc extensions, so they already ask). (2) edit text bounded in the proxy precheck (`edits_too_large`, mutants WW53). (3) undo retention by age; full store asks; the undo directory must be owned by the proxy user and not group/world-writable. (4) Upgrade: the config guard's message now names the undo store and the two fixes (`undo_dir` in proxy.json, or `SENTINEL_PROXY_STATE_DIR`); only servers with `runtime` are checked; the config file is compared by its real path too. Mutants WW51-WW60. `_narrow_glob` stays lenient on purpose (a glob such as `*x` is accepted; lint does not judge it).

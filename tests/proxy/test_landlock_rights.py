@@ -1,8 +1,8 @@
 """The Landlock rights arithmetic as pure functions (no kernel, no process): which access bits a rule gets for a path or an exact grant.
 
-Phase 1 of the "narrow write right" plan pins TODAY's behaviour: grants are `read` (READ_FILE on exactly that file) and `list` (READ_DIR
-beneath that directory) only; no data directory right and no grant ever carries EXECUTE, MAKE_*, REMOVE_*, REFER or WRITE_FILE for something the
-agent merely NAMED. The expected values below are literal kernel bit numbers (include/uapi/linux/landlock.h), not the module's own constants,
+Grants are `read` (READ_FILE on exactly that file), `list` (READ_DIR beneath that directory) and, from phase 2 (DECISIONS D32), `write`
+(READ_FILE | WRITE_FILE | TRUNCATE on exactly one existing regular file, ABI >= 3). No grant ever carries EXECUTE, MAKE_*, REMOVE_*, REFER or
+IOCTL_DEV, and only `write` carries WRITE_FILE / TRUNCATE. The expected values below are literal kernel bit numbers (include/uapi/linux/landlock.h), not the module's own constants,
 so a change to a constant cannot make the test agree with itself."""
 import pytest
 
@@ -20,18 +20,39 @@ MUTATING = WRITE_FILE | REMOVE_DIR | REMOVE_FILE | ALL_MAKE | REFER | TRUNCATE
 # --------------------------------------------------------------------------- the grant vocabulary
 
 
-def test_the_grant_rights_are_exactly_read_and_list():
-    assert sandbox.GRANT_RIGHTS == {"read": READ_FILE, "list": READ_DIR}
+def test_the_grant_rights_are_exactly_read_list_and_write():
+    assert sandbox.GRANT_RIGHTS == {"read": READ_FILE, "list": READ_DIR, "write": READ_FILE | WRITE_FILE | TRUNCATE}
 
 
-@pytest.mark.parametrize("right", ["write", "w", "rw", "read|write", "READ", "", "execute", "delete", "create", "append", "truncate"])
+@pytest.mark.parametrize("right", ["w", "rw", "read|write", "READ", "WRITE", "", "execute", "delete", "create", "append", "truncate", "overwrite"])
 def test_no_other_grant_right_exists(right):
     assert right not in sandbox.GRANT_RIGHTS
 
 
-def test_no_grant_right_carries_a_mutating_or_execute_bit():
+def test_only_the_write_grant_carries_a_mutating_bit_and_it_is_exactly_write_file_and_truncate():
     for name, bits in sandbox.GRANT_RIGHTS.items():
-        assert not bits & (MUTATING | EXECUTE | IOCTL_DEV), name
+        assert not bits & (EXECUTE | IOCTL_DEV | REMOVE_DIR | REMOVE_FILE | ALL_MAKE | REFER), name
+        assert bits & MUTATING == (WRITE_FILE | TRUNCATE if name == "write" else 0), name
+
+
+def test_the_write_grant_needs_landlock_abi_3_because_below_it_truncate_is_not_mediated():
+    assert sandbox.WRITE_MIN_ABI == 3
+    assert [sandbox.write_abi_ok(a) for a in range(0, 9)] == [False, False, False, True, True, True, True, True, True]
+
+
+@pytest.mark.parametrize("abi, expected", [(1, READ_FILE | WRITE_FILE), (2, READ_FILE | WRITE_FILE),
+                                           (3, READ_FILE | WRITE_FILE | TRUNCATE), (4, READ_FILE | WRITE_FILE | TRUNCATE),
+                                           (5, READ_FILE | WRITE_FILE | TRUNCATE), (6, READ_FILE | WRITE_FILE | TRUNCATE),
+                                           (7, READ_FILE | WRITE_FILE | TRUNCATE)])
+def test_a_write_grant_on_a_file_per_abi(abi, expected):
+    """Below ABI 3 the TRUNCATE bit is dropped (the kernel does not know it); the grant is then refused as a whole by `write_abi_ok`."""
+    assert sandbox.rule_access(sandbox.GRANT_RIGHTS["write"], abi, is_dir=False) == expected
+
+
+@pytest.mark.parametrize("abi", range(1, 8))
+def test_a_write_grant_never_has_execute_make_remove_refer_or_ioctl_bits_at_any_abi(abi):
+    got = sandbox.rule_access(sandbox.GRANT_RIGHTS["write"], abi, is_dir=False)
+    assert got & ~(READ_FILE | WRITE_FILE | TRUNCATE) == 0
 
 
 # --------------------------------------------------------------------------- fs_mask: what each ABI handles
