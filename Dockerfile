@@ -33,6 +33,7 @@ COPY server/requirements.txt server/requirements.txt
 COPY seismograph/requirements.txt seismograph/requirements.txt
 COPY requirements-proxy.txt requirements-proxy.txt
 RUN --mount=type=secret,id=buildca,required=false \
+    set -e; \
     if [ -f /run/secrets/buildca ]; then export PIP_CERT=/run/secrets/buildca SSL_CERT_FILE=/run/secrets/buildca REQUESTS_CA_BUNDLE=/run/secrets/buildca; fi; \
     if [ "$EMBEDDINGS" = "1" ]; then \
         if [ -n "$TORCH_INDEX_URL" ]; then pip install torch --index-url "$TORCH_INDEX_URL"; fi; \
@@ -51,6 +52,7 @@ ENV HF_HOME=/opt/hf
 COPY --from=hfseed / /opt/hf-seed/
 COPY scripts/docker/prefetch_model.py /tmp/prefetch_model.py
 RUN --mount=type=secret,id=buildca,required=false \
+    set -e; \
     if [ -f /run/secrets/buildca ]; then export SSL_CERT_FILE=/run/secrets/buildca REQUESTS_CA_BUNDLE=/run/secrets/buildca CURL_CA_BUNDLE=/run/secrets/buildca; fi; \
     if [ "$EMBEDDINGS" = "1" ]; then python /tmp/prefetch_model.py /opt/hf-seed; else mkdir -p /opt/hf; echo "EMBEDDINGS=0: no model baked in"; fi; \
     rm -rf /opt/hf-seed /tmp/prefetch_model.py

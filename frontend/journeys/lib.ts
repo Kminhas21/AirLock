@@ -1,4 +1,4 @@
-import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import net from "node:net";
@@ -99,6 +99,16 @@ export async function startStack(env: Record<string, string> = {}): Promise<Stac
   await launch();
   return { port, url: `http://127.0.0.1:${port}`, ws: `ws://127.0.0.1:${port}`, stop: stopProc, restart: async () => { await stopProc(); await launch(); }, log: () => out };
 }
+
+// The sandbox trampoline looks a BARE command up in its safe PATH only (/usr/local/bin:/usr/bin:/bin), never in ours (fail closed). On a GitHub
+// runner `python` is setup-python's interpreter under /opt/hostedtoolcache and /usr/bin has only python3 (without our packages), so a sandboxed
+// server gets the absolute path of the interpreter on OUR PATH (like e2e/boundary.spec.ts and the pytest boundary tests).
+let pythonAbs = "";
+export const pythonPath = () => (pythonAbs ||= execFileSync("python", ["-c", "import sys; print(sys.executable)"]).toString().trim());
+
+/** D31: a server whose auto-allowed path calls run kernel-confined: sandboxed, with `runtime` (read access to what the interpreter needs). */
+export const sandboxedServer = (args: string[], extra: Record<string, unknown> = {}) =>
+  ({ command: pythonPath(), args, sandbox: { read: [], runtime: [path.join(ROOT, "tests/proxy")], network: "none" }, ...extra });
 
 export interface Agent { call(tool: string, args: unknown): Promise<{ is_error: boolean; text: string }>; stop(): void }
 

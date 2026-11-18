@@ -107,3 +107,48 @@ def test_the_real_app_serves_the_ui_only_when_asked_and_keeps_its_own_routes(ui_
     assert "WebSocketDisconnect" in served.stdout                              # /inbox/ws still refuses unauthenticated clients: the mount did not shadow it
     plain = subprocess.run([sys.executable, "-c", code], cwd=ROOT / "server", env=env, capture_output=True, text=True, timeout=120)
     assert '"root": 404' in plain.stdout and '"health": "ok"' in plain.stdout   # without SENTINEL_UI_DIR nothing is served
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------ journeys vs the product
+# First full-tier run on GitHub: W2/W4 (read_file auto-allowed by a rule with no sandbox) and W5 (a sandboxed server started with a bare `python`) failed.
+# They were written before D31 (kernel-confined auto-allows: an unsandboxed server asks every time; policy_e2e.json lost its read rule) and before the
+# runner fix of cb635a0 (the sandbox trampoline looks a bare command up in /usr/bin only, and a GitHub runner's python is under /opt/hostedtoolcache).
+import json as _json
+import re as _re
+from pathlib import Path as _Path
+
+_ROOT = _Path(__file__).resolve().parents[2]
+_JOURNEYS = sorted((_ROOT / "frontend" / "journeys").glob("j*.spec.ts"))
+# the test image copies frontend/src but not frontend/journeys: these run on the host and in CI, not inside the image's test stage
+needs_journeys = pytest.mark.skipif(not _JOURNEYS, reason="frontend/journeys is not in this tree (the Docker test stage)")
+
+
+@needs_journeys
+def test_no_journey_starts_a_sandboxed_server_with_a_bare_python():
+    bad = []
+    for f in _JOURNEYS:
+        lines = f.read_text().splitlines()
+        for i, line in enumerate(lines):
+            if "sandbox:" in line and any('command: "python"' in l for l in lines[max(0, i - 2):i + 1]):
+                bad.append(f"{f.name}:{i + 1}")
+    assert bad == [], f"a sandboxed server needs the absolute interpreter (lib.ts `pythonPath()`): {bad}"
+
+
+@needs_journeys
+def test_every_rule_a_journey_expects_exists_in_the_policy_it_copies():
+    rules = {r["id"] for r in _json.loads((_ROOT / "tests" / "e2e" / "data" / "policy_e2e.json").read_text())["rules"]}
+    for f in _JOURNEYS:
+        text = f.read_text()
+        if "policy_e2e.json" not in text:
+            continue
+        named = set(_re.findall(r'data-rule-id="([\w-]+)"', text)) | set(_re.findall(r"auto-allowed by rule ([\w-]+)", text))
+        assert named <= rules, (f.name, sorted(named - rules))
+
+
+@needs_journeys
+def test_a_journey_that_expects_a_standing_read_rule_to_auto_allow_uses_a_sandboxed_server_with_runtime():
+    text = (_ROOT / "frontend" / "journeys" / "j2-operator.spec.ts").read_text()
+    line = next(l for l in text.splitlines() if 'agent("w2-second-session"' in l)
+    assert "sandboxedServer" in line, "D31: an unsandboxed server asks every time, so a standing rule only decides in a sandboxed session"
+    lib = (_ROOT / "frontend" / "journeys" / "lib.ts").read_text()
+    assert "runtime:" in lib and "pythonPath" in lib

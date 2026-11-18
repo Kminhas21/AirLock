@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { DOWNSTREAM, makeIdentity, ROOT, shooter, signIn, startAgent, startStack, tmp, type Stack } from "./lib";
+import { DOWNSTREAM, makeIdentity, pythonPath, ROOT, shooter, signIn, startAgent, startStack, tmp, type Stack } from "./lib";
 
 // W5: running risky servers safely. Landlock + network-namespace sandbox, a per-call worker, a just-in-time secret, and the warning before it is used.
 const SECRET = "sk-live-0123456789-VERY-SECRET";
@@ -18,7 +18,7 @@ test("W5 boundary: sandbox chips, credential warning (name never value), unsandb
   await page.click('[data-testid="tab-inbox"]');
   await signIn(page, tokens.sam);
   await expect(page.locator('[data-testid="inbox-identity"]')).toBeVisible({ timeout: 20_000 });
-  const sandboxed = { command: "python", args: [path.join(ROOT, "tests/proxy/fake_downstream_probe.py")], lifecycle: "per_call", call_timeout_s: 30,
+  const sandboxed = { command: pythonPath(), args: [path.join(ROOT, "tests/proxy/fake_downstream_probe.py")], lifecycle: "per_call", call_timeout_s: 30,
     sandbox: { read: [path.join(ROOT, "tests/proxy")], write: [allowed], network: "none", env_allow: [], require: true },
     secrets: { API_TOKEN: { from_env: "E2E_HOST_SECRET", tools: ["whoami_env"] } } };
   const agent = startAgent({ wsBase: stack.ws, session: "w5-sandboxed", token: tokens.assistant, dir, servers: { fs: sandboxed }, passthrough: { E2E_HOST_SECRET: SECRET } });

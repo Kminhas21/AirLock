@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { expect, test } from "@playwright/test";
-import { makeIdentity, shooter, signIn, startAgent, startStack, tmp, type Agent, type Stack } from "./lib";
+import { DOWNSTREAM, makeIdentity, sandboxedServer, shooter, signIn, startAgent, startStack, tmp, type Agent, type Stack } from "./lib";
 
 // W2: the day-to-day operator. Sign in, approve, deny with a reason, read the evidence, create a standing rule, see it decide a new session, phone layout.
 let stack: Stack;
@@ -9,7 +9,7 @@ const dir = tmp("operator");
 const POLICY = path.join(dir, "policy.json");
 const { file, tokens } = makeIdentity(dir, { operators: [{ id: "olive", tenant: "acme", role: "admin" }], agents: [{ id: "assistant", tenant: "acme" }] });
 const agents: Agent[] = [];
-const agent = (session: string) => { const a = startAgent({ wsBase: stack.ws, session, token: tokens.assistant, dir }); agents.push(a); return a; };
+const agent = (session: string, servers?: Record<string, unknown>) => { const a = startAgent({ wsBase: stack.ws, session, token: tokens.assistant, dir, servers }); agents.push(a); return a; };
 
 test.beforeAll(async () => {
   writeFileSync(POLICY, JSON.stringify({ version: 1, default: "ask", rules: [] }));
@@ -77,8 +77,12 @@ test("W2 operator: approve, deny with a reason, evidence, standing rule, new ses
   const rules = JSON.parse(readFileSync(POLICY, "utf8")).rules;
   expect(rules).toHaveLength(1);
 
-  const b = agent("w2-second-session");
-  expect((await b.call("read_file", { path: "/project/docs/b.txt" })).is_error).toBe(false);
+  // D31: a standing allow auto-approves a path read only for a server that is sandboxed with `runtime` (the call then runs kernel-confined);
+  // an unsandboxed server asks every time
+  const b = agent("w2-second-session", { fs: sandboxedServer([DOWNSTREAM]) });  // sandboxedServer
+  const read = await b.call("read_file", { path: "/project/docs/b.txt" });
+  expect(read.is_error).toBe(false);
+  expect(read.text).toBe('read_file:{"path": "/project/docs/b.txt"}');
   const row = page.locator('[data-testid="inbox-resolved"][data-reason="policy"]').first();
   await expect(row).toBeVisible({ timeout: 30_000 });
   await expect(row).toContainText("auto-allowed by rule");

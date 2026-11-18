@@ -178,3 +178,69 @@ def test_the_compose_demo_server_is_sandboxed_with_runtime_so_starter_path_reads
     assert sc.sandbox is not None and sc.sandbox["require"] is True
     assert sc.sandbox["runtime"] == ["/app/tests/proxy"] and sc.sandbox["read"] == [] and sc.sandbox["write"] == []
     assert sc.command == "/opt/venv/bin/python"      # the trampoline looks bare names up in its safe PATH only, not the venv
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------ the model stage
+# First full-tier run on GitHub: `FAILED to obtain the model: couldn't connect to https://huggingface.co` although the runner had network, then
+# `COPY --from=model /opt/hf: not found`. Two real bugs: (1) prefetch_model.py tried the local cache with HF_HUB_OFFLINE=1 and then flipped the
+# variable to 0 IN THE SAME PROCESS, but huggingface_hub reads it once at import, so the "download" was still offline; (2) the RUN ended with
+# `; rm -rf ...`, so the failing prefetch was masked by rm's exit status and the stage "succeeded" without a model.
+PREFETCH = ROOT / "scripts" / "docker" / "prefetch_model.py"
+
+
+def _fake_hub(tmp_path, *, reachable=True):
+    """A stand-in `sentence_transformers` that behaves like huggingface_hub >= 2: HF_HUB_OFFLINE is read ONCE, at import."""
+    pkg = tmp_path / "fakepkgs" / "sentence_transformers"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text(
+        "import os\nfrom pathlib import Path\nOFFLINE = os.environ.get('HF_HUB_OFFLINE') == '1'     # constant at import, like huggingface_hub\n"
+        f"REACHABLE = {reachable!r}\n"
+        "class _V:\n    shape = (1, 384)\n"
+        "class SentenceTransformer:\n"
+        "    def __init__(self, name):\n"
+        "        marker = Path(os.environ['HF_HOME']) / 'hub' / 'model.bin'\n"
+        "        if marker.exists():\n            return\n"
+        "        if OFFLINE or not REACHABLE:\n            raise OSError(\"We couldn't connect to 'https://huggingface.co'\")\n"
+        "        marker.parent.mkdir(parents=True, exist_ok=True); marker.write_text('weights')\n"
+        "    def encode(self, xs):\n        return _V()\n")
+    return tmp_path / "fakepkgs"
+
+
+def _run_prefetch(tmp_path, reachable=True, seed=None):
+    import os
+    import sys
+    env = {**os.environ, "PYTHONPATH": str(_fake_hub(tmp_path, reachable=reachable)), "HF_HOME": str(tmp_path / "hf")}
+    env.pop("HF_HUB_OFFLINE", None)
+    return subprocess.run([sys.executable, str(PREFETCH), str(seed or tmp_path / "no-seed")], env=env, capture_output=True, text=True, timeout=60)
+
+
+def test_the_model_prefetch_downloads_when_the_local_cache_is_empty_even_though_it_tried_offline_first(tmp_path):
+    r = _run_prefetch(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "downloaded and verified offline" in r.stdout
+    assert (tmp_path / "hf" / "hub" / "model.bin").exists()
+
+
+def test_the_model_prefetch_fails_the_build_when_the_model_cannot_be_had(tmp_path):
+    r = _run_prefetch(tmp_path, reachable=False)
+    assert r.returncode == 1 and "FAILED to obtain the model" in r.stderr
+
+
+def test_the_model_prefetch_uses_a_seeded_cache_without_the_network(tmp_path):
+    seed = tmp_path / "seed" / "models--x"
+    seed.mkdir(parents=True)
+    (tmp_path / "seed" / "model.bin").write_text("weights")
+    r = _run_prefetch(tmp_path, reachable=False, seed=tmp_path / "seed")
+    assert r.returncode == 0 and "available from the local cache" in r.stdout, r.stdout + r.stderr
+
+
+def test_a_failing_prefetch_fails_the_model_stage_it_is_not_masked_by_the_cleanup_after_it(tmp_path):
+    body = stage_body("model")
+    run = re.search(r"^RUN .*?(?=^\S|\Z)", body, flags=re.M | re.S).group(0)
+    script = re.sub(r"\\\n", " ", run)[len("RUN "):]
+    script = re.sub(r"--mount=\S+\s*", "", script)
+    script = script.replace("python /tmp/prefetch_model.py /opt/hf-seed", "false").replace("rm -rf /opt/hf-seed /tmp/prefetch_model.py", "true")
+    r = subprocess.run(["sh", "-c", script], env={"EMBEDDINGS": "1", "PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
+    assert r.returncode != 0, "a failed model prefetch must fail the build: the runtime stage COPYs /opt/hf"
+    ok = subprocess.run(["sh", "-c", script.replace("false", "true", 1)], env={"EMBEDDINGS": "1", "PATH": "/usr/bin:/bin"}, capture_output=True, text=True)
+    assert ok.returncode == 0

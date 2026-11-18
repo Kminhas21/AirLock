@@ -24,9 +24,10 @@ test("W4 policy author: allow / deny / ask rules decide, and the proxy's auto fl
   const agent = startAgent({ wsBase: stack.ws, session: "w4-policy", token: tokens.assistant, dir, autoApprove: ["fs:echo"],
     servers: { fs: { command: "python", args: [DOWNSTREAM], env: { FAKE_DOWNSTREAM_LOG: LOG } } } });
 
-  expect((await agent.call("read_file", { path: "/project/a.txt" })).is_error).toBe(false);
-  const allowed = page.locator('[data-testid="inbox-resolved"][data-rule-id="allow-read-project"]').first();
-  await expect(allowed).toHaveText(/auto-allowed by rule allow-read-project/, { timeout: 30_000 });
+  // D31: a rule may auto-allow only what needs no confinement here (this server is not sandboxed, so a path read would ask): an echo of a bare counter
+  expect((await agent.call("echo", { n: 0 })).is_error).toBe(false);
+  const allowed = page.locator('[data-testid="inbox-resolved"][data-rule-id="allow-echo-n"]').first();
+  await expect(allowed).toHaveText(/auto-allowed by rule allow-echo-n/, { timeout: 30_000 });
   await expect(page.locator('[data-testid="inbox-pending"]')).toHaveCount(0);
   await shot(page, "allow-rule-no-click-needed");
 
@@ -35,11 +36,11 @@ test("W4 policy author: allow / deny / ask rules decide, and the proxy's auto fl
   await expect(page.locator('[data-testid="inbox-resolved"][data-rule-id="deny-write-outside"]')).toHaveText(/denied by rule deny-write-outside/);
   await shot(page, "deny-rule-never-reaches-the-tool");
 
-  const held = agent.call("echo", { n: 1 });
+  const held = agent.call("echo", { x: 1 });
   const card = page.locator('[data-testid="inbox-pending"]').first();
   await expect(card).toBeVisible({ timeout: 30_000 });
   await expect(card.locator('[data-testid="inbox-rule"]')).toHaveText("held by rule ask-echo");
-  expect(calls()).toEqual(["read_file"]);                      // only the allowed call reached the downstream
+  expect(calls()).toEqual(["echo"]);                           // only the allowed call reached the downstream
   await shot(page, "ask-rule-held-for-a-human-despite-auto-approve-flag");
   await card.locator('[data-testid="inbox-approve"]').click();
   expect((await held).is_error).toBe(false);
