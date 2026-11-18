@@ -32,7 +32,7 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ github.event_name == 'push' && 25 || github.event_name == 'pull_request' && 50 || 240 }}
+    timeout-minutes: ${{ github.event_name == 'push' && 25 || github.event_name == 'pull_request' && 90 || 240 }}
     env:
       EVENT: ${{ github.event_name }}
       SCHEDULE: ${{ github.event.schedule }}

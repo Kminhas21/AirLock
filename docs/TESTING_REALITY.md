@@ -229,7 +229,7 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   to survive the whole suite to count as a survivor. Other mutants run the whole suite directly, as before.
 * **CI** (`.github/workflows/ci.yml`, not run here: validated with actionlint 1.7.7 and a YAML load; tracked although `.gitignore` ignores
   dotfiles, via `!.github/`, tested): one job, tier from the trigger, concurrency group per trigger and ref (a newer run cancels the
-  superseded one), timeouts 25 / 50 / 240 min, pip / npm / MiniLM / Playwright / `.realdeps` caches (the `.realdeps` key includes the exact
+  superseded one), timeouts 25 / 90 / 240 min (the pr tier outgrew 50: a PR that edits a test runs every mutant), pip / npm / MiniLM / Playwright / `.realdeps` caches (the `.realdeps` key includes the exact
   Python version and `scripts/realdeps_setup.sh`; the script pins `mcp-server-time` and rebuilds its venv when the interpreter does not run
   or the version is not the pin; that server's own dependencies are not pinned), `HF_HUB_OFFLINE=1` after the one model fetch, CPU torch,
   Chromium via `npx playwright install` with `CHROMIUM_PATH` from Playwright, the events file and junit (`GATE_JUNIT_DIR`: backend stages
