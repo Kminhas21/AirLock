@@ -20,6 +20,9 @@ run "mutation targets are current (fast: stale mutants fail here, not at the end
 run "live coverage map, static (every user workflow has a live test or a declared gap; referenced files exist; live specs are run)" python scripts/check_live_coverage.py
 # Backend pytest, split by marker (GATE_PYTEST_* in scripts/gate_lib.sh): every collected test is in exactly one of these three stages.
 run "backend pytest, fast (unmarked tests, parallel)" $XD -m "$GATE_PYTEST_PUSH" ${GATE_JUNIT_DIR:+--junitxml=$GATE_JUNIT_DIR/backend-fast.xml}
+# GATE_AS_USER=1 (opt-in, any tier, never a default): the sandbox / proxy / live selection again as an unprivileged user (scripts/run_nonroot.sh;
+# root hides bugs GitHub's unprivileged runner shows). Needs root to create the user; CI already runs non-root, so it does not use this.
+[ "${GATE_AS_USER:-0}" = 1 ] && run "non-root pass (tests/proxy tests/server tests/live as an unprivileged user; opt-in GATE_AS_USER=1)" bash scripts/run_nonroot.sh
 if at_tier pr; then
   run "backend pytest, slow (process-based files, parallel)" $XD -m "$GATE_PYTEST_PR" ${GATE_JUNIT_DIR:+--junitxml=$GATE_JUNIT_DIR/backend-slow.xml}
 fi

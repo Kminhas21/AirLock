@@ -177,3 +177,29 @@ def test_the_ci_workflow_is_not_git_ignored(tmp_path):
     ignored = lambda p: subprocess.run(["git", "-C", str(repo), "check-ignore", "-q", p]).returncode == 0
     assert not ignored(".github/workflows/ci.yml")
     assert ignored(".env")                        # the exception does not un-ignore secrets
+
+
+# ----------------------------------------------------------------------------- the opt-in non-root pass (GATE_AS_USER=1, scripts/run_nonroot.sh)
+@pytest.mark.parametrize("tier", sorted(EXPECTED))
+def test_the_nonroot_stage_is_not_in_any_default_tier(tier, tmp_path):
+    _, stages = listed(tier, tmp_path, **OPT_IN)
+    assert not [n for n, _ in stages if "non-root" in n] and not [a for _, a in stages if "run_nonroot.sh" in " ".join(a)]
+
+
+@pytest.mark.parametrize("tier", sorted(EXPECTED))
+def test_gate_as_user_adds_exactly_one_nonroot_stage_and_nothing_else(tier, tmp_path):
+    _, base = listed(tier, tmp_path)
+    r, with_user = listed(tier, tmp_path, GATE_AS_USER="1")
+    assert r.returncode == 2 and "GATE: LISTED" in r.stdout
+    base_names = [n for n, _ in base]
+    extra = [s for s in with_user if s[0] not in base_names]          # argv holds a fresh mktemp dir per run: compare stage names
+    assert len(extra) == 1 and [n for n in base_names if n not in [m for m, _ in with_user]] == []
+    name, argv = extra[0]
+    assert name.startswith("non-root pass") and argv[0] == "bash" and argv[1] == "scripts/run_nonroot.sh", extra
+    assert (ROOT / argv[1]).is_file()
+
+
+def test_gate_as_user_other_values_do_not_enable_it(tmp_path):
+    for v in ("0", "", "yes", "true"):
+        _, stages = listed("push", tmp_path, GATE_AS_USER=v)
+        assert not [n for n, _ in stages if "non-root" in n], v

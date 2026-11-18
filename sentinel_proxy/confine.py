@@ -171,7 +171,7 @@ def confined_spec(spec: dict, grants: list) -> dict:
 
 def status_ok(st: Any) -> bool:
     """The worker's trampoline status proves the confinement: a confined worker, Landlock filesystem applied, no layer missing."""
-    return (isinstance(st, dict) and st.get("confined") is True and "landlock_fs" in (st.get("layers") or [])
+    return (isinstance(st, dict) and st.get("confined") is True and not st.get("truncated") and "landlock_fs" in (st.get("layers") or [])
             and not st.get("missing"))
 
 

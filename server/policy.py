@@ -847,6 +847,11 @@ class Policy:
                     and r.destination in (None, "any") and r.party is None and r.alert is None:
                 warns.append(f"rule {r.id}: allow rule with secrets: true and no other narrowing condition would allow "
                              f"EVERY call that receives credentials")
+        for r in self.rules:
+            if r.verdict == "allow" and r.confine and "write" in r.confine.values() and (r.server is None or any(not p.strip("*?") for p in r.server)):
+                warns.append(f"rule {r.id}: allow rule with a write confine has no server condition, so ANY server with a tool of that "
+                             f"name gets its writes auto-allowed; add \"server\": \"<name>\" to its \"when\" (docs/policy.md, "
+                             f"\"Scope the write rules to one server\")")
         by_when: dict[str, list[Rule]] = {}
         for r in self.rules:
             by_when.setdefault(_canon_when(r), []).append(r)

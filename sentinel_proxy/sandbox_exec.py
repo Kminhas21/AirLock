@@ -5,6 +5,8 @@ pass through untouched (MCP stdio).  Nothing is ever written to stdout.  One sta
 
     SENTINEL_SANDBOX_STATUS {"layers": [...], "missing": [...], "network": "...", "landlock_abi": n, "home": "<private dir to remove after exit>" | null}
 
+The status line is complete valid JSON of at most STATUS_MAX (32768) bytes: over that, its grant lists are dropped whole and it says "truncated": true
+(it then proves no confinement and the proxy refuses the call). Free-text error lines are capped at 600 characters; the status line never is.
 A confined worker's spec carries `grants` ([base, value, right], DECISIONS D31); its status adds "confined": true and "granted": [the values
 that got a rule]. A value that cannot be opened beneath its base without a symlink gets no rule: the server then meets EACCES / ENOENT.
 
@@ -25,9 +27,43 @@ EXIT_FAIL_CLOSED = 126
 EXIT_NOT_FOUND = 127
 
 
+STATUS_PREFIX = "SENTINEL_SANDBOX_STATUS "
+# Hard upper bound of the status line, in bytes (the JSON is ASCII). The status names every granted path, so it grows with the grants and with long
+# TMPDIR-style paths; the 600-character cap of a free-text error line once cut it mid-string (invalid JSON, so no proof of confinement and a refused
+# call). Kept well below the proxy reader's 64 KiB line limit (asyncio.StreamReader), so a status can never kill the reader or flood the log.
+STATUS_MAX = 32768
+
+
 def _err(msg: str) -> None:
+    """A free-text line on stderr, capped at 600 characters (a message must not flood the proxy's log)."""
     try:
         os.write(2, (msg.replace("\n", " ")[:600] + "\n").encode("utf-8", "replace"))
+    except OSError:
+        pass
+
+
+def status_line(status: dict) -> str:
+    """The status as ONE line (no newline): complete valid JSON, at most STATUS_MAX bytes. A status over the bound is replaced, whole, by one that keeps
+    the layers, what is missing, the network, the ABI and the private HOME (the proxy still removes it) but NOT `confined` and the grant lists, and says
+    `truncated`: it proves no confinement, so the proxy refuses the call (fail closed) instead of parsing a cut string."""
+    line = STATUS_PREFIX + json.dumps(status, sort_keys=False)
+    if len(line) <= STATUS_MAX:
+        return line
+    slim = {k: v for k, v in status.items() if k in ("layers", "missing", "network", "landlock_abi", "home")}
+    slim["truncated"] = True
+    line = STATUS_PREFIX + json.dumps(slim, sort_keys=False)
+    if len(line) > STATUS_MAX:
+        slim.pop("home", None)
+        line = STATUS_PREFIX + json.dumps({k: slim[k] for k in ("layers", "missing", "truncated") if k in slim}, sort_keys=False)
+    return line
+
+
+def _status(line: str) -> None:
+    """Write the status line whole (never through the free-text cap)."""
+    data = (line + "\n").encode("ascii", "replace")
+    try:
+        while data:
+            data = data[os.write(2, data):]
     except OSError:
         pass
 
@@ -207,7 +243,7 @@ def main(argv=None, *, execve=os.execve) -> int:
         status.update(confined=True, granted=granted)
         if write_granted:
             status["write_granted"] = write_granted
-    _err("SENTINEL_SANDBOX_STATUS " + json.dumps(status, sort_keys=False))
+    _status(status_line(status))
     os.closerange(3, fd_limit + 1)                               # nothing inherited from the proxy may leak into the server
     try:
         execve(target, [cmd, *args], env)

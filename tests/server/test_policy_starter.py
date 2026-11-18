@@ -50,7 +50,8 @@ def ev(pol, tool, args, **kw):
 def test_starter_lints_clean():
     assert C.main(["lint", STARTER]) == 0
     p = P.load_policy(STARTER)
-    assert p.lint() == [] and p.default == "ask"
+    # the only warnings are the two write-scope ones (D32 follow-up, tests/server/test_policy_write_scope.py): the starter is generic by design
+    assert [w for w in p.lint() if "no server condition" not in w] == [] and p.default == "ask"
     assert not any(r.verdict == "deny" for r in p.rules)
 
 

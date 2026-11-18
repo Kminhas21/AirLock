@@ -203,9 +203,12 @@ def test_the_file_loader_reports_a_rejected_policy_and_returns_none(tmp_path):
 
 def test_lint_accepts_a_good_write_rule_and_names_the_rule_and_the_problem_of_a_bad_one(tmp_path, capsys):
     f = tmp_path / "p.json"
-    f.write_text(json.dumps(doc(RULE)))
+    f.write_text(json.dumps(doc({**RULE, "when": {**RULE["when"], "server": "filesystem"}})))
     assert C.main(["lint", str(f)]) == 0
     assert "WARN" not in capsys.readouterr().out
+    f.write_text(json.dumps(doc(RULE)))                      # no server condition: a warning, never an error (test_policy_write_scope.py)
+    assert C.main(["lint", str(f)]) == 0
+    assert "WARN" in capsys.readouterr().out
     f.write_text(json.dumps(doc({**RULE, "confine": {"path": "write", "paths": "read"}, "when": when(arg_keys=["path", "content", "paths"])})))
     assert C.main(["lint", str(f)]) == 1
     out = capsys.readouterr()

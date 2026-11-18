@@ -179,6 +179,20 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   `pytest.ini`, selects EVERY mutant**: there is no cheap, reliable mutant-to-killer mapping, and a weakened test must not slip through
   because its mutants' targets did not change (so a PR that edits ordinary tests runs the whole mutation check, about 25 min). Nothing
   selected = a quick pass that says so. A missing or unknown base ref is RED, never "nothing changed".
+* **Non-root pass (opt-in, in no tier): `GATE_AS_USER=1`.** CI's runner is unprivileged; a dev box or a container is usually root, and root hides bugs
+  (a test once depended on network-namespace support only root has, and passed locally). `GATE_AS_USER=1 bash scripts/verify.sh` adds ONE stage,
+  `non-root pass`, to whatever tier you run (`GATE_LIST=1` shows it; without the variable no tier lists it, so CI time does not grow);
+  `sudo bash scripts/run_nonroot.sh [pytest args]` runs just that stage. It runs `python -m pytest tests/proxy tests/server tests/live -m 'not research' -n 4`
+  as the user `sentinel-nonroot` (`NONROOT_USER`; an existing account is reused only if this script made it: GECOS marker, uid >= 1000), in a private copy of
+  the repository under `NONROOT_DIR` (default `/var/tmp/sentinel-nonroot-<user>/repo`; the directory must be absent, empty or carry the marker file the script
+  wrote, never a symlink or a system directory, and it is the ONLY place the root-run script writes) and with an EMPTY environment (PATH, HOME, TMPDIR, LANG,
+  `HF_*`, `OMP_NUM_THREADS=1`, and `SENTINEL_SANDBOX_REQUIRED=1` only when you set it to 1: a missing sandbox is then a failure, not a skip; your tokens never
+  reach it). The copy leaves out `.git`, `frontend/node_modules`, caches and credential-looking files (`.env`, `*.pem`, `*.key`, `id_*`, `.netrc`,
+  `credentials*`); the absolute path inside `.realdeps/tv` is rewritten; the user gets its own copy of the MiniLM cache once (`NONROOT_HF=0` skips it).
+  Needs root once for `useradd`/`runuser`; `NONROOT_WORKERS` sets `-n`; `NONROOT_DRY_RUN=1` prints the plan and changes nothing; already non-root, it just runs
+  pytest in the checkout. **Cleanup: `sudo NONROOT_CLEAN=1 bash scripts/run_nonroot.sh`** removes the script-made user (`userdel -r`, its home and model copy
+  included) and the work directory, each only if it carries the script's marker. Pinned by tests/test_gate_tiers.py (listed only with `GATE_AS_USER=1`, never in
+  a default tier) and tests/test_run_nonroot.py.
 * **Pre-commit gate: `GATE_TIER=pr` locally.** `full` and `weekly` run in CI (nightly and weekly), not before every commit. That is a real
   trade: a change that breaks only a research detector, a mutant of a file the change did not touch, Docker or a journey is found the next
   night or week, not before the commit.

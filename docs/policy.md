@@ -66,6 +66,22 @@ extensions to `.json .yaml .toml .py .js .sh`: a written `package.json`, workflo
 Desktop Commander's `write_file` (extra `mode`) and `edit_block` (`file_path`) stay asks. `lint` warns about a write rule next to `SENTINEL_POLICY_WRITABLE=1`: keep the policy
 file and the event log outside every `sandbox.write` directory. `policy_cli explain/test` honour `--unconfinable`; `test` assumes writes are NOT confinable (the replay cannot know a file exists).
 
+### Scope the write rules to one server
+The starter is generic: `allow-write-docs` and `allow-edit-docs` have no `when.server`, so ANY server that offers a tool named `write_file` / `edit_file` gets its overwrites
+of existing `.md .txt .rst .csv .log` files auto-allowed (still kernel-confined to one inode with a before-image, and only on a server the proxy can confine). That is the
+shipped behaviour and the v3 replay numbers (115 of 376 benign, 0 of 127 violating) depend on it, so it is unchanged; instead `lint` WARNS (never an error) for an `allow`
+rule with a `write` confine and no `when.server` (a `server` of `"*"` counts as none), and **a production deployment should scope both rules to the server it means**.
+Copy the starter (`policy_cli init /etc/sentinel/policy.json --starter`) and add the one line to the `when` of each rule, `{"server": "filesystem"}` being the name of the
+server in the proxy config (a string, or a list of exact names / globs such as `["filesystem", "docs-*"]`):
+```json
+{"id": "allow-write-docs", "verdict": "allow",
+ "when": {"server": "filesystem", "tool": "write_file", "arg_keys": ["path", "content"], "args": [ ...as shipped... ]}, "confine": {"path": "write"}},
+{"id": "allow-edit-docs", "verdict": "allow",
+ "when": {"server": "filesystem", "tool": "edit_file", "arg_keys": ["path", "edits", "dryRun"], "args": [ ...as shipped... ]}, "confine": {"path": "write"}}
+```
+Check it: `python -m policy_cli lint policy.json` (no write-scope warning left) and `python -m policy_cli explain policy.json --server filesystem --tool write_file --args
+'{"path": "/p/a.md", "content": "x"}'` (verdict allow, rule `allow-write-docs`) against `--server other` (verdict ask).
+
 ## How a decision is made
 1. `deny` beats `ask` beats `allow`; none matching => `default` (`ask` unless you set it). The rule shown is the most specific one of the winning class.
 2. An alert from a monitor turns an `allow` into `ask` (never silently allowed). An `allow` also needs a WORKING monitor (not the `rules` fallback / stub embedder); otherwise the call is held.
