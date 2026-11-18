@@ -217,3 +217,15 @@ def test_monitor_info_reports_stub_on_silent_fallback(monkeypatch):
 def test_monitor_info_none_when_embedder_unavailable(monkeypatch):
     monkeypatch.setattr(live_drift, "get_embedder", lambda: (_ for _ in ()).throw(RuntimeError("x")))
     assert live_drift.monitor_info()["embedder"] == "none"
+
+
+def test_live_drift_imports_when_started_from_inside_the_server_directory():
+    """B16: `cd server && uvicorn main:app` has only server/ on sys.path; pytest.ini's pythonpath hides that. A clean subprocess does not."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    server = Path(__file__).resolve().parents[2] / "server"
+    env = {k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTEST_CURRENT_TEST")}
+    p = subprocess.run([sys.executable, "-c", "import live_drift"], cwd=server, env=env, capture_output=True, text=True, timeout=120)
+    assert p.returncode == 0, p.stderr[-1500:]

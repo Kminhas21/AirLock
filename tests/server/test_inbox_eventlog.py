@@ -545,3 +545,17 @@ async def test_a_call_on_a_peer_known_to_be_dead_is_denied_disconnected_not_held
     await hub.close_log()
     for cid in ("held1", "auto1"):
         assert decisions[cid]["decision"] == "deny" and decisions[cid]["reason"] == "disconnected" and decisions[cid]["actor"] == "system", decisions
+
+
+async def test_an_operator_note_is_never_written_on_an_approve_decision_record():
+    """O2: the innermost guard (the hub's callers also drop the note, but this record is the audit trail and must not depend on them)."""
+    tl = Timeline()
+    st = FakeStore(tl)
+    r = make(tl, st)
+    await r.start()
+    session = next(iter(r.hub.sessions.values()))
+    await r.hub._log_decision(session, "c1", "approve", "human", "human", None, None, note="because")
+    await r.hub._log_decision(session, "c2", "deny", "human", "human", None, None, note="because")
+    await r.hub._log_decision(session, "c3", "deny", "policy", "policy", None, None, note="because")
+    dec = {e[2]: e[3] for e in logged(st, "decision")}
+    assert "note" not in dec["c1"] and dec["c2"]["note"] == "because" and "note" not in dec["c3"]

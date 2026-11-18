@@ -8,13 +8,19 @@ mutation's target text is not found (a stale mutation would silently prove nothi
     python scripts/mutation_check.py --check-targets          only check that every target is current (seconds; no test runs)
     python scripts/mutation_check.py --changed-since REF      only the mutants whose target file changed since REF: committed on this
                                                               branch (git diff REF...HEAD) plus staged, unstaged and untracked files
-                                                              (GATE_TIER=pr, DECISIONS.md D30); none changed = a quick pass that says so
+                                                              (GATE_TIER=pr, DECISIONS.md D30); none changed = a quick pass that says so. A changed test file selects
+                                                              only the mutants whose witness test file (scripts/mutant_killers.json) it is
+    python scripts/mutation_check.py --check-killer-map       only check that the committed killer map matches the mutant list (seconds)
+    python scripts/mutation_check.py --build-killer-map       (re)attribute the mutants that have no current map entry: each runs once, serially
+                                                              per mutant, --jobs N mutants in parallel; --rebuild-all redoes every one (~30+ min)
 """
-import argparse, shutil, subprocess, sys, tempfile
+import argparse, concurrent.futures, contextlib, hashlib, json, os, re, shutil, subprocess, sys, tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-IGNORE = shutil.ignore_patterns("node_modules", ".git", "__pycache__", "dist", ".pytest_cache", "frontend")
+# frontend/ is COPIED (minus node_modules/dist): the backend tests read frontend/src (tests/contract/test_ui_threshold.py needs drift.ts and
+# DriftMonitor.tsx). A copy without it made those tests fail in every tree, so every mutant "was killed" by a failure unrelated to it.
+IGNORE = shutil.ignore_patterns("node_modules", ".git", "__pycache__", "dist", ".pytest_cache", ".results")
 
 # (id, file, old, new, count) -- each re-introduces one bug from DECISIONS.md
 MUTANTS = [
@@ -83,7 +89,11 @@ MUTANTS = [
     ("Z7 a UI is registered for broadcasts before its snapshot is sent", "server/inbox_hub.py", "        async with ui._lock:\n            self._uis.append(ui)\n            recent: list = []", "        self._uis.append(ui)\n        async with asyncio.Lock():\n            recent: list = []", 1),
     # operator UI (DECISIONS.md D20)
     ("O1 hub: a standing rule is written without the explicit confirm", "server/inbox_hub.py", '            if frame.get("confirm") is not True:', "            if False:", 1),
-    ("O2 hub: the operator note is attached to approvals too", "server/inbox_hub.py", 'note = p.note if (decision == "deny" and reason == "human") else None      # never a note on an approve', "note = p.note      # never a note on an approve", 1),
+    # O2 was EQUIVALENT as first written (it removed one of three guards: the decision path at note = p.note if ..., this record guard, and the
+    # post-log reset to None; any two make the third redundant), so it survived once the check was made real. It now removes the INNERMOST guard,
+    # which tests/server/test_inbox_eventlog.py exercises directly.
+    ("O2 hub: the operator note is written on an approve decision record", "server/inbox_hub.py",
+     '        if note and decision == "deny" and reason == "human":\n            payload["note"] = note', '        if note:\n            payload["note"] = note', 1),
     ("O3 drift_update no longer carries the active threshold", "server/events.py", '        out["threshold"] = float(threshold)', "        pass", 1),
     ("O4 hub: standing rules are offered although the policy is not writable", "server/inbox_hub.py", '        caps = {"policy_writable": writable, "event_log": self.store is not None}', '        caps = {"policy_writable": True, "event_log": self.store is not None}', 1),
     # enforcement boundary (DECISIONS.md D21)
@@ -461,12 +471,12 @@ MUTANTS = [
     ("T7 the reality stages and the live-coverage proof are skipped at pr", "scripts/verify.sh",
      'if at_tier pr; then\n  run "reality: hostile', 'if at_tier full; then\n  run "reality: hostile', 1),
     ("T8 full runs only the changed-files mutants", "scripts/verify.sh",
-     'if at_tier full; then\n  run "mutation check (tests must', 'if at_tier weekly; then\n  run "mutation check (tests must', 1),
+     'if at_tier full; then\n  if [ "${GATE_MUTATION_' 'FULL', 'if at_tier weekly; then\n  if [ "${GATE_MUTATION_FULL', 1),
     ("T9 a stage listing exits 0 (could pass for a green gate)", "scripts/verify.sh",
      'nothing ran)"; exit 2; fi', 'nothing ran)"; exit 0; fi', 1),
     # T10-T14 mutate this file: their targets are split into adjacent literals so this list does not contain them a second time
     ("T10 changed-since ignores the branch's commits", "scripts/mutation_check.py",
-     'return (_git(root, "diff", "--name-only", f"{ref}.' '..HEAD") | ', 'return (', 1),
+     'return (_git(root, "diff", "--name-only", "--no-' 'renames", f"{ref}.' '..HEAD") | ', 'return (', 1),
     ("T11 changed-since ignores untracked files", "scripts/mutation_check.py",
      '            | _git(root, "ls-files", "--others", ' '"--exclude-standard"))', '            )', 1),
     ("T12 changed-since counts the base branch's own later commits (two-dot diff)", "scripts/mutation_check.py",
@@ -478,9 +488,9 @@ MUTANTS = [
     ("T15 gate-script mutants run the whole serial suite before the gate's own tests (minutes per mutant instead of seconds)",
      "scripts/mutation_check.py", 'if rel.startswith(GATE_' 'SCRIPTS) else []', 'if False else []', 1),
     ("T16 a changed test file selects only the mutants whose target changed (a weakened killer slips through)", "scripts/mutation_check.py",
-     "    if tests - gate_" "tests:\n        return list(mutants)\n", "", 1),
+     "        if tests - gate_" "tests:\n            return list(mutants)\n", "", 1),
     ("T17 a changed gate test selects none of the gate-script mutants it kills", "scripts/mutation_check.py",
-     "(gate_tests and m[1].startswith(GATE_" "SCRIPTS))", "False", 1),
+     "(gate_tests and m[1].startswith(GATE_" "SCRIPTS)))\n        if hit", "False)\n        if hit", 1),
     ("T18 no origin default branch silently diffs against HEAD (nothing selected) instead of failing", "scripts/mutation_check.py",
      '    raise SystemExit("mutation check: no origin/' 'HEAD', '    return "HEAD"\n    raise SystemExit("mutation check: no origin/' 'HEAD', 1),
     ("T19 the sandbox trampoline ignores TMPDIR (the boundary leak checks would look in the wrong place)", "sentinel_proxy/sandbox_exec.py",
@@ -488,6 +498,44 @@ MUTANTS = [
     ("T20 sandbox tests skip silently although SENTINEL_SANDBOX_REQUIRED=1 (CI)", "tests/no_skip_plugin.py",
      'missing and os.environ.get("SENTINEL_SANDBOX_' 'REQUIRED") != "1"', "missing", 1),
     ("T21 the Claude key stays in the environment of every stage", "scripts/gate_lib.sh", "  unset SENTINEL_CLAUDE_API_KEY\n", "", 1),
+    ("T22 a changed killer test selects none of the mutants it is the witness for (a weakened killer slips through)", "scripts/mutation_check.py",
+     "if hit or killers " "& changed or killers & closure:", "if hit:", 1),
+    ("T23 a changed shared test-support file (conftest, plugin, helper) selects only its own mutants", "scripts/mutation_check.py",
+     "hit = (every" "thing or (ANY_TEST", "hit = (False or (ANY_TEST", 1),
+    ("T24 a mutant with a missing or stale killer-map entry is not selected", "scripts/mutation_check.py",
+     "if m[1] in changed or not " "_entry_ok(m, e):", "if m[1] in changed:", 1),
+    ("T25 a renamed test file lists only its new name (the old killer is never seen)", "scripts/mutation_check.py",
+     '"diff", "--name-only", ' '"--no-renames", ', '"diff", "--name-only", ', 2),
+    ("T26 a mutant killed only by a combination ignores changed test files", "scripts/mutation_check.py",
+     "(ANY_TEST in kill" "ers and (pytest_tests or readers or dirs))", "False", 1),
+    ("T27 the killer-map check accepts an entry whose mutant definition changed", "scripts/mutation_check.py",
+     "elif not isinstance(e, dict) " 'or e.get("hash") != mutant_hash(m):', "elif not isinstance(e, dict):", 1),
+    ("T28 an unusable killer map still lets test changes skip mutants (no fallback to all)", "scripts/mutation_check.py",
+     "    if not _map_" "usable(killer_map):\n        tests =", "    if False:\n        tests =", 1),
+    ("T29 the killer-map build keeps stale entries instead of re-attributing them", "scripts/mutation_check.py",
+     "if _entry_ok(m, old[" '"mutants"].get(m[0]))', "if m[0] in old[" '"mutants"]', 1),
+    ("T30 the backend mutants run without first proving the UNMUTATED tree is green (a red clean tree makes every mutant look killed)", "scripts/mutation_check.py",
+     "    if todo:\n        require_clean_" "backend_tree()\n", "", 1),
+    ("T31 the killer-map build attributes witnesses without first proving the UNMUTATED tree is green", "scripts/mutation_check.py",
+     "    old = load_killer_map()\n    require_clean_" "backend_tree()\n", "    old = load_killer_map()\n", 1),
+    ("T32 an attributed witness is taken from a tree nobody proved green", "scripts/mutation_check.py",
+     "    if not frontend:\n        require_clean_" "backend_tree()\n", "", 1),
+    ("T33 a candidate group that collects nothing (pytest exit 5) reads as a kill", "scripts/mutation_check.py",
+     "if p.returncode not " "in (0, NO_TESTS_RC):", "if p.returncode != 0:", 1),
+    ("T34 a hung mutant aborts the run instead of reading as killed", "scripts/mutation_check.py",
+     "    except subprocess.TimeoutExpired:\n        return " '"killed", f"KILLED    {m[0]}   [timeout]"\n', "", 1),
+    ("T35 the clean-tree run reports success whatever pytest returned", "scripts/mutation_check.py",
+     'return p.returncode, (p.stdout or "") + (p.stderr ' 'or "")', 'return 0, (p.stdout or "") + (p.stderr ' 'or "")', 1),
+    ("T36 a non-zero exit that names no failing test counts as a kill", "scripts/mutation_check.py",
+     "    if rc != 0 and not " "files:\n", "    if False:\n", 1),
+    ("T37 a doc, CI or data file selects none of the mutants whose witness reads it (a weakened reader slips through)", "scripts/mutation_check.py",
+     'or any(k in readers ' 'or any(k.startswith(d + "/") for d in dirs) for k in killers)', "or False", 1),
+    ("T38 the PR-tier selection cap is ignored (a huge selection becomes a silent timeout)", "scripts/mutation_check.py",
+     "if limit and len(" "backend) + len(frontend) > limit:", "if False and len(backend) + len(frontend) > limit:", 1),
+    ("T39 a change at the top of tests/ (no_skip_plugin, harness, conftest) selects only some mutants", "scripts/mutation_check.py",
+     'return f.startswith("tests/") and f.count("/") ' '== 1 and not _is_pytest_test(f)', "return False", 1),
+    ("T40 a changed test module selects none of the tests that import it (a weakened helper slips through its importers)", "scripts/mutation_check.py",
+     "if hit or killers & changed or killers" " & closure:", "if hit or killers & changed:", 1),
 ]
 
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.
@@ -510,18 +558,94 @@ FRONTEND_MUTANTS = [
 ]
 
 
-def run_suite(tree: Path, rel: str = "") -> int:
-    """The default suite, serial, stopping at the first failure. A mutant of a gate script (scripts/*, tests/*.py) first meets the top-level
-    tests/test_*.py, the gate's own tests (seconds): its only killers sit at the END of the collection order, so the whole suite would
-    otherwise run before them. A mutant that survives that quick pass still has to survive the whole suite. (Not pytest-xdist: with
-    workers, -x does not stop early, each worker drains its queue.)"""
+# A test that re-runs ~25% of the suite in a nested tree and sorts BEFORE the real unit tests: with -x it would be the witness of nearly every
+# mutant and cost minutes each. It runs last (alone) instead, so it still counts as a killer when nothing else kills the mutant.
+NESTED_SUITE_TEST = "tests/docker/test_image_context.py::test_the_fast_backend_tests_pass_in_a_tree_made_only_of_what_the_test_stage_copies"
+
+
+def group_by_dir(files: list[str]) -> list[list[str]]:
+    """Files grouped by directory, groups in order of first appearance: one pytest run per group (see run_suite_detail)."""
+    groups: dict = {}
+    for f in files:
+        groups.setdefault(f.rsplit("/", 1)[0], []).append(f)
+    return list(groups.values())
+
+
+def candidate_tests(tree: Path, rel: str) -> list[str]:
+    """Test files (repo-relative) most likely to kill a mutant of `rel`, best first: a name that contains the module's stem, then any test that
+    mentions the stem as a word. They run first (-x), so the witness is the real unit test, not whatever sorts first in the whole suite (before
+    this, tests/e2e and tests/docker ran first: minutes per mutant). Gate-script mutants have their own quick pass; the nested-suite test
+    lives in tests/docker and is excluded. Only a hint for ORDER: the whole suite still runs afterwards."""
+    if rel.startswith(GATE_SCRIPTS) or not (tree / "tests").is_dir():
+        return []
+    stem = Path(rel).stem
+    word = re.compile(rf"\b{re.escape(stem)}\b")
+    named, mentioned = [], []
+    for f in sorted((tree / "tests").rglob("test_*.py")):
+        r = f.relative_to(tree).as_posix()
+        if r.startswith("tests/docker/"):
+            continue
+        if stem in f.name:
+            named.append(r)
+        elif word.search(f.read_text(errors="ignore")):
+            mentioned.append(r)
+    return named + mentioned
+
+
+NO_TESTS_RC = 5       # pytest: "no tests were collected"
+
+
+def fails(rc: int) -> bool:
+    """A pytest exit code that means the tests FAILED (anything but passed / nothing collected)."""
+    return rc not in (0, NO_TESTS_RC)
+
+
+def suite_env(extra: dict | None = None) -> dict:
+    """MUTATION_CHECK_RUN=1: the tests that read the COMMITTED killer map skip (a stale map must not make a surviving mutant read as killed)."""
+    return {**os.environ, "OMP_NUM_THREADS": "1", "MUTATION_CHECK_RUN": "1", **(extra or {})}
+
+
+def shard_of(name: str, n: int) -> int:
+    """0-based shard of a mutant: sha256 of its name mod n (stable across runs and machines, unlike hash())."""
+    return int(hashlib.sha256(name.encode()).hexdigest(), 16) % n
+
+
+def in_shard(name: str, i: int, n: int) -> bool:
+    """`i` is 1-based (--shard i/n)."""
+    return shard_of(name, n) == i - 1
+
+
+def parse_shard(text: str) -> tuple[int, int]:
+    try:
+        i, n = (int(x) for x in text.split("/"))
+    except ValueError:
+        raise SystemExit(f"mutation check: --shard wants i/N, got {text!r}")
+    if not (n >= 1 and 1 <= i <= n):
+        raise SystemExit(f"mutation check: --shard {text!r}: need 1 <= i <= N")
+    return i, n
+
+
+def run_suite_detail(tree: Path, rel: str = "", env: dict | None = None) -> tuple[int, str]:
+    """The default suite, serial, stopping at the first failure; (returncode, its output). A mutant of a gate script (scripts/*, tests/*.py)
+    first meets the top-level tests/test_*.py, the gate's own tests (seconds): its only killers sit at the END of the collection order, so the
+    whole suite would otherwise run before them. A mutant that survives that quick pass still has to survive the whole suite. (Not
+    pytest-xdist: with workers, -x does not stop early, each worker drains its queue.)"""
     quick = [str(f.relative_to(tree)) for f in sorted((tree / "tests").glob("test_*.py"))] if rel.startswith(GATE_SCRIPTS) else []
-    for paths in ([quick] if quick else []) + [[]]:
-        p = subprocess.run([sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", *paths],
-                           cwd=tree, capture_output=True, text=True, timeout=600)
-        if p.returncode != 0:
-            return p.returncode
-    return 0
+    env, out = env or suite_env(), ""
+    cand = candidate_tests(tree, rel)
+    # one pytest run per directory of candidates: tests/e2e/conftest.py and tests/proxy/conftest.py are both imported as `conftest`, so a run holding
+    # files of both fails to collect one of them, and that mutant would read as KILLED by an ImportError
+    for paths in ([quick] if quick else []) + group_by_dir(cand) + [["--deselect", NESTED_SUITE_TEST], [NESTED_SUITE_TEST]]:
+        p = subprocess.run([sys.executable, "-m", "pytest", "-x", "-q", "-rfE", "-p", "no:cacheprovider", *paths],
+                           cwd=tree, capture_output=True, text=True, timeout=1800, env=env)
+        out = p.stdout or ""
+        if p.returncode not in (0, NO_TESTS_RC):         # exit 5 = a group whose tests are all deselected (tests/live, hostile...): not a kill
+            return p.returncode, out
+    return 0, out
+
+
+def run_suite(tree: Path, rel: str = "") -> int:
+    return run_suite_detail(tree, rel)[0]
 
 
 def check_targets() -> int:
@@ -552,7 +676,8 @@ def _git(root: Path, *args: str) -> set[str]:
 def changed_files(ref: str, root: Path = ROOT) -> set[str]:
     """Files (repo-relative) changed on this branch since its merge base with `ref`, plus staged, unstaged and untracked ones.
     An unknown ref is an error (SystemExit), never an empty set: a typo must not turn into "nothing to check"."""
-    return (_git(root, "diff", "--name-only", f"{ref}...HEAD") | _git(root, "diff", "--name-only", "HEAD")
+    # --no-renames: a rename must list the OLD path too (it is a deletion of a possible killer); git's default lists only the new name
+    return (_git(root, "diff", "--name-only", "--no-renames", f"{ref}...HEAD") | _git(root, "diff", "--name-only", "--no-renames", "HEAD")
             | _git(root, "ls-files", "--others", "--exclude-standard"))
 
 
@@ -575,61 +700,518 @@ def _is_gate_test(f: str) -> bool:
     return f.startswith("tests/test_") and f.endswith(".py") and "/" not in f[len("tests/"):]
 
 
-def select_changed(mutants: list, changed: set[str]) -> list:
-    """Mutants whose target changed. A changed or deleted test file, fixture, helper or pytest.ini can weaken any mutant's killer and there
-    is no cheap, reliable mutant -> killer mapping, so it selects EVERY mutant; a changed top-level gate test (tests/test_*.py) selects the
-    gate-script mutants it kills."""
-    tests = {f for f in changed if f.startswith("tests/") or f == "pytest.ini"}
-    gate_tests = {f for f in tests if _is_gate_test(f)}
-    if tests - gate_tests:
-        return list(mutants)
-    return [m for m in mutants if m[1] in changed or (gate_tests and m[1].startswith(GATE_SCRIPTS))]
+KILLER_MAP = ROOT / "scripts" / "mutant_killers.json"
+KILLER_MAP_SCHEMA = 1
+ANY_TEST = "*"          # a killer entry meaning "no single test file is a reliable witness": any changed test file selects the mutant
+_PYTEST_CONFIG = {"pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"}
+_VITEST_CONFIG = re.compile(r"^frontend/(vite\.config\.[^/]+|eslint\.config\.[^/]+|vitest\.config\.[^/]+|package(-lock)?\.json|tsconfig[^/]*\.json|src/(.*/)?(setup|vitest\.setup)[^/]*)$")
+
+
+def _is_pytest_test(f: str) -> bool:
+    b = f.rsplit("/", 1)[-1]
+    return f.startswith("tests/") and f.endswith(".py") and (b.startswith("test_") or b.endswith("_test.py"))
+
+
+def _is_vitest_test(f: str) -> bool:
+    return f.startswith("frontend/") and re.search(r"\.test\.tsx?$", f) is not None
+
+
+_SOURCE_EXT = (".py", ".ts", ".tsx")
+_REQUIREMENTS = re.compile(r"^requirements[\w.-]*\.txt$")
+
+
+def _without_docstrings(src: str) -> str:
+    """`src` with module, class and function docstrings and comments blanked: prose that names a file ("see docs/TESTING_REALITY.md") is not a read of it."""
+    import ast
+    try:
+        tree = ast.parse(src)
+    except SyntaxError:
+        return src
+    lines = src.splitlines()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and node.body:
+            first = node.body[0]
+            if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+                for i in range(first.lineno - 1, (first.end_lineno or first.lineno)):
+                    lines[i] = ""
+    out = "\n".join(lines)
+    import io, tokenize
+    try:                                              # comments are prose too: "# see docs/TESTING_REALITY.md" is not a read
+        for tok in reversed([t for t in tokenize.generate_tokens(io.StringIO(out).readline) if t.type == tokenize.COMMENT]):
+            row = out.split("\n")
+            row[tok.start[0] - 1] = row[tok.start[0] - 1][:tok.start[1]]
+            out = "\n".join(row)
+    except (tokenize.TokenError, IndentationError, SyntaxError):
+        pass
+    return out
+
+
+def _test_texts() -> dict[str, str]:
+    """{repo-relative path: code without docstrings} of every tests/**/*.py (this file's own examples excluded: they name files on purpose)."""
+    return {f.relative_to(ROOT).as_posix(): _without_docstrings(f.read_text(errors="ignore")) for f in sorted((ROOT / "tests").rglob("*.py"))
+            if f.name != "test_mutation_check.py"}
+
+
+def _readers(f: str, texts: dict[str, str]) -> set[str]:
+    """Test files whose text names file `f` (its repo path, its base name, or its directory as a path prefix): the tests that may read it."""
+    base, parent = f.rsplit("/", 1)[-1], f.rsplit("/", 1)[0] if "/" in f else ""
+    tokens = [t for t in (f, base) if len(t) >= 3]
+    # the directory counts only when a test names it as a path component or a glob (`/ "docs"`, `"docs"`, `docs/*`), not in a prose mention
+    last = parent.rsplit("/", 1)[-1]
+    dirpat = re.compile(rf"""["']{re.escape(last)}["']|{re.escape(parent)}/\*""") if len(last) >= 3 else None
+    stem = base.rsplit(".", 1)[0]
+    pat = re.compile(rf"\b{re.escape(stem)}\b") if f.startswith("tests/") and f.endswith(".py") and len(stem) >= 3 else None   # an import
+    return {t for t, text in texts.items() if t != f and (any(k in text for k in tokens) or (dirpat and dirpat.search(text)) or (pat and pat.search(text)))}
+
+
+IMPORT_DEPTH = 4
+
+
+def import_closure(changed: set[str], texts: dict[str, str], depth: int = IMPORT_DEPTH) -> set[str]:
+    """The changed test files plus the test files that import or name their module (transitively, `depth` levels): test modules import each
+    other (`from test_inbox_hub import Rig`), so weakening a helper in one weakens every witness that imports it."""
+    seen, frontier = set(changed), set(changed)
+    for _ in range(depth):
+        nxt = set()
+        for f in frontier:
+            stem = f.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            if len(stem) < 3:
+                continue
+            pat = re.compile(rf"\b{re.escape(stem)}\b")
+            nxt |= {t for t, text in texts.items() if t not in seen and pat.search(text)}
+        seen |= nxt
+        frontier = nxt
+        if not nxt:
+            break
+    return seen
+
+
+def _is_everything(f: str) -> bool:
+    """A change that can alter ANY pytest run: pytest config, requirements, a root conftest, and test support at the top of tests/ (conftest,
+    no_skip_plugin, harness, fixtures, __init__)."""
+    b = f.rsplit("/", 1)[-1]
+    if f in _PYTEST_CONFIG or _REQUIREMENTS.match(b) or f == "conftest.py":
+        return True
+    return f.startswith("tests/") and f.count("/") == 1 and not _is_pytest_test(f)
+
+
+def _pytest_scope(changed: set[str], texts: dict[str, str]) -> tuple[bool, set[str], set[str]]:
+    """(everything, witness files, witness directories) a non-test change reaches. A support file under tests/<D>/ reaches every witness under
+    tests/<D>/ plus the tests that name it; any other non-Python file reaches only the tests that name it (docs, CI, data, scripts, frontend
+    sources the backend tests read). A non-target .py source selects nothing here (the documented blind spot, covered by the nightly run)."""
+    everything, files, dirs = False, set(), set()
+    for f in changed:
+        if _is_pytest_test(f) or _is_vitest_test(f):
+            continue
+        if _is_everything(f):
+            everything = True
+        elif f.startswith("tests/"):
+            dirs.add("tests/" + f.split("/")[1])
+            files |= _readers(f, texts)
+        elif not f.endswith(_SOURCE_EXT) or f.startswith("frontend/"):
+            files |= _readers(f, texts)
+    return everything, files, dirs
+
+
+def _vitest_shared(f: str) -> bool:
+    """Vitest config, and EVERY frontend/src file that is not a vitest test (a helper, a setup file, a library a test imports)."""
+    return _VITEST_CONFIG.match(f) is not None or (f.startswith("frontend/src/") and not _is_vitest_test(f))
+
+
+def mutant_hash(m: tuple) -> str:
+    """Content hash of a mutant's whole definition: a changed (name, file, old, new, count) invalidates its map entry."""
+    return hashlib.sha256(json.dumps(list(m), ensure_ascii=True).encode()).hexdigest()
+
+
+def make_entry(m: tuple, killers: list[str], kind: str = "single", tier: str = "push", runner: str = "pytest") -> dict:
+    return {"hash": mutant_hash(m), "kind": kind, "killers": sorted(killers), "runner": runner, "tier": tier}
+
+
+def _mutants_hash(entries: dict) -> str:
+    return hashlib.sha256("\n".join(f"{n}:{e['hash']}" for n, e in sorted(entries.items())).encode()).hexdigest()
+
+
+def new_killer_map(entries: dict) -> dict:
+    entries = dict(sorted(entries.items()))
+    return {"schema": KILLER_MAP_SCHEMA, "mutants_hash": _mutants_hash(entries), "mutants": entries}
+
+
+def write_killer_map(km: dict, path: Path | None = None) -> None:
+    (path or KILLER_MAP).write_text(json.dumps(km, indent=1, sort_keys=True) + "\n")
+
+
+def load_killer_map(path: Path | None = None) -> dict | None:
+    """The committed map, or None when it is missing, unreadable or of another schema (callers then fall back to the safe rule)."""
+    try:
+        km = json.loads((path or KILLER_MAP).read_text())
+    except (OSError, ValueError):
+        return None
+    return km if _map_usable(km) else None
+
+
+def _map_usable(km) -> bool:
+    return isinstance(km, dict) and km.get("schema") == KILLER_MAP_SCHEMA and isinstance(km.get("mutants"), dict)
+
+
+def _entry_ok(m: tuple, e) -> bool:
+    return (isinstance(e, dict) and e.get("hash") == mutant_hash(m) and e.get("runner") in ("pytest", "vitest")
+            and isinstance(e.get("killers"), list) and bool(e["killers"]) and all(isinstance(k, str) for k in e["killers"]))
+
+
+def killer_map_problems(mutants: list, km, root: Path = ROOT, check_files: bool = True) -> list[str]:
+    """Why the map cannot be trusted for `mutants` (empty = current). Fast, no test run."""
+    if km is None or not _map_usable(km):
+        return [f"{KILLER_MAP.name} is missing, unreadable or has a different schema (expected {KILLER_MAP_SCHEMA})"]
+    ents, probs = km["mutants"], []
+    names = {m[0] for m in mutants}
+    for m in mutants:
+        e = ents.get(m[0])
+        if e is None:
+            probs.append(f"{m[0]}: no entry in the killer map (a new mutant)")
+        elif not isinstance(e, dict) or e.get("hash") != mutant_hash(m):
+            probs.append(f"{m[0]}: the mutant definition changed since its killer entry was built")
+        elif not _entry_ok(m, e):
+            probs.append(f"{m[0]}: its killer entry is malformed or names no killer")
+        elif check_files:
+            probs += [f"{m[0]}: killer file {k} no longer exists (renamed or deleted)" for k in e["killers"]
+                      if k != ANY_TEST and not (root / k).exists()]
+    probs += [f"{n}: entry for a mutant that no longer exists" for n in sorted(set(ents) - names)]
+    if not probs and km.get("mutants_hash") != _mutants_hash(ents):
+        probs.append("mutants_hash does not match the entries: the map is older than (or edited apart from) the mutant list")
+    return probs
+
+
+def select_changed(mutants: list, changed: set[str], killer_map=None) -> list:
+    """The mutants to re-run for a change set. Every rule fails SAFE (more mutants, never fewer):
+    * a mutant whose TARGET file changed;
+    * a mutant with no usable map entry (missing, or its definition hash differs): its killer is unknown, so it runs whatever changed;
+    * a changed, deleted or renamed test file that is in the mutant's killer set (the witness files in scripts/mutant_killers.json): the
+      whole point, a weakened killer must re-run the mutants it was the proof for;
+    * a mutant killed by "*" (killed only in combination, or attribution unclear): any changed test file of its runner;
+    * a changed shared support file (pytest.ini, any conftest.py, tests/no_skip_plugin.py, anything under tests/ that is not a test_*.py:
+      helpers, fixtures, data; vite/vitest/package config for the frontend): EVERY mutant of that runner;
+    * a changed top-level gate test (tests/test_*.py): every gate-script mutant (the older rule, kept on top of the map).
+    No usable map at all: the old rule, ANY change under tests/ or pytest.ini selects every mutant."""
+    if not _map_usable(killer_map):
+        tests = {f for f in changed if f.startswith("tests/") or f == "pytest.ini"}
+        gate_tests = {f for f in tests if _is_gate_test(f)}
+        if tests - gate_tests:
+            return list(mutants)
+        return [m for m in mutants if m[1] in changed or (gate_tests and m[1].startswith(GATE_SCRIPTS))]
+    ents = killer_map["mutants"]
+    pytest_tests = {f for f in changed if _is_pytest_test(f)}
+    vitest_tests = {f for f in changed if _is_vitest_test(f)}
+    vitest_shared = any(_vitest_shared(f) for f in changed)
+    gate_tests = {f for f in changed if _is_gate_test(f)}
+    texts = _test_texts() if pytest_tests else {}
+    closure = import_closure(pytest_tests, texts) if pytest_tests else set()
+    everything, readers, dirs = _pytest_scope(changed, _test_texts() if any(not (_is_pytest_test(f) or _is_vitest_test(f)) and
+                                                                         not _is_everything(f) for f in changed) else {})
+    out = []
+    for m in mutants:
+        e = ents.get(m[0])
+        if m[1] in changed or not _entry_ok(m, e):
+            out.append(m)
+            continue
+        killers = set(e["killers"])
+        if e["runner"] == "vitest":
+            hit = vitest_shared or (ANY_TEST in killers and vitest_tests)
+        else:
+            hit = (everything or (ANY_TEST in killers and (pytest_tests or readers or dirs))
+                   or any(k in readers or any(k.startswith(d + "/") for d in dirs) for k in killers)
+                   or (gate_tests and m[1].startswith(GATE_SCRIPTS)))
+        if hit or killers & changed or killers & closure:
+            out.append(m)
+    return out
+
+
+def failed_nodes(output: str | None) -> list[str]:
+    """pytest node ids (or bare files, for a collection error) from the `-rfE` summary lines, in order."""
+    nodes = []
+    for line in (output or "").splitlines():
+        mt = re.match(r"(?:FAILED|ERROR) (\S+?\.py(?:::.*?)?)(?: - .*)?$", line)
+        if mt:
+            nodes.append(mt.group(1))
+    return nodes
+
+
+def node_file(node: str) -> str:
+    return node.split("::", 1)[0]
+
+
+def failed_vitest_files(output: str | None) -> list[str]:
+    return sorted({"frontend/" + mt.group(1) for mt in re.finditer(r"FAIL\s+(src/\S+?\.test\.tsx?)", output or "")})
+
+
+_TIER_ORDER = ("push", "pr", "weekly")
+
+
+def classify_kill(m: tuple, nodes: list[str], alone_fails, tier_of, runner: str = "pytest") -> dict:
+    """A killed mutant's map entry. `nodes`: the failing tests (pytest node ids, or vitest files), `alone_fails(file)`: does that file fail
+    on the mutant when run ALONE. The record is a WITNESS set: files that kill the mutant by themselves, so as long as none is touched the
+    mutant is still killed (a kill another, unlisted test also makes is not needed as evidence). A failure that names no test file, or
+    a file that passes alone (the kill needed other tests: order or pollution), is a COMBINATION: the entry is "*" and any changed test
+    file selects the mutant."""
+    files = sorted({node_file(n) for n in nodes})
+    if not files:
+        return make_entry(m, [ANY_TEST], "unknown", "unknown", runner)
+    tiers = [tier_of(n) for n in nodes]
+    tier = min(tiers, key=lambda t: _TIER_ORDER.index(t) if t in _TIER_ORDER else 99)
+    if all(alone_fails(f) for f in files):
+        return make_entry(m, files, "single", tier, runner)
+    return make_entry(m, [ANY_TEST], "combination", tier, runner)
+
+
+class StaleMutant(Exception):
+    pass
+
+
+@contextlib.contextmanager
+def backend_tree():
+    """A throwaway, UNMUTATED copy of the repo that the backend tests can run in."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / "repo"
+        shutil.copytree(ROOT, tree, ignore=IGNORE)
+        yield tree
+
+
+@contextlib.contextmanager
+def mutated_backend_tree(m: tuple):
+    """A throwaway copy of the repo with mutant `m` applied (StaleMutant if its target text is gone)."""
+    name, rel, old, new, count = m
+    with backend_tree() as tree:
+        f = tree / rel
+        text = f.read_text()
+        if text.count(old) != count:
+            raise StaleMutant(f"{name}: expected {count} occurrence(s) of target in {rel}, found {text.count(old)}")
+        if name.startswith("B15"):
+            text = text.replace("except Exception:\n        # Details", "except Exception as exc:\n        # Details")
+        f.write_text(text.replace(old, new))
+        yield tree
+
+
+_CLEAN: dict = {}
+
+
+def run_clean_suite(tree: Path, paths: list[str] | None = None) -> tuple[int, str]:
+    """The whole default suite on the UNMUTATED copy (xdist: it is one run, not one per mutant); `paths` narrows it (tests)."""
+    env = suite_env()
+    p = subprocess.run([sys.executable, "-m", "pytest", "-q", "-rfE", "-p", "no:cacheprovider", "-n", "4", *(paths or [])], cwd=tree, capture_output=True,
+                       text=True, timeout=3600, env=env)
+    return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def require_clean_backend_tree() -> None:
+    """Refuse (SystemExit) to run any backend mutant unless the UNMUTATED copy passes the suite: with a red clean copy every mutant looks
+    KILLED, by a failure that has nothing to do with it. Runs once per process."""
+    if "rc" not in _CLEAN:
+        print("mutation check: running the suite on the UNMUTATED tree first (a red clean tree would make every mutant look killed) ...", flush=True)
+        with backend_tree() as tree:
+            _CLEAN["rc"], out = run_clean_suite(tree)
+        _CLEAN["failed"] = failed_nodes(out)[:10]
+    if _CLEAN["rc"] != 0:
+        raise SystemExit("mutation check: the UNMUTATED backend tree is RED, so every mutant would read as killed and the check proves nothing. "
+                         f"Fix the copy or the tests first. Failing: {_CLEAN['failed']}")
+
+
+@contextlib.contextmanager
+def mutated_frontend_tree(m: tuple):
+    name, rel, old, new, count = m
+    with tempfile.TemporaryDirectory() as tmp:
+        tree = Path(tmp) / "repo"
+        shutil.copytree(ROOT / "frontend", tree / "frontend", ignore=shutil.ignore_patterns("node_modules", "dist", "e2e", ".results"))
+        (tree / "frontend" / "node_modules").symlink_to(ROOT / "frontend" / "node_modules", target_is_directory=True)
+        f = tree / rel
+        text = f.read_text()
+        if text.count(old) != count:
+            raise StaleMutant(f"{name}: expected {count} occurrence(s) of target in {rel}, found {text.count(old)}")
+        clean = subprocess.run(["npx", "vitest", "run"], cwd=tree / "frontend", capture_output=True, text=True, timeout=300)
+        if clean.returncode != 0:      # a scratch copy that fails BEFORE the mutation would make every mutant look killed
+            raise StaleMutant(f"{name}: the unmutated frontend copy does not pass vitest")
+        f.write_text(text.replace(old, new))
+        yield tree
+
+
+def _pytest_tiers() -> "callable":
+    """node id -> push | pr | weekly, from the markers (scripts/gate_lib.sh GATE_PYTEST_*): best effort, informational."""
+    def collect(marker: str) -> set[str]:
+        p = subprocess.run([sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "-m", marker],
+                           cwd=ROOT, capture_output=True, text=True, timeout=300)
+        return {line.split("[", 1)[0] for line in p.stdout.splitlines() if "::" in line}
+    slow, research = collect("slow"), collect("research")
+    return lambda n: "weekly" if n.split("[", 1)[0] in research else "pr" if n.split("[", 1)[0] in slow else "push" if "::" in n else "unknown"
+
+
+def _attribute_one(m: tuple, frontend: bool, tier_of) -> dict | None:
+    """Run mutant `m` once; its entry, or None when it SURVIVED or is STALE (the caller reports it)."""
+    env = suite_env()
+    if not frontend:
+        require_clean_backend_tree()
+    try:
+        if frontend:
+            with mutated_frontend_tree(m) as tree:
+                p = subprocess.run(["npx", "vitest", "run"], cwd=tree / "frontend", capture_output=True, text=True, timeout=300)
+                if p.returncode == 0:
+                    return None
+                files = failed_vitest_files(p.stdout + p.stderr)
+
+                def alone(f: str) -> bool:
+                    q = subprocess.run(["npx", "vitest", "run", f[len("frontend/"):]], cwd=tree / "frontend", capture_output=True, text=True, timeout=300)
+                    return q.returncode != 0
+                return classify_kill(m, files, alone, lambda n: "push", "vitest")
+        with mutated_backend_tree(m) as tree:
+            rc, out = run_suite_detail(tree, m[1], env)
+            if rc == 0:
+                return None
+
+            def alone(f: str) -> bool:
+                q = subprocess.run([sys.executable, "-m", "pytest", "-x", "-q", "-p", "no:cacheprovider", f], cwd=tree, capture_output=True,
+                                   text=True, timeout=600, env=env)
+                return fails(q.returncode)
+            return classify_kill(m, failed_nodes(out), alone, tier_of)
+    except (StaleMutant, subprocess.TimeoutExpired) as e:
+        print("STALE   ", e)
+        return None
+
+
+def attribute(mutants: list, jobs: int, on_done=None) -> dict:
+    """name -> entry (None = survived / stale / timed out) for every mutant, `jobs` mutants at a time (each runs its own throwaway copy)."""
+    frontend = {m[0] for m in mutants if m in FRONTEND_MUTANTS}
+    tier_of = _pytest_tiers() if len(frontend) < len(mutants) else None
+    res = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs)) as ex:
+        futs = {ex.submit(_attribute_one, m, m[0] in frontend, tier_of): m for m in mutants}
+        for fu in concurrent.futures.as_completed(futs):
+            m = futs[fu]
+            res[m[0]] = fu.result()
+            e = res[m[0]]
+            if on_done is not None:
+                on_done(m[0], e)
+            print(f"{(e['kind'] + ' ' + ','.join(e['killers'])) if e else 'NO WITNESS'}  <-  {m[0]}", flush=True)
+    return res
+
+
+def build_killer_map(rebuild_all: bool, jobs: int) -> int:
+    """Attribute every mutant that has no CURRENT entry (all of them with rebuild_all) and write the map. A survivor or stale mutant writes
+    nothing and fails: a mutant nobody kills is a hole in the suite, not an entry."""
+    mutants = MUTANTS + FRONTEND_MUTANTS
+    old = load_killer_map()
+    require_clean_backend_tree()
+    keep = {} if rebuild_all or old is None else {
+        m[0]: old["mutants"][m[0]] for m in mutants
+        if _entry_ok(m, old["mutants"].get(m[0])) and all(k == ANY_TEST or (ROOT / k).exists() for k in old["mutants"][m[0]]["killers"])}
+    todo = [m for m in mutants if m[0] not in keep]
+    print(f"killer map: {len(keep)} current entries kept, {len(todo)} to attribute ({jobs} at a time)")
+    saved = dict(keep)
+    if rebuild_all or todo:
+        write_killer_map(new_killer_map(saved))        # drop whatever old map there was at once; each result is saved as it completes
+
+    def on_done(name: str, entry) -> None:
+        if entry is not None:
+            saved[name] = entry
+            write_killer_map(new_killer_map(saved))
+    new = attribute(todo, jobs, on_done) if todo else {}
+    bad = sorted(n for n, e in new.items() if e is None)
+    good = {n: e for n, e in new.items() if e is not None}
+    if todo:
+        write_killer_map(new_killer_map({**keep, **good}))    # a partial map is safe: a mutant without an entry is always selected
+    for n in bad:
+        print("NO WITNESS", n)
+    if bad:
+        print(f"\nkiller map written WITHOUT {len(bad)} mutant(s) that survived, are stale or timed out: RED")
+        return 1
+    print(f"killer map written: {KILLER_MAP} ({len(keep) + len(good)} mutants)")
+    return 0
+
+
+def check_killer_map() -> int:
+    probs = killer_map_problems(MUTANTS + FRONTEND_MUTANTS, load_killer_map(), ROOT)
+    for p in probs:
+        print("STALE   ", p)
+    if probs:
+        print(f"killer map: {len(probs)} problem(s); fix with: python scripts/mutation_check.py --build-killer-map (re-attributes only those)")
+        return 1
+    print(f"killer map: current ({len(MUTANTS) + len(FRONTEND_MUTANTS)} mutants)")
+    return 0
+
+
+_JOBS = 1       # mutants run in parallel by run_backend (--jobs); each runs its own serial suite in its own copy
+
+
+def _run_one_backend(m: tuple):
+    """(status, line) for one mutant: status killed | survived | stale. KILLED needs a named failing test or a timeout (a hung mutant is
+    killed); a non-zero exit that names no test is inconclusive (stale, RED), never a silent kill."""
+    try:
+        with mutated_backend_tree(m) as tree:
+            rc, out = run_suite_detail(tree, m[1])
+    except StaleMutant as e:
+        return "stale", str(e)
+    except subprocess.TimeoutExpired:
+        return "killed", f"KILLED    {m[0]}   [timeout]"
+    files = sorted({node_file(n) for n in failed_nodes(out)})
+    if rc != 0 and not files:
+        return "stale", f"{m[0]}: inconclusive: pytest exited {rc} without naming a failing test (not counted as a kill)"
+    return ("killed" if rc != 0 else "survived"), f"{'KILLED  ' if rc != 0 else 'SURVIVED'}  {m[0]}" + (f"   [{', '.join(files)}]" if files else "")
+
+
+_LOG: Path | None = None   # --log FILE (env GATE_MUTATION_LOG): one JSON line per finished mutant, so a restart resumes instead of starting over
+
+
+def _logged() -> dict:
+    out = {}
+    if _LOG is not None and _LOG.exists():
+        for line in _LOG.read_text().splitlines():
+            try:
+                d = json.loads(line)
+                out[(d["name"], d["hash"])] = d
+            except (ValueError, KeyError):
+                continue
+    return out
 
 
 def run_backend(mutants: list, survivors: list, stale: list) -> None:
-    for name, rel, old, new, count in mutants:
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "repo"
-            shutil.copytree(ROOT, tree, ignore=IGNORE)
-            # contracts.ts is read by the contract tests
-            (tree / "frontend/src/types").mkdir(parents=True, exist_ok=True)
-            shutil.copy(ROOT / "frontend/src/types/contracts.ts", tree / "frontend/src/types/contracts.ts")
-            f = tree / rel
-            text = f.read_text()
-            if text.count(old) != count:
-                stale.append(f"{name}: expected {count} occurrence(s) of target in {rel}, found {text.count(old)}")
+    done = _logged()
+    todo = []
+    for m in mutants:
+        d = done.get((m[0], mutant_hash(m)))
+        if d is None:
+            todo.append(m)
+            continue
+        print(f"{d['line']}   (from the log)", flush=True)
+        if d["status"] == "survived":
+            survivors.append(m[0])
+    if todo:
+        require_clean_backend_tree()
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, _JOBS)) as ex:
+        for m, (status, line) in zip(todo, ex.map(_run_one_backend, todo)) if _JOBS <= 1 else _as_completed(ex, todo):
+            if status == "stale":
+                stale.append(line)
                 continue
-            if name.startswith("B15"):
-                text = text.replace("except Exception:\n        # Details", "except Exception as exc:\n        # Details")
-            f.write_text(text.replace(old, new))
-            rc = run_suite(tree, rel)
-            print(f"{'KILLED  ' if rc != 0 else 'SURVIVED'}  {name}")
-            if rc == 0:
-                survivors.append(name)
+            print(line, flush=True)
+            if _LOG is not None:
+                with _LOG.open("a") as fh:
+                    fh.write(json.dumps({"name": m[0], "hash": mutant_hash(m), "status": status, "line": line}) + "\n")
+            if status == "survived":
+                survivors.append(m[0])
+
+
+def _as_completed(ex, mutants):
+    futs = {ex.submit(_run_one_backend, m): m for m in mutants}
+    for fu in concurrent.futures.as_completed(futs):
+        yield futs[fu], fu.result()
 
 
 def run_frontend(mutants: list, survivors: list, stale: list) -> None:
-    for name, rel, old, new, count in mutants:
-        with tempfile.TemporaryDirectory() as tmp:
-            tree = Path(tmp) / "repo"
-            shutil.copytree(ROOT / "frontend", tree / "frontend",
-                            ignore=shutil.ignore_patterns("node_modules", "dist", "e2e", ".results"))
-            (tree / "frontend" / "node_modules").symlink_to(ROOT / "frontend" / "node_modules", target_is_directory=True)
-            f = tree / rel
-            text = f.read_text()
-            if text.count(old) != count:
-                stale.append(f"{name}: expected {count} occurrence(s) of target in {rel}, found {text.count(old)}")
-                continue
-            clean = subprocess.run(["npx", "vitest", "run"], cwd=tree / "frontend", capture_output=True, text=True, timeout=300)
-            if clean.returncode != 0:      # a scratch copy that fails BEFORE the mutation would make every mutant look killed
-                stale.append(f"{name}: the unmutated frontend copy does not pass vitest")
-                continue
-            f.write_text(text.replace(old, new))
-            base = subprocess.run(["npx", "vitest", "run"], cwd=tree / "frontend", capture_output=True, text=True, timeout=300)
-            rc = base.returncode
-            print(f"{'KILLED  ' if rc != 0 else 'SURVIVED'}  {name}")
-            if rc == 0:
-                survivors.append(name)
+    for m in mutants:
+        try:
+            with mutated_frontend_tree(m) as tree:
+                rc = subprocess.run(["npx", "vitest", "run"], cwd=tree / "frontend", capture_output=True, text=True, timeout=300).returncode
+        except StaleMutant as e:
+            stale.append(str(e))
+            continue
+        print(f"{'KILLED  ' if rc != 0 else 'SURVIVED'}  {m[0]}")
+        if rc == 0:
+            survivors.append(m[0])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -637,18 +1219,54 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--check-targets", action="store_true", help="only check that every mutant's target text is current")
     ap.add_argument("--changed-since", metavar="REF", help="only the mutants whose target file (or any test) changed since REF (plus the "
                     "working tree); @origin = origin's default branch")
+    ap.add_argument("--check-killer-map", action="store_true", help="only check that scripts/mutant_killers.json matches the mutant list")
+    ap.add_argument("--build-killer-map", action="store_true", help="attribute the mutants without a current killer-map entry and write the map")
+    ap.add_argument("--rebuild-all", action="store_true", help="with --build-killer-map: attribute every mutant, not only the stale ones")
+    ap.add_argument("--shard", metavar="i/N", help="run only the mutants whose name hashes into shard i of N (1-based; sha256 of the name): the "
+                    "full check is split across CI jobs; every mutant is in exactly one shard")
+    ap.add_argument("--max-selected", type=int, default=None, help="with --changed-since: RED (not a silent timeout) when more than this many "
+                    "mutants are selected (env GATE_MUTATION_MAX; 0 or unset = no limit)")
+    ap.add_argument("--log", metavar="FILE", help="append each finished backend mutant's verdict to FILE and skip mutants already in it (resumable)")
+    ap.add_argument("--jobs", type=int, default=None, help="mutants run in parallel, each a serial suite in its own copy (default 1 for a check, "
+                    "min(4, cpus) for --build-killer-map; env GATE_MUTATION_JOBS)")
     a = ap.parse_args(argv)
     if a.check_targets:
         return check_targets()
+    global _JOBS, _LOG
+    _LOG = Path(a.log or os.environ.get("GATE_MUTATION_LOG") or "") if (a.log or os.environ.get("GATE_MUTATION_LOG")) else None
+    jobs = a.jobs or int(os.environ.get("GATE_MUTATION_JOBS") or 0) or None
+    _JOBS = jobs or 1
+    if a.check_killer_map:
+        return check_killer_map()
+    if a.build_killer_map:
+        return build_killer_map(a.rebuild_all, jobs or min(4, os.cpu_count() or 1))
     backend, frontend = MUTANTS, FRONTEND_MUTANTS
+    if a.shard:
+        si, sn = parse_shard(a.shard)
+        backend, frontend = [m for m in backend if in_shard(m[0], si, sn)], [m for m in frontend if in_shard(m[0], si, sn)]
+        print(f"mutation check: shard {si}/{sn}: {len(backend) + len(frontend)} of {len(MUTANTS) + len(FRONTEND_MUTANTS)} mutants")
     if a.changed_since:
         base = resolve_base(a.changed_since)
         changed = changed_files(base)
-        backend, frontend = select_changed(MUTANTS, changed), select_changed(FRONTEND_MUTANTS, changed)
+        km = load_killer_map()
+        if km is None:
+            print("mutation check: no usable killer map: any change under tests/ selects every mutant")
+        backend, frontend = select_changed(MUTANTS, changed, km), select_changed(FRONTEND_MUTANTS, changed, km)
         if not backend and not frontend:
             print(f"mutation check: no mutant targets changed since {base} ({len(changed)} file(s) changed): nothing to run")
             return 0
-        tests = sorted(f for f in changed if f.startswith("tests/") or f == "pytest.ini")
+        limit = a.max_selected if a.max_selected is not None else int(os.environ.get("GATE_MUTATION_MAX") or 0)
+        if limit and len(backend) + len(frontend) > limit:
+            sel = backend + frontend
+            shared = sorted(f for f in changed if _is_everything(f) or _vitest_shared(f))
+            why = [f"{len({m[1] for m in sel} & changed)} changed mutant target(s)",
+                   f"{sum(1 for f in changed if _is_pytest_test(f) or _is_vitest_test(f))} changed test file(s)"]
+            if shared:
+                why.append(f"shared test support changed: {shared[:5]}")
+            print(f"mutation check FAILED: too many mutants selected for the PR tier ({len(sel)} > {limit}): "
+                  f"run the nightly mutation workflow ({'; '.join(why)})")
+            return 1
+        tests = sorted(f for f in changed if f.startswith("tests/") or _is_vitest_test(f) or _is_everything(f) or _vitest_shared(f))
         print(f"mutation check: {len(backend) + len(frontend)} of {len(MUTANTS) + len(FRONTEND_MUTANTS)} mutants selected by the changes "
               f"since {base} (targets: {sorted({m[1] for m in backend + frontend} & changed)}; tests changed: {tests[:10]}"
               f"{' ...' if len(tests) > 10 else ''})")

@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parent.parent
 VERIFY = ROOT / "scripts" / "verify.sh"
 
 # stage-name prefixes per tier, in addition to everything of the tier below it (each prefix must start exactly one stage)
-PUSH = ["preflight", "mutation targets are current", "live coverage map, static", "backend pytest, fast", "seismograph legacy",
+PUSH = ["preflight", "mutation targets are current", "mutant killer map is current", "live coverage map, static", "backend pytest, fast", "seismograph legacy",
         "frontend typecheck", "frontend lint", "frontend unit tests", "frontend build"]
 PR = ["backend pytest, slow", "reality: hostile", "reality: real MCP servers", "reality: hub under concurrent load",
       "reality: live workflows", "live coverage proven", "browser e2e", "browser replay parity: action_sim", "browser inbox (",
@@ -105,6 +105,20 @@ def test_the_changed_files_mutation_stage_uses_the_base_ref_or_origins_default_b
     _, stages = listed("pr", tmp_path, GATE_BASE="")
     argv = next(a for n, a in stages if n.startswith("mutation check, changed"))
     assert argv[-2:] == ["--changed-since", "@origin"]
+
+
+def test_the_killer_map_staleness_check_runs_in_every_tier(tmp_path):
+    """The map that lets a PR skip mutants must never be stale: a fast check in the push tier (so in every tier), not at the end of a long one."""
+    for tier in ("push", "pr", "full", "weekly"):
+        argv = next(a for n, a in listed(tier, tmp_path)[1] if n.startswith("mutant killer map is current"))
+        assert argv[-2:] == ["scripts/mutation_check.py", "--check-killer-map"], (tier, argv)
+
+
+def test_the_full_and_weekly_tiers_run_every_mutant_without_the_map(tmp_path):
+    """The safety net behind the map's shortcut: the nightly (full) and weekly tiers run the whole mutation check, no --changed-since."""
+    for tier in ("full", "weekly"):
+        argv = next(a for n, a in listed(tier, tmp_path)[1] if n.startswith("mutation check ("))
+        assert argv[-1] == "scripts/mutation_check.py" and "--changed-since" not in argv, (tier, argv)
 
 
 # ----------------------------------------------------------------------------- nothing orphaned
@@ -203,3 +217,44 @@ def test_gate_as_user_other_values_do_not_enable_it(tmp_path):
     for v in ("0", "", "yes", "true"):
         _, stages = listed("push", tmp_path, GATE_AS_USER=v)
         assert not [n for n, _ in stages if "non-root" in n], v
+
+
+# ----------------------------------------------------------------------------- the full mutation check in CI (its own sharded job)
+CI = ROOT / ".github" / "workflows" / "ci.yml"
+
+
+def test_with_the_external_flag_the_full_tier_delegates_the_mutation_check_and_names_the_ci_job(tmp_path):
+    _, stages = listed("full", tmp_path, GATE_MUTATION_FULL="external")
+    named = [(n, a) for n, a in stages if n.startswith("mutation check")]
+    assert len(named) == 1 and "CI job `mutation`" in named[0][0] and named[0][1][-1] == "--check-targets"
+    _, stages = listed("full", tmp_path)
+    assert [a[-1] for n, a in stages if n.startswith("mutation check")] == ["scripts/mutation_check.py"]    # local default: the whole check, unsharded
+
+
+def test_every_tier_from_pr_up_runs_the_mutation_check_or_names_the_job_that_does(tmp_path):
+    for tier in ("pr", "full", "weekly"):
+        for ext in ({}, {"GATE_MUTATION_FULL": "external"}):
+            names = [n for n, _ in listed(tier, tmp_path, **ext)[1] if n.startswith("mutation check")]
+            assert len(names) == 1, (tier, ext, names)
+            if ext:
+                assert "CI job `mutation`" in names[0] or tier == "pr"
+
+
+def test_the_ci_workflow_has_a_sharded_resumable_mutation_job_and_the_gate_job_delegates_to_it():
+    import yaml
+    wf = yaml.safe_load(CI.read_text())
+    jobs = wf["jobs"]
+    assert set(jobs) >= {"gate", "mutation"}
+    mut = jobs["mutation"]
+    assert mut["strategy"]["matrix"]["shard"] == [1, 2, 3, 4] and mut["strategy"]["fail-fast"] is False
+    assert mut["timeout-minutes"] == 350
+    text = CI.read_text()
+    assert "--shard ${{ matrix.shard }}/4" in text and "--log" in text and "--jobs 3" in text or "GATE_MUTATION_JOBS: \"3\"" in text
+    assert "actions/cache" in text and "mutation-log" in text                                  # a rerun resumes from the verdict log
+    cond = mut["if"]
+    assert "schedule" in cond and "full" in cond and "weekly" in cond                            # nightly and weekly, never on a push or a PR
+    steps = " ".join(str(s.get("run", "")) + str(s.get("env", "")) for s in jobs["gate"]["steps"])
+    assert "GATE_MUTATION_FULL" in steps and "external" in steps
+    assert "GATE_MUTATION_JOBS" in steps and "GATE_MUTATION_MAX" in steps                      # the pr tier: parallel and capped
+    t = jobs["gate"]["timeout-minutes"]
+    assert "pull_request' && 120" in t

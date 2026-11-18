@@ -1,0 +1,2602 @@
+{
+ "mutants": {
+  "B1 deny path still executes": {
+   "hash": "ec628b7c8eee8fc5eed1dd06f0ed0748f862c0500078049654320a379040f501",
+   "killers": [
+    "tests/e2e/test_ws_session.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B1 gate fails open on garbage": {
+   "hash": "be58d83a9a7edd759440c9ffd0ad20969fe477b4857b58ac0ebdfea8d732d880",
+   "killers": [
+    "tests/server/test_gate.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B1 gate ignores node_id": {
+   "hash": "0a499e753f9f2148790e837139e494b4eccd9eca50a4e322be8fdedc653927ce",
+   "killers": [
+    "tests/server/test_gate.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B1 sandbox: Landlock is built but never applied": {
+   "hash": "9d60de7681cae3e727d2c29c2e81cfc16010473a64b1a51fa45aedae11ea1d19",
+   "killers": [
+    "tests/proxy/test_boundary.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "unknown"
+  },
+  "B11 magic threshold restored": {
+   "hash": "1e5eee359474965b1c810ee497b76d8081ede696e041fe11c2b3cd199329fb0f",
+   "killers": [
+    "tests/seismograph/test_drift_detector.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B11 shrinkage removed": {
+   "hash": "7b33597045445b0ca568ad3a9fe8bc5a6ca55a2d4eb853af4aacd58795801b41",
+   "killers": [
+    "tests/seismograph/test_drift_detector.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B14 replay requires model key": {
+   "hash": "2011a1781443a9a5c0f6b60538b12dd326636fe51a8d4cf84e1e985f55bd6e17",
+   "killers": [
+    "tests/e2e/test_ws_session.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B15 exception text leaked": {
+   "hash": "15590e12cd18a891e4d8e2f1820a861e0f327225f3f4c89197dc3beec3ae3217",
+   "killers": [
+    "tests/e2e/test_ws_gaps.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B16 server not importable from server/ dir": {
+   "hash": "7b56be7142eb603668785c5fd6e886ba46f9caa812b0b258840cb49341ee54a5",
+   "killers": [
+    "tests/server/test_live_drift.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B17 default model not resolved": {
+   "hash": "2bbd50410d328e6102d0ccbfc7ee586501efac290d479d9a98ea00a2b7a49def",
+   "killers": [
+    "tests/server/test_providers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B2 proxy: every secret goes to every tool of the worker": {
+   "hash": "e2e988995d228ab86dc5134c19ee0fae2a2583a7f2f0c091b3afd6ff7ea9baac",
+   "killers": [
+    "tests/proxy/test_boundary.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "unknown"
+  },
+  "B2 timeout approves instead of denying": {
+   "hash": "12414ff6aafeba86ea5081b9d559d59acc5a1a958fefb1bb6454fa79e622d115",
+   "killers": [
+    "tests/server/test_gate.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B20 replan never emitted": {
+   "hash": "4201ff8aa1b4d13477fefc06ec303a3ddf28512837b9bb09c4ef57cdffdb210b",
+   "killers": [
+    "tests/e2e/test_ws_gaps.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B3 origin check removed": {
+   "hash": "c72655c4b3407cd0fa289fa92ddd7094bb149735d27dfbbfe2579d16081c2da7",
+   "killers": [
+    "tests/server/test_auth.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B3 proxy: secret values are no longer scrubbed": {
+   "hash": "f2feb25afea80c41006f0f88c3140ea5ae0ac397610009de90d41eb5a919944e",
+   "killers": [
+    "tests/proxy/test_boundary.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "unknown"
+  },
+  "B3 token check removed": {
+   "hash": "17ddf824693845f6d858f2e2d57346dba0bf49ee4466964a6f39b4340542d93a",
+   "killers": [
+    "tests/server/test_auth.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B4 hub: a call that receives credentials may be auto-approved by the legacy flag": {
+   "hash": "c469bc1b6eeac12ca97051207e5cc650c3107ca98f0b7bcd7c9363cf2f7faf30",
+   "killers": [
+    "tests/server/test_inbox_boundary.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B4 shared environment": {
+   "hash": "aa7bf2da17c8af51bfec21164537fa8d2b9757fc029031ac297b62fe434ee24c",
+   "killers": [
+    "tests/server/test_mock_environment.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B5 LLM retries disabled": {
+   "hash": "04d80e3e529f82f11792073e6aa8b31e7973bf9e9ab4e031b4c55e1c8d3fa42c",
+   "killers": [
+    "tests/server/test_llm_call.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B5 hub: the live session-open event hides the sandbox boundary": {
+   "hash": "42f4165efba0c1ff125dcac0d86b1015cd57db6f76c340a798f628784377e6ae",
+   "killers": [
+    "tests/server/test_inbox_session_open_event.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B5 no terminal event on LLM error": {
+   "hash": "77b57fd0da9e266165c9f1437901acab6a8f023609fef598e8e2832e36c24ab6",
+   "killers": [
+    "tests/e2e/test_ws_gaps.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B6 circumvention only counted after decision": {
+   "hash": "3988337d2599acfc1e8bca44abce4c4544dc5b5b11d0ffd6f986d66075e72ecf",
+   "killers": [
+    "tests/e2e/test_ws_gaps.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "B8 contract field renamed": {
+   "hash": "5b6b09775b712b268c01dbe1209b0f685d0a2c538edda39a8cc69c44635ec4db",
+   "killers": [
+    "tests/contract/test_events_contract.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C1 grant walk follows symlinks (openat2 without RESOLVE_NO_SYMLINKS: a link names its target)": {
+   "hash": "c9789e508bf6c52dce973593bd2b8e1352e041d039add1486f400fe512c6d263",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C10 a path-slot argument outside confine is not floored at ask": {
+   "hash": "40d37a9d424045cf21dd37396007e634c1a57f01c64e363f7aae6de61b4f09f8",
+   "killers": [
+    "tests/server/test_policy_confine.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C11 proxy belt removed (a policy approval of a path call without confine runs unconfined)": {
+   "hash": "e68feef9745d4d910d65eac58ef1583ba0c0a1cddd77c84dcc60f3d343adc586",
+   "killers": [
+    "tests/proxy/test_confined_call.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C12 a failed grant falls back to granting its base directory": {
+   "hash": "bf522a883ac94d1a08bbe3fffebcc7ddbee68199f771e447858e8296f7e3ff4e",
+   "killers": [
+    "tests/proxy/test_confined_call.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C13 hub reads a missing confinable as true (an old proxy's path calls are auto-allowed)": {
+   "hash": "6e497c190417f2714cb0d112ab9f31d3143e62c88686552170382513536ef382",
+   "killers": [
+    "tests/server/test_inbox_confine.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C14 a too-broad sandbox.runtime is accepted at config validation": {
+   "hash": "ceb2fc45913d93077ec504b7278f4b258de5598d86f1a0a410ba0ea2bb23a0b9",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C15 server_confinable does not fail closed on a too-broad runtime": {
+   "hash": "00364c541eea35d3de41363aa3f4dc67fd5c2bd03759d250d8e38ace495a11b0",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C16 precheck drops the lexical resolution (the card shows only the kernel-order decoy)": {
+   "hash": "c509fc5c71bdc58818cd9612aa238dbc8e07a3b5ff664f8315945ca8503e0496",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C17 lint is silent about a path-like argument under an empty confine": {
+   "hash": "ca4177d1d4b4101b3177b70946228e511deff296b0bfa87529ccf02e000380dc",
+   "killers": [
+    "tests/server/test_policy_confine.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C18 a standing rule for a directory-listing tool confines it with read": {
+   "hash": "3e00ec7cd375f73f2e06ffe1fd6be14ecd95973a09eeab4cb79529f3d6af2fe1",
+   "killers": [
+    "tests/server/test_policy_writer.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C19 hub drops links_lexical from the pending card": {
+   "hash": "ff4c197c18d2ac42b69fd771f691bb12a8f7b53c9a85a68288e10b884fd43cdc",
+   "killers": [
+    "tests/server/test_inbox_confine.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C2 grant walk may leave its base (RESOLVE_BENEATH dropped: '..' escapes)": {
+   "hash": "fc1cf3dd1a5e878eeb92864ee5e77f8f8908bd71485a696f5fdaa67b1601591e",
+   "killers": [
+    "tests/proxy/test_sandbox_exact.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C3 the confined spec keeps the server's read/write directories": {
+   "hash": "7784e35f20740cacb80194e8a57a1551d5753f9a6baa459cc60d326af9091537",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C4 a list grant also grants READ_FILE beneath the directory": {
+   "hash": "a84e4ae925e99669bd2b74e5bf6354f9a63c303800579478e8c72ed975b6bad9",
+   "killers": [
+    "tests/proxy/test_sandbox_exact.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C5 the proxy runs a confined call in the session process": {
+   "hash": "b7e3692585939c768f4075b1f31fd9958c03425e85ff9dc7e377911326393fd5",
+   "killers": [
+    "tests/proxy/test_confined_call.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C6 the worker status check is skipped (call_tool on an unproven worker)": {
+   "hash": "2d3c822446444eba25b24df343fa54ea771236810d2b3b7114758de95c28011c",
+   "killers": [
+    "tests/proxy/test_confined_call.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C7 hub ignores confinable=false (path allows of an unsandboxed server are auto-allowed)": {
+   "hash": "e64c0a4bb2567009b586306263b3417de6cedfb7e56ae786ea369d37b80ebf8f",
+   "killers": [
+    "tests/server/test_inbox_confine.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C8 hub omits confine in proxy_decision": {
+   "hash": "70b16ec5269c935e580810a67e7463fa496bb2e2a0013255d309510a32fc73d9",
+   "killers": [
+    "tests/server/test_inbox_confine.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "C9 an allow rule without confine is not floored at ask": {
+   "hash": "e0671feed35b32d2f9233b0ae7852056808934f36dc394b4019140141d1d8045",
+   "killers": [
+    "tests/server/test_policy_cli.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "F1 drawer shows the raw (multi-line) tool name": {
+   "hash": "b2f50a65f97f3fee39ad0a50141c608027d1087ef66ffc60022eb1a1b97bd948",
+   "killers": [
+    "frontend/src/components/NodeDetail.test.tsx"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "F2 drawer colours drift against the old 2.5": {
+   "hash": "00081ac9e81edda4fef0306be6115d100852ae6c313daaf4e7077220b7b2bd05",
+   "killers": [
+    "frontend/src/components/NodeDetail.test.tsx"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "F3 sanitiser removes nothing": {
+   "hash": "d2d1bfb738d667f5e7b3cf705fad9d8502269947177d07e0f162dfc6df12a15d",
+   "killers": [
+    "frontend/src/components/Inbox.test.tsx",
+    "frontend/src/components/NodeDetail.test.tsx",
+    "frontend/src/lib/inboxRoute.test.ts",
+    "frontend/src/lib/safeText.test.ts"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "F4 result panel is raw text again": {
+   "hash": "9acd3d649f2613d2cd131f4cc2e641d601ee1ab1b12209d0202888f24cf75163",
+   "killers": [
+    "frontend/src/components/NodeDetail.test.tsx"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "F5 the standing-rule frame is built without confirm=true semantics (unknown verdicts are offered)": {
+   "hash": "556f11d86b6066551fd073078bc649a4e4fc6fb7d4d564fa5b573df802c3e5fb",
+   "killers": [
+    "frontend/src/lib/inboxView.test.ts"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "F6 the UI offers standing rules although the hub says it is not writable": {
+   "hash": "7df4296b886c1d9b135f36dd1de811b07e6719dad624dc936abc97d3a5a020c9",
+   "killers": [
+    "frontend/src/lib/inboxRoute.test.ts"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "F7 the UI ignores the threshold carried by the event": {
+   "hash": "1440f9d4cf17d185cc989cd5300def2f4e7255cf9f2540d5d9466e1087fb6574",
+   "killers": [
+    "frontend/src/components/NodeDetail.test.tsx",
+    "frontend/src/lib/drift.test.ts"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "F8 the card shows only one resolution of a link (the lexical one is dropped)": {
+   "hash": "db3494daed1e840e9294b6d7a49c2f235aab147f063bac72495b487e7798d1c5",
+   "killers": [
+    "frontend/src/components/Inbox.test.tsx"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "FW1 the card does not show that a held call is a write": {
+   "hash": "d9a2a35f8ec0feca5771006c83e14dd5dfc63d886d14e9dc215c29609d0a295e",
+   "killers": [
+    "frontend/src/components/Inbox.test.tsx"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "FW2 the resolved row hides what an auto-allowed write wrote": {
+   "hash": "90e4fef614bacd37d0254f23c0d323d718d7c6bb7ef23f126c4e25bbe89da605",
+   "killers": [
+    "frontend/src/components/Inbox.test.tsx"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "FW3 a reason outside the closed set is shown as the proxy's own text": {
+   "hash": "77062af723504e39814847be114d91eae6e197335b4af56c767ce765158f31dc",
+   "killers": [
+    "frontend/src/lib/inboxRoute.test.ts"
+   ],
+   "kind": "single",
+   "runner": "vitest",
+   "tier": "push"
+  },
+  "G1 preflight: an HTTPS proxy without the Docker build CA passes (the build then fails hours later)": {
+   "hash": "facae3eb90897c500bd6cafd6ae60052aa57ce666f6a52b549d84c5f42be1e45",
+   "killers": [
+    "tests/test_gate_lib.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "G2 a failed stage writes no FAIL event (a watcher never hears of it)": {
+   "hash": "4f5449a22effcd48bc85ea133b9d48b843b5197dfd6c2540fdd431823e6514a7",
+   "killers": [
+    "tests/test_gate_lib.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "G3 fail-fast keeps running after a failure": {
+   "hash": "c52e8ad6de511fd7356e428e9c5d1e7148c79a2d77502c7e5f0918299c0a6010",
+   "killers": [
+    "tests/test_gate_lib.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "G4 verify.sh runs on (and goes GREEN) when scripts/gate_lib.sh cannot be loaded": {
+   "hash": "415b1c1f58db45861312f44e018e42f3ac4910a967e54e08b6bc97b38bd9fd72",
+   "killers": [
+    "tests/test_gate_lib.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "G5 DONE says GREEN even when the gate aborted": {
+   "hash": "20606ea1817b56632f9a0cc193f35b44ac7da704c8a72152e4e8d0fdaeb4c03d",
+   "killers": [
+    "tests/test_gate_lib.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "G6 preflight: a loopback proxy passes without host networking": {
+   "hash": "1f172d4d53b329cba6576ec754508a10a406a869c29f92cf941e3ccd7b6f1a2c",
+   "killers": [
+    "tests/test_gate_lib.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "G7 preflight: a directory passes as the build CA": {
+   "hash": "08cd045569ea81fa9dd990eac30943538fb54a5a93d1f0e724104880b5ff85ac",
+   "killers": [
+    "tests/test_gate_lib.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H1 /health public view still shows full paths": {
+   "hash": "4dbf002784178ec0804b36573e187175e9202ad3c5a1e431d036728156b0de38",
+   "killers": [
+    "tests/server/test_health_view.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H1 effects: the file-name pattern is quadratic again (one 200 KB argument froze the hub)": {
+   "hash": "d1e233347775656a8d3b0f81ce7be7c84d86a15fee11977b07ecfd5b4fa1b24f",
+   "killers": [
+    "tests/eval/test_effects_bounded.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H10 a failed hello_ack abandons the connection (a call queued in the same instant is never read nor logged)": {
+   "hash": "612c101d33575cba51afb026485f2d63fefaa2508fa5f02b3fb78063b8228ef0",
+   "killers": [
+    "tests/server/test_inbox_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H11 hub: a call on a peer already known to be dead is held or auto-approved instead of denied": {
+   "hash": "1e2eb1bbb820598be9a196457d40bdd85f8c3ed6cba6cf2fb75cf31e16033f6c",
+   "killers": [
+    "tests/server/test_inbox_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H12 denied_effect_match downgrade not applied (a note-named retry stays critical)": {
+   "hash": "cba2d569d923a78f3c99722e0cc772bf5d384a7aae4ee0d2c4ef9d59fbda8d2c",
+   "killers": [
+    "tests/server/test_inbox_note_alert.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H13 same-directory safety rail removed (a basename in the note blesses any directory)": {
+   "hash": "bcecafbe44bb79d66d666c212d7cf38a0f706542483818502e534f92ebc510a0",
+   "killers": [
+    "tests/server/test_alert_note.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H14 starter: the sensitive-path rule is an allow instead of an ask": {
+   "hash": "f164cc7d37425eb800395d42e3dd555db55b7169c9f3a45dec3f505771de4aaf",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H14b engine: a matching ask rule no longer beats an allow": {
+   "hash": "f166b85b341e726adf6b926da543e5149bdda49f08f117ec73cce124d8d8378c",
+   "killers": [
+    "tests/server/test_inbox_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H15 unknown builtin policy loads as allow-all instead of failing closed": {
+   "hash": "7fc9a62e7598e1b5917de96c13adba7ca9533ecb53a6c7c4d80d1f2af0476e57",
+   "killers": [
+    "tests/server/test_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H15b resolver returns an empty path instead of None for an unknown builtin": {
+   "hash": "2da5f99d419dc072391e6e108c6b55f8ea92422a0080043d97e9ca3a9fb6e99c",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H16 icontains_any is case-sensitive": {
+   "hash": "f26e63920f435b0c1eaa8410625cd9d8c5e6bcb9fc33e3fe837ad63d4ae41b42",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H17 icontains_any ignores list arguments": {
+   "hash": "2f2fe12fafcc7192accb4204f76603389b5b0f16b822eaa79e1ac0192e10ce75",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H18 icontains_any: an over-long element no longer counts as a match": {
+   "hash": "ee0fa765ecd042857260aa5c2e0b53a6cdd6564a49a02c6f4195f15712822689",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H19 decoy: a NEW key at which the denied call had nothing is allowed to earn the label": {
+   "hash": "ea83bdac3724e12701fe519c85f545d5638bcfe88311d5466ee56afcace15205",
+   "killers": [
+    "tests/server/test_alert_note.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H2 /health detail shown to everyone": {
+   "hash": "d9be2647297b6024e9154f0d40a7f3d4c829be8c67830d756e7ee2733c22acc0",
+   "killers": [
+    "tests/server/test_health_view.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H2 effects: the whole hostile argument is scanned, not a bounded window": {
+   "hash": "eb0ab17a0be9cde4f7c05fdebd7e90d99690449c8a24e6063d971e3797b18f50",
+   "killers": [
+    "tests/eval/test_effects_bounded.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H20 icontains_any: path normalisation removed (only the as-written text is tested)": {
+   "hash": "0b5fbe158ca02116e6d3bf3914ae117f363ca0835b99043d1bbdd143e54a9293",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H21 icontains_any: non-string list entries are skipped instead of matching": {
+   "hash": "18a32d4c81ab8747a9b75d48e573e81afb021a2c02bd19abac9db25487dfa1ad",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H22 the :// needle is removed from the path rule (a URL read is auto-allowed again)": {
+   "hash": "4d7e12707987aad70387ddba3f80a1af638cd705a66f3d5b51e4558195233f41",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H23 the ask-url-flag rule is an allow (isUrl:true fetches unattended again)": {
+   "hash": "9ef26d081b9121c64cc1091b35c6b0c4082aaf89882c942da2ad63867c26f30e",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H24 engine: when.arg_keys is ignored (a read tool with an extra flag is auto-allowed again)": {
+   "hash": "8e905d3b0e59336349d6f2c2e688a412612e6deaf7288fa502152d6143c2af81",
+   "killers": [
+    "tests/server/test_policy_arg_keys.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H25 engine: arg_keys on args that are not an object matches an allow rule": {
+   "hash": "4094a9eadf1f645359d4f213facb67fc0ab31b8f613643d8ce30042e07f17c44",
+   "killers": [
+    "tests/server/test_policy_arg_keys.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H26 starter: the read rule lists isUrl (Desktop Commander's URL fetch is auto-allowed again)": {
+   "hash": "4fdc1344e05adae07e2d8c3c83bdb3599d2e10d171cb1ff31531a653df8b6a26",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H27 icontains_any: an object / scalar in a path slot is false again (paths: {..} slips past the ask rule)": {
+   "hash": "edf7219b4f93770c2f6c292b4b4021c3506fdfa401d1e293f8bb18a810539a4e",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H28 starter: read_multiple_files allowed on any `paths` value, not only a non-empty list": {
+   "hash": "c029f31e9287e8a57eaa6fcee923fc4002c46fdb3ea316567477f12b4e8ded48",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H3 /health token never checked": {
+   "hash": "5437c396f774aa5495ea5f62538e35eab5573e7110dadbc7c5977436e569b5cf",
+   "killers": [
+    "tests/server/test_health_view.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H3 agent loop: a response with no choices raises IndexError": {
+   "hash": "4ac9f7430252cb7f7fe7388f62431a3f9b6ff06c99aca4f3f2675ab7a1b2b42b",
+   "killers": [
+    "tests/e2e/test_ws_hostile_shapes.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H4 /health leaks the fallback message": {
+   "hash": "e909459386a54808c8e3867960117cdc3c782de50e7d323881da89d4944b2117",
+   "killers": [
+    "tests/server/test_health_view.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H4 agent loop: list-of-parts content is passed through un-normalised": {
+   "hash": "1bda68b38e2611d0224e374acfddf70daacd02f7445f1fa7aafb3cd37d411c3f",
+   "killers": [
+    "tests/e2e/test_ws_hostile_shapes.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H5 proxy: an oversize call is sent anyway (the hub drops the whole link)": {
+   "hash": "5b1f1a6d566d4beb4a18accd47b3efdb6e1fb521005311fe13cccb213d69220e",
+   "killers": [
+    "tests/proxy/test_oversize_call.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H6 proxy and hub disagree about the frame limit": {
+   "hash": "a55e4606e6af1751a8c3d9b511733c5748539de04017e213ac76f1e70e43b1d9",
+   "killers": [
+    "tests/proxy/test_oversize_call.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H7 hub: a call whose proxy closed while the monitor ran is dropped BEFORE call_proposed (vanishes from the audit trail)": {
+   "hash": "5cd4685f7663f3863899424f47417747df15d041ebe721032ba6908857ad190c",
+   "killers": [
+    "tests/server/test_inbox_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H8 replay ignores the logged denials (denied-effect alerts never fire)": {
+   "hash": "15c15eb388be13f2fe0db3a1fc3dd90c826516f785604a37f6180ba7aa8a78e1",
+   "killers": [
+    "tests/server/test_eventlog_replay.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "H9 verify --previous does not compare the archive head with log_continues": {
+   "hash": "fc1aa21e92b9a833d9e2e56eecadafa91cc813019c83e2d8c0698f0ad78312ca",
+   "killers": [
+    "tests/server/test_eventlog_rotate.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "I1 identity: JWT audience is no longer verified": {
+   "hash": "b4796db71267a3182b40e9d995311fb38e94bb7fe2de24ca7f039c9417a4868e",
+   "killers": [
+    "tests/e2e/test_identity_end_to_end.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "I2 identity: token digests compared with == (timing)": {
+   "hash": "3fbd320474f1e29f454b5c5ee9c79b3d898faf8a69838b65b2f5fbeb075e07ac",
+   "killers": [
+    "tests/server/test_identity.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "I3 identity: a viewer may decide": {
+   "hash": "a003aa2b563e585a00e2ef83a915afd6a9c35c6af35f358fc4d7ba1ec1ee3951",
+   "killers": [
+    "tests/server/test_identity.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "I4 hub: broadcasts reach the UIs of every tenant": {
+   "hash": "115e362baccd3e359caf74872569310e1a408939a7e84d16517b608f9fef25fc",
+   "killers": [
+    "tests/server/test_inbox_identity.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "I5 notify: redirects are followed": {
+   "hash": "8d39fe0843b09d84a47c3316701586b734ba5d1012ac9e0add51de2947cfb3f5",
+   "killers": [
+    "tests/server/test_notify.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "L1 no-skip: SENTINEL_NO_SKIP=1 is ignored (a skipped live test passes the stage)": {
+   "hash": "7541f4b5d380e4a2e98bd173029ffdea0cd0c0859889273d9fc581d7a91107ed",
+   "killers": [
+    "tests/test_no_skip_plugin.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "L2 no-skip: an xfail passes the stage again": {
+   "hash": "a71956511f401e2f93c2aabb70b7fd21e2c37bf2a517a13add332258b6b8c860",
+   "killers": [
+    "tests/test_no_skip_plugin.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "L3 coverage: a workflow with no live test and no gap passes": {
+   "hash": "68d58ca924e8da4989d784cf38c54d47086108534c9a2d3c84732eb091c601d8",
+   "killers": [
+    "tests/test_check_live_coverage.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "L4 coverage: a skipped / xfail / failed live test counts as proof": {
+   "hash": "d156be1d939614f1eb2aaac1cee40200b6c9afc7cb23b1db24ef3105e9cbb992",
+   "killers": [
+    "tests/test_check_live_coverage.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "L5 coverage: a spec only an opt-in stage runs counts as live": {
+   "hash": "a8b466955ccb3a3deeccb232cdba1ffc11aee978d36eda3f0a5c94717b8b0948",
+   "killers": [
+    "tests/test_check_live_coverage.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "L6 coverage: a live test absent from the junit files counts as proof": {
+   "hash": "3035e8f2d3bbc48aa021efb5d49ccf376866fc548181b7c5e4bc9697bb08a232",
+   "killers": [
+    "tests/test_check_live_coverage.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "L7 coverage: a node id in two junit files keeps its LAST outcome (a skip hides behind a later pass)": {
+   "hash": "92d6954da7affa516ad92943d528ca1e55240dd7cd83ab4f831dd568ddb01959",
+   "killers": [
+    "tests/test_check_live_coverage.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "O1 hub: a standing rule is written without the explicit confirm": {
+   "hash": "089c4c0d45372e54ab4cbbd07e437ac9aaf8f9132e673adb2ca73f917e157125",
+   "killers": [
+    "tests/server/test_inbox_rules.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "O2 hub: the operator note is written on an approve decision record": {
+   "hash": "5a126e444b317a24fc1183e68d3bd7020543718cb142bc25d97a19e18be8bb6c",
+   "killers": [
+    "tests/server/test_inbox_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "O3 drift_update no longer carries the active threshold": {
+   "hash": "10a7ab078016dbdffbb2fd49e09b9d27e40bc6ac96dba02995b4350955673cf7",
+   "killers": [
+    "tests/server/test_drift_threshold_event.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "O4 hub: standing rules are offered although the policy is not writable": {
+   "hash": "ef77b5f9bb7a08553b027e7b2c8b6da2330458b91cda28211a809ddee8d49324",
+   "killers": [
+    "tests/server/test_inbox_hub.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "R1 denied-party match ignored (denials never reach the registry detector)": {
+   "hash": "b66adebf874e4d1309dbbde3bde92cb83ad54c2dc43d25a54a9fc5d47d7e5e8b",
+   "killers": [
+    "tests/server/test_proposal_monitor_registry.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "R2 registry mode without a usable registry keeps running D8/D9 (fallback to action_sim removed)": {
+   "hash": "947e98e01718f4ab22b937ba9cc55a9f80ab129579e620e1be09d768a7572ff7",
+   "killers": [
+    "tests/server/test_proposal_monitor_registry.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "R3 registry/frozen fallback lands on rules instead of action_sim": {
+   "hash": "b7d46d99a0c8443442900dd997482fb1980a2a82b3bd6019791b7e86dff0d173",
+   "killers": [
+    "tests/server/test_proposal_monitor_registry.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "R4 denied-party match ignored when choosing the earlier denied proposal for the alert text": {
+   "hash": "56d922f2f4c8b9236913855b88d3054effea68eea19888c32a8d5b551b40429c",
+   "killers": [
+    "tests/server/test_proposal_monitor_registry_v3.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T1 a tier drops its own stages (rank compared with > instead of >=)": {
+   "hash": "0ff6ce646c1c0d60e7d559283047c33919496a2c3288827f3a6b3a7cefcd7f0a",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T10 changed-since ignores the branch's commits": {
+   "hash": "c910b21972b537bfb7fcc2d260acf9755f57dbcba04396c2aa09af3af91968fd",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T11 changed-since ignores untracked files": {
+   "hash": "0f2a07bced6a0edb3d5f6b991ac4cf8ea0dce5a6b5961d1252d31fe1bc0c6f8f",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T12 changed-since counts the base branch's own later commits (two-dot diff)": {
+   "hash": "d7c7b7d8d2241c7ade8673584d4afc5870a4220d1cb2345b272982cbfaf55df0",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T13 changed-since selects every mutant": {
+   "hash": "9d7dda697009f564ae5c8f4733a1af4194f188b5f04de66e66185f1101e5d500",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T14 an unknown ref selects nothing and passes": {
+   "hash": "b3763ca428f537d69abd227060896b5d547ee0f07a46887750173dc183e45009",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T15 gate-script mutants run the whole serial suite before the gate's own tests (minutes per mutant instead of seconds)": {
+   "hash": "cc3d885d40b19c1cab652da17dd8c660fe9138e9c6924782c6d9b45ddabb3485",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T16 a changed test file selects only the mutants whose target changed (a weakened killer slips through)": {
+   "hash": "a57b450a6828ecf4cce2698995c24346cbabd320638b5510b6c0f6423abbf555",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T17 a changed gate test selects none of the gate-script mutants it kills": {
+   "hash": "595fed1b3cec077552bfbdba8513f9a52610c933afc28e1292508a37421ae3e7",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T18 no origin default branch silently diffs against HEAD (nothing selected) instead of failing": {
+   "hash": "378d2bbcc02c45c132280a3a7a5e3550326c60fe13f9dbe4e7a7a57dc552d558",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T19 the sandbox trampoline ignores TMPDIR (the boundary leak checks would look in the wrong place)": {
+   "hash": "4909354c09a4511f757f14f9e8851a8e492e1853ba41a49dd4efd35c07812ae3",
+   "killers": [
+    "tests/e2e/test_boundary_end_to_end.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T2 an unknown GATE_TIER runs anyway (as nothing beyond push)": {
+   "hash": "2a242ac7569606419e83cd29809434ac930334b0a16b5804f3ae4a98aabf6a0c",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T20 sandbox tests skip silently although SENTINEL_SANDBOX_REQUIRED=1 (CI)": {
+   "hash": "15fa22b2ad89d41e82673750be25a7a28c15bfa8b07d707b9ad23720d74b7ad4",
+   "killers": [
+    "tests/test_no_skip_plugin.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T21 the Claude key stays in the environment of every stage": {
+   "hash": "31384a85134f34ebf37d87c0613b6b1cca751f0099e326dd19e0a6b247626d03",
+   "killers": [
+    "tests/test_gate_lib.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T22 a changed killer test selects none of the mutants it is the witness for (a weakened killer slips through)": {
+   "hash": "1e63c859fc046174e25c96ddd1adca2dbb90d842c59d88deca55a88fa3449e0f",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T23 a changed shared test-support file (conftest, plugin, helper) selects only its own mutants": {
+   "hash": "dcee743c78566252ef2eb6267151b6f0adac1029e768f20d9f5d28ece0347d1d",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T24 a mutant with a missing or stale killer-map entry is not selected": {
+   "hash": "e6d0b418104894f425d0aa23b0184821a42f4ff0e0b7735d6f8c3cc4086eb131",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T25 a renamed test file lists only its new name (the old killer is never seen)": {
+   "hash": "d56ffb13eb82dd38c19bd146deb0f2d9bdb93d7266db3f16dad4f76529671d8d",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T26 a mutant killed only by a combination ignores changed test files": {
+   "hash": "1e34336dec7011064457c40edf7eb82d27a2726183be4625d7671c15f14995f5",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T27 the killer-map check accepts an entry whose mutant definition changed": {
+   "hash": "be182fa6edceb9e968b202310e287fc6f110787f6f592bef70f2b3b5f12f1cfd",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T28 an unusable killer map still lets test changes skip mutants (no fallback to all)": {
+   "hash": "9cf689909433f21e629ca15921a353d6f2da17492bb0edfbb291cb0f2e53ec5a",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T29 the killer-map build keeps stale entries instead of re-attributing them": {
+   "hash": "681d4ce837bed573bb5f4499b6139a470360474615a9ed2bbdddafb092cb31d9",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T3 the default tier is push, not full (a bare verify.sh silently runs less)": {
+   "hash": "e3d3722814fc2f37542a14e9c436a9d26d5c2a03636a72e4264f431889f6340c",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T30 the backend mutants run without first proving the UNMUTATED tree is green (a red clean tree makes every mutant look killed)": {
+   "hash": "b1b57ba6ab02ba77c3071cff22426198e529fcbf4879ddd45e352ddd8c61bd3a",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T31 the killer-map build attributes witnesses without first proving the UNMUTATED tree is green": {
+   "hash": "5192db995914df9938d1a8984fe17eb8d50cbdd56cc30a31840e729e4345778e",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T32 an attributed witness is taken from a tree nobody proved green": {
+   "hash": "3e5ce727c1637277333fe82605c0560e8db0858f0a6838ac233150697ef8e7bf",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T33 a candidate group that collects nothing (pytest exit 5) reads as a kill": {
+   "hash": "8e5dc5d1093e4e99f38971806822bc3b153fa39f385e577771ea48a151262d73",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T34 a hung mutant aborts the run instead of reading as killed": {
+   "hash": "3dc133dc4c529f2e845ea45258dea1bb1a425c2603f11a064a7459ed36d17a4b",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T35 the clean-tree run reports success whatever pytest returned": {
+   "hash": "f4955ba38ad09672724cc364b25da47f923b63e57447cbd3193108fdfe4fbdc0",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T36 a non-zero exit that names no failing test counts as a kill": {
+   "hash": "50d72f650eefb3d540c68269a97e54780a5be61929ca2669faae4aa2623d8e93",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T37 a doc, CI or data file selects none of the mutants whose witness reads it (a weakened reader slips through)": {
+   "hash": "2ad169b9f52d10e44e799d9c40493b189f9cff83a5ae286f54a13bbc7576fe07",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T38 the PR-tier selection cap is ignored (a huge selection becomes a silent timeout)": {
+   "hash": "084c4909e580f4451942a8ec89ce131d37c9b1cad836239ceebe92eb876c0c24",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T39 a change at the top of tests/ (no_skip_plugin, harness, conftest) selects only some mutants": {
+   "hash": "72897e2a42456e400e9a37ed18b7db48d87e958f5956d1166393eace31f2ddfd",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T4 slow tests are selected by no tier": {
+   "hash": "89faf071d2805f63a4e13069dd2327abe0a39877eb5c0b9a86c4a32e8ff0d9f4",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T40 a changed test module selects none of the tests that import it (a weakened helper slips through its importers)": {
+   "hash": "b1801169b3893a01c2d6821931860876c99ed927a155a74d98cde9f4c74e0061",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T5 research tests also run in the push stage (selected twice)": {
+   "hash": "bf1b8a4d1bd7ad7f18f7a0267043cfe3a51c4ae99fd520eef1268393ef345a21",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T6 the research browser stages run on every PR": {
+   "hash": "6077b7eeb29c9683ee0ab2b2dcb2f21b4c959595d0cd6f2057c1cb84d7000522",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T7 the reality stages and the live-coverage proof are skipped at pr": {
+   "hash": "d3536f5a9ad6696433d29336f86a805846ce08a61a78a2e3991293e9d9a902f5",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T8 full runs only the changed-files mutants": {
+   "hash": "502cc2e709a68fa3eeb378299958abd54bc91b8f7e28c618cdb050d90867e714",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T9 a stage listing exits 0 (could pass for a green gate)": {
+   "hash": "c98723ac37e5ecc2c22e2d01f37d067ba499d026e55753da00a9e20de451c3de",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "U1 union ignores the action-similarity member": {
+   "hash": "786355f11aff6c74fad0bfa6dd42f7b9051aee5b8954a053d9722ed2b854b02d",
+   "killers": [
+    "tests/e2e/test_registry_parity_union.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR1 grants: the right string is no longer validated (a `write` grant is accepted by the spec)": {
+   "hash": "3df7861adb19c1eeae285a062688236474a8720691d514522e1f08e4d562ecb7",
+   "killers": [
+    "tests/proxy/test_sandbox_grants_spec.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR10 open_grant leaks the descriptor of a wrong-kind object": {
+   "hash": "02766590a7471a99b63ba3c78d7f530c8d1ae69388ec99af8a036c6459d91a12",
+   "killers": [
+    "tests/proxy/test_confine_precheck_names.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR11 the number of grants in a worker spec is no longer capped": {
+   "hash": "a72b6fbc8a299c6d7e769d8ea65e7a035866d6e0a3a96f6440b335e99001652f",
+   "killers": [
+    "tests/proxy/test_sandbox_grants_spec.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR12 the wire accepts an unknown right in a policy approval's confine map": {
+   "hash": "9851b3dfd5901028194850bd13f6d973189131687fc4acd3cd2475f7be51be44",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR13 policy accepts an unknown right as a confine right": {
+   "hash": "37892963c807a2ae0b7766cb3ac92e67297020c4be4fb699defaa477e4ea4716",
+   "killers": [
+    "tests/server/test_policy_confine.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR14 a standing rule built from a call confines its path arguments with `write`": {
+   "hash": "e34425117c9de0564d5a86e04ccddfd53d9991e70a7fe6129d37793dccaf13e2",
+   "killers": [
+    "tests/server/test_policy_writer.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR15 precheck: an escape from the base (EXDEV) is confinable again": {
+   "hash": "946e2383e891c3a4f4167986a4d9e77659d4f34c5fc1d41ee35a2756c78228f5",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR16 precheck: a name beneath a file (ENOTDIR) is no longer a plain missing name": {
+   "hash": "c931c2f8cb29751d6804e82c78afd6e870cba67b6f5b2fa9e65ca7f695f79a8a",
+   "killers": [
+    "tests/proxy/test_confine_precheck_names.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR17 a home-relative value is walked (confinable) instead of refused": {
+   "hash": "cba13047f59e99fb489f18b039125b36a7940b3e87ff1d30aba9fa231984cc64",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR18 a timed-out confined worker is reported as a denial": {
+   "hash": "07127bda96d96cd61cebe47808fb72d969d130d9bdce61f52184678d0df79111",
+   "killers": [
+    "tests/proxy/test_boundary.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR19 a failed confined worker is reported to the hub as ok": {
+   "hash": "95d88ddf444da4cda864925321df46712266737c11104583550f0f526cb3c8a1",
+   "killers": [
+    "tests/proxy/test_confined_call_failures.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR2 grants: a NUL byte in a value is accepted by the spec (the C-string truncation is then the worker's problem)": {
+   "hash": "7d5fa31c248ad74f2e213c9131bc74b7f71a3564853c04e272a73b6915ee5c22",
+   "killers": [
+    "tests/proxy/test_sandbox_grants_spec.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR20 a session downstream whose transport failed is not marked dead (later calls still go to the hub)": {
+   "hash": "909b55e3a5f84fe4504e782ce0cb48440c6655daeaeba7bf10f4f9917fe4ceb9",
+   "killers": [
+    "tests/proxy/test_confined_call_failures.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR21 a confined worker's result summary is not scrubbed of the call's secrets": {
+   "hash": "eb0e31ad78fb72e838c51094f624a85a7d410bd27c96b67e3cac6e0603d1959b",
+   "killers": [
+    "tests/proxy/test_boundary.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR22 a required sandbox that reported no status is accepted at startup": {
+   "hash": "30576c2fa63083fb760430a57301c4e05dffb636bd538a7a7df28346d295b3d1",
+   "killers": [
+    "tests/proxy/test_proxy_check_status.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR23 a required sandbox with a missing layer is accepted at startup": {
+   "hash": "ea05838790eded0cbcdf8e91b1a6cafd65b5b60589b10c858dab7209e3a756ff",
+   "killers": [
+    "tests/proxy/test_proxy_check_status.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR24 hub: a policy resolution that raises turns the policy OFF (legacy auto-approve) instead of broken": {
+   "hash": "753780cce7960f8a1034c8ab50347d04418857bbb5b58db8ab5042c8368bbec2",
+   "killers": [
+    "tests/server/test_inbox_guards.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR25 hub: an unexpected error while handling a call approves it": {
+   "hash": "5733485fa4e33536f992edfa28643bb26cf225c617464c1d25f22826f7b61f63",
+   "killers": [
+    "tests/server/test_inbox_guards.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR26 hub: a verdict outside allow/deny/ask is trusted": {
+   "hash": "50047ca44f1ddd719f7f4cd7eb63d097d8e9e14b2ce39e4d2c69883e2726c05a",
+   "killers": [
+    "tests/server/test_inbox_guards.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR27 hub: identity mode accepts a UI frame without a principal": {
+   "hash": "47ac67643e84579dc31cd77e637d2693ebe0f69fcf52991d89105640fc1ddd31",
+   "killers": [
+    "tests/server/test_inbox_guards.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR28 hub: an authentication that blows up is not refused as unauthorized": {
+   "hash": "7569e4d75703e630acd30636eea4ef0e46cb2362e976aeee256f68d671e75f87",
+   "killers": [
+    "tests/server/test_inbox_guards.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR29 policy_writer: the written file is no longer checked to reload to the digest reported": {
+   "hash": "6bff0acbc3ec0b270a0d84e78ad4c982fde56c91c6ba675ee6ab6997c95a0ba4",
+   "killers": [
+    "tests/server/test_policy_writer_errors.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR3 the write grant also grants EXECUTE (a written file could be run)": {
+   "hash": "e5038a9098a720a8ed383873c168388f10df863bc2146fa1cc6f64147b274750",
+   "killers": [
+    "tests/proxy/test_landlock_rights.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR30 policy_writer: the size of the resulting policy is no longer limited": {
+   "hash": "2f5e4e9bb9511b6b409a3d909b73cc4b000839662de52efe5b2caaf68a19011d",
+   "killers": [
+    "tests/server/test_policy_writer_errors.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR31 policy_writer: an unexpected exception's text (a path, a secret) is passed on to the hub": {
+   "hash": "b0223d885aa2a47a7a2a424de29052c18973bc07c5811c55d70c6fda920f640c",
+   "killers": [
+    "tests/server/test_policy_writer_errors.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR32 policy_writer: a file that is no longer a regular file after the open is read anyway": {
+   "hash": "db4b602effd55bcb51d384bd250bfdb04058e49628c81bdadd48941e7932b061",
+   "killers": [
+    "tests/server/test_policy_writer_errors.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR33 policy_writer: an Always-allow with a path-like argument that is not a confine slot is built (confine {} runs it unconfined)": {
+   "hash": "e5c177235f9b1f9fa340a857121cfee82347b68b4ea2c04c1c8a1552dc4f28ca",
+   "killers": [
+    "tests/server/test_policy_writer_write_calls.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR34 precheck: a NUL in a value is no longer noticed (the walk truncates it, the call is auto-allowed)": {
+   "hash": "d101a1583768d3ba208e188208472bcd027a0eba88274129a9bcb5588c23cd77",
+   "killers": [
+    "tests/proxy/test_confine_precheck_names.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR35 grants: an unhashable right raises TypeError instead of SandboxSpecError": {
+   "hash": "267a1cf27eebcafe628771eb51278982f7d601aa6c50b0f3c2586007d0c44bf5",
+   "killers": [
+    "tests/proxy/test_sandbox_grants_spec.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR36 proxy: a closed-pipe MCP error does not mark the session downstream dead": {
+   "hash": "e9ea27f803100dd984d159b4341ed7baae2099a95a43059e663073aaea53d142",
+   "killers": [
+    "tests/proxy/test_confined_call_failures.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR37 proxy: any MCP error from a session downstream marks it dead (an ordinary tool error kills the server)": {
+   "hash": "a74054d7a951eb8fb56bea9940c69309dab62e597e3c782445f5c98bb374c4bd",
+   "killers": [
+    "tests/proxy/test_confined_call_failures.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR38 proxy: a worker's ExceptionGroup is not unwrapped (the real MCP message is lost)": {
+   "hash": "366e07bf29628301cf8c0aaf56797508ae80bdd2009bc9afdd809cde4e0693da",
+   "killers": [
+    "tests/proxy/test_confined_call_failures.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR4 a read grant also grants WRITE_FILE on the named file": {
+   "hash": "f5acb6cc2d99fb5cbcfcc831fcd1bb87bb9fef2f21f933d510454c834c4b993d",
+   "killers": [
+    "tests/proxy/test_sandbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR5 rule_access: a directory-only right is no longer masked off for a file": {
+   "hash": "065a21a64e31f63c67f1f7fd0f06291f5f732f474e0f41b388cf89e2625f138d",
+   "killers": [
+    "tests/proxy/test_boundary.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "unknown"
+  },
+  "WR6 rule_access: rights are no longer limited to what the ABI handles (a bit the kernel does not know is passed on)": {
+   "hash": "30ea00ef241c26ad20aff098b1f2c642d1e5ed9005c01421cb11da9860a41fef",
+   "killers": [
+    "tests/proxy/test_landlock_rights.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR7 the operator's write set gains EXECUTE (a written file could be run)": {
+   "hash": "d27a95a00151d58c9f17ddae0159775cb3827097a779c7f9ddc5a755c3965be0",
+   "killers": [
+    "tests/proxy/test_sandbox.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR8 fs_rules gives the operator's read directories the write rights": {
+   "hash": "4f6b60e6b70485b7ba09baaf470e4ecb6470de9e06e94d8d988a83fe558875e7",
+   "killers": [
+    "tests/proxy/test_sandbox.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WR9 open_grant no longer checks the kind (a read grant may cover a directory, a list grant a file)": {
+   "hash": "6fc594b77c32cebf22a2f7f06ede41fa0f7b8a9fad40b9090e3603c3e3520536",
+   "killers": [
+    "tests/proxy/test_sandbox_exact.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW1 write grant: a second name (nlink > 1) no longer refuses the grant": {
+   "hash": "ad236d7e3fd971b389ae1365a34718b7c64518b5db25359d05405bd82bcd5fa1",
+   "killers": [
+    "tests/proxy/test_sandbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW10 the proxy treats Landlock ABI < 3 as able to confine a write": {
+   "hash": "4754dcc332274c6c67345a2215615b26ae6af91c40fdf62771497175719cdae9",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW11 the worker does not report the inode and link count of its write grant": {
+   "hash": "f4696c361da050a03d32946576a7e4a7e18188dd5569ac9a320655a836de782d",
+   "killers": [
+    "tests/proxy/test_sandbox_status_line.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW12 a worker with a write grant keeps the operator's file-size limit (a granted file can grow without bound)": {
+   "hash": "c35644e98da86959271697b7920d5d29720ff3e0d550daaf89403d8dd830b25e",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW13 precheck: a second name (nlink > 1) is confinable": {
+   "hash": "149e75103e6a3781fb33d107992514aefb143c08a1797735151af47da99b4505",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW14 precheck: an exec bit is confinable": {
+   "hash": "0681cea335736c0c9c4e675ffee51ac75dad5f4c57707fbe03f2a83c5894b188",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW15 precheck: the walk starts at `/` instead of the write directory (a symlinked ancestor is judged, the ceiling is lost)": {
+   "hash": "a28b2d2c6a554b10eb7d40491e30c42d891de3bc56b94574ec7b21ac1d531488",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW16 precheck: a file past the size cap is confinable": {
+   "hash": "a2c152cb653e2e11278ccfa0704dd011590ef4c86c14ac1aba258dfa35c06caf",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW17 write_target accepts an unnormalised value (`..`, `//`, `/./`)": {
+   "hash": "2636d44ab4077eba61bee56ceb6aad2cd7f85b059c8966263b2d5c0d134c4331",
+   "killers": [
+    "tests/proxy/test_sandbox_grants_spec.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW18 precheck: no before-image is needed for an auto-allow": {
+   "hash": "a330a67f6e4549de0cdb8fe18d717d9f47bf92b7137d76b9abfe74b6efd3653d",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW19 the proxy takes no before-image although it grants the write": {
+   "hash": "0ba621e8d0ec84f3552f5212bbf7df9ea66ebffd0027c2210152dde7ff02e284",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW2 write grant: an exec bit no longer refuses the grant": {
+   "hash": "3b1e839908a5f29604cac0f63e0f526c168957ec8cc4a044fc62fa9581df4eac",
+   "killers": [
+    "tests/proxy/test_sandbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW20 the write status check is dropped (a swapped inode or a second name is not noticed)": {
+   "hash": "e264de4a8521160065b5c3269cf803cfa66a87f240477e22ee7c12ded8c20f94",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW21 the proxy's own check of a write decision is removed (a forged write approval runs)": {
+   "hash": "eb92ac23ffdbe16b1f560c26affe223baec360136df7bc49b451d771335aa3d7",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW22 a write decision with no write grant still starts a worker": {
+   "hash": "51b366b8f20c23f27e8d40469fa99b7968a36dee5e1e27e4a37dca08970babd7",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW23 a before-image that cannot be taken no longer stops the call": {
+   "hash": "88e677e1bead2eae8c1fb21cc1b82ec6c2605ef93d44b2dcfdbca9e2329cf206",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW24 the before-image is world-readable": {
+   "hash": "20bd284965759359339465ca151bbea161798f4eb00ef3a831766dceac909d5d",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW25 write_status_ok compares only the number of grants (any inode passes)": {
+   "hash": "751c461b6563024b45c52a51acc7859b8f65f8d0229556526c7a5054064ea977",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW26 write_status_ok ignores the link count": {
+   "hash": "a01e19b97435b65bf128c7bdff416b05008f7556d9ecc4b0c904e05d2b9c0ec0",
+   "killers": [
+    "tests/proxy/test_write_grant.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW27 hub floor: a write allow stands although the proxy did not vouch for it": {
+   "hash": "bf779882e05957ce908ad59b6e78aed7111770c6f0bb49989f981d215514b355",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW28 hub reads a missing write_confinable as true (an old proxy's writes are auto-allowed)": {
+   "hash": "e03455f2489cac029a6301c83c714d6534899de2ec6bfeb756a29302513a75aa",
+   "killers": [
+    "tests/server/test_inbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW29 hub ignores what the proxy said about the write (always confinable)": {
+   "hash": "5e6accfbf03ac9518fc4bca94884b7588a2d5de3a1741650083009e44c75d74c",
+   "killers": [
+    "tests/server/test_inbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW3 write grant: a directory, FIFO or device may carry it": {
+   "hash": "b29886a34ff0f8bd4fff8640dbf357a9a08ee8818283c7bb736d92461fb9f788",
+   "killers": [
+    "tests/proxy/test_sandbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW30 policy: a write rule need not bound what is written (max_len)": {
+   "hash": "d3c29ea51cb4c4a0499b0d25a116b6fc89cb7378ef906cbdaf748ef805b6ba43",
+   "killers": [
+    "tests/server/test_policy_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW31 policy: a write rule need not narrow `path` with a glob": {
+   "hash": "c9d97b0ad7f6c21c1ca841c1d38dc5e3da5ea4a54b5186dc98912ea8d396b970",
+   "killers": [
+    "tests/server/test_policy_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW32 policy: write is accepted for any argument and next to others": {
+   "hash": "776471fd187400dd1fc534e31c0fb8f16e33e655fe9b1da97ef928548bbaa56b",
+   "killers": [
+    "tests/server/test_policy_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW33 policy: a write rule may leave out the tool": {
+   "hash": "a5c46ca7843306eca08ebcc8e8875caae653c3f33dec3f347c3e0ba2dcbd6682",
+   "killers": [
+    "tests/server/test_policy_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW34 starter: the write ask rule for sensitive paths is an allow": {
+   "hash": "a4d791bf5db80fb14cd91ff1f498728bc3571ddc66f1585f6b3e45ebee2d7154",
+   "killers": [
+    "tests/server/test_policy_starter.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW35 starter: .github/ is no longer a sensitive write path": {
+   "hash": "23a18c05170f652360411f2bcbb685655330b6565b479354c2c3133ea1d6f247",
+   "killers": [
+    "tests/server/test_policy_starter_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW36 starter: python files are doc extensions": {
+   "hash": "805826dd0f697121a8627f748343d7437d3d6392e65006dcd1f689bb4d045ce7",
+   "killers": [
+    "tests/server/test_policy_starter_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW37 starter: the write allow takes any extra argument (Desktop Commander's `mode`)": {
+   "hash": "de61fea184cc3b9df435ab5750347698dbd7a853fca191a2b7e59780b5cb9920",
+   "killers": [
+    "tests/server/test_policy_starter_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW38 hub: the card carries no write finding": {
+   "hash": "eb412ae71b6fcf7d01df0339d5148654bf84bef71e88249df152e253f14daa79",
+   "killers": [
+    "tests/server/test_inbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW39 hub: the writes the proxy reports are not logged": {
+   "hash": "4bd28c8b2a56e7332e7d63eda0a8f0ffccacdd73a08244a0bd5be021706849b6",
+   "killers": [
+    "tests/server/test_inbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW4 write grant: the size cap is gone (no before-image can be kept)": {
+   "hash": "0b71b685ef1b368f37b12774f4bd4d881878eaff4573fee5d844f7f63a77d668",
+   "killers": [
+    "tests/proxy/test_sandbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW40 hub: a reason outside the closed set reaches the card": {
+   "hash": "b9e37513b3cbd6c1c3c274ba24e302133a12ff75894b98c1267c3298edf22481",
+   "killers": [
+    "tests/server/test_inbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW41 proxy: a timed out worker's write is not reported": {
+   "hash": "94f8b82a72f1d826b2401dd801738df9afc67a891761860603a68490f8077a2a",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW42 config: a write directory may contain the undo store": {
+   "hash": "26e9c5e4580fe5174e4fa14824dcd4c2f6ed9eb4e43e9808bd9b79bd49962617",
+   "killers": [
+    "tests/proxy/test_config_undo.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW43 config: a write directory may contain the proxy's config file": {
+   "hash": "9a55b57afa4e97c7709abcca1c84ac4e4421934dbf4a628ba73eb09a62c3c7af",
+   "killers": [
+    "tests/proxy/test_config_undo.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW44 precheck: an undo directory inside a write directory is fine": {
+   "hash": "06ede33e6c30e9d47900f0ace31e6cf6e5d41e5f3e1e55cc34ee0a7d96e0029e",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW45 a write the proxy cannot confine is reported with the wrong reason (always unsupported)": {
+   "hash": "6fceb5dda06e14ec534d9dc747718bdd9147edbfc5032955e415755c7e5b794c",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW46 the after-image never says the name leads elsewhere": {
+   "hash": "7c913c156b9c79bd9bbfbf5cc1a049563160808ea647caf67f647e2dd55dc110",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW47 an undo copy may be overwritten by a second snapshot of the same call": {
+   "hash": "5d25a4aaded375c8026cff84ff96f371b9fda1bbb1115e818c32811c6d330c84",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW48 expired before-images are never removed from the undo store": {
+   "hash": "dcc15d28709545ba45e200dc5212ef2040902c1eab9c8c6a27c754d11c955e41",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW49 eventlog show hides what an auto-written call wrote": {
+   "hash": "2f386f18161cf521a8cc4e786667953fea15bd08769086b226a0876a86288578",
+   "killers": [
+    "tests/server/test_eventlog_cli_writes.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW5 write grant drops TRUNCATE (O_TRUNC of the granted file fails)": {
+   "hash": "66c32a9eba66348eae1a921cfb3ce532b4b330ae7a5dd9a679125eee60ecb38b",
+   "killers": [
+    "tests/proxy/test_sandbox_status_line.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW50 glob list: a list of patterns matches only its first pattern": {
+   "hash": "03dd7ed4b1de1b8b54da9818908e5e62056469b1a812b7b837df9530e55f1a41",
+   "killers": [
+    "tests/server/test_policy_starter_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW51 starter: requirements files are no longer a sensitive write path": {
+   "hash": "89fafb4056b5beff1d3ae0b3f236a8c101baab7e31d677d1fd064bf21f92b187",
+   "killers": [
+    "tests/server/test_policy_starter_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW52 starter: agent skill and rule directories (.windsurf) are no longer sensitive write paths": {
+   "hash": "611831c979f930dd946df34312530f329ad14daa8b2b7c1fde5f0fdee34a8b3a",
+   "killers": [
+    "tests/server/test_policy_starter_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW53 precheck: the size of the edits is not bounded (one 10M-character edit is confinable)": {
+   "hash": "37062183bc9c13b72536dbc1c271e9c2680466b0e9acc84017ffd9ae3855e9d4",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW54 undo store: a full store (too many calls) still has room, so a later write can push nothing out but also never asks": {
+   "hash": "013b86ccaacde06e17926487604688f0edd82ae231f4464cb4e8f46049e4a41a",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW55 undo store: the size of the store is never limited": {
+   "hash": "0622e54f8a70968095bc252b9af8e29cceeff04bfbb75137527db15027170a35",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW56 undo directory: an owner other than the proxy user is accepted": {
+   "hash": "a45c38d2bce6ffb0eadcb9114a09d9e30649aea2e97a299eb0bd78111d4b7d4a",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW57 undo directory: a group- or world-writable directory is accepted": {
+   "hash": "7c06139772a9def404155e7458320d5a4e3303fd4f12fe50155e32d3994c3a60",
+   "killers": [
+    "tests/proxy/test_write_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW58 snapshot: a full store does not stop the copy": {
+   "hash": "35b360727b84efe33b724d91d3d5ea6f70e5425a850fe92897896a7f16e9a96b",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW59 config guard: a symlinked config file is judged by the link's own place only": {
+   "hash": "72fbb9d72f1978870f70d9106501ea0efb6e4b4fd8882b7f953f4cea303fdbfd",
+   "killers": [
+    "tests/proxy/test_config_undo.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW6 write grant adds MAKE_REG (it can create files beside the granted one)": {
+   "hash": "a876853bbb9a7c0a134fe456d5aaac61d776eb17e54db0c97c5219de99ebd1bf",
+   "killers": [
+    "tests/proxy/test_landlock_rights.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW60 retention: everything is pruned whatever its age (the original before-image goes first)": {
+   "hash": "e034793ea6ccee48bc02900b7c708012512575689212b01fc5f214f11bb51309",
+   "killers": [
+    "tests/proxy/test_confined_call_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW61 lint: an unscoped allow rule with a write confine is no longer warned about": {
+   "hash": "b541fa3e591c32d720e6f28da3ef78da871bf634b23245468ae8107b13fec8a5",
+   "killers": [
+    "tests/server/test_policy_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW62 lint: a server pattern of only wildcards counts as a scope": {
+   "hash": "41585e066b31e9c21bf5354fac4ec301091471af79fffa9a3fbc456aba5cd24f",
+   "killers": [
+    "tests/server/test_policy_write_scope.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW63 lint: every allow rule with a confine is warned, not only a write confine": {
+   "hash": "df45e51c7193861cfb299878c05344dd35d6cda26587b9b2115ce9d31f7a7652",
+   "killers": [
+    "tests/server/test_policy_cli.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW64 policy: a rule's server condition is ignored (a scoped write rule allows every server)": {
+   "hash": "4c27438c5538a8c8e932a77e5ba38f3e50e1f8a21d52994595a6f5ad74be4156",
+   "killers": [
+    "tests/server/test_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW65 policy: a server name is matched by prefix only (a scoped write rule also allows 'filesystem-evil')": {
+   "hash": "16c260b981a3571023e9bc0e4c5762413921db6e2db54ea6fb781362a8eddefc",
+   "killers": [
+    "tests/server/test_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW66 lint: only the single pattern '*' (not '**' or '?*') is a wildcard, not a scope": {
+   "hash": "42c3cf460f34ce8ffdca912b954ab1ca2cdd0cd6c9ea8a2b9f778f692ea85515",
+   "killers": [
+    "tests/server/test_policy_write_scope.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW67 status line: written through the 600-character free-text cap again (cut mid-string with long paths)": {
+   "hash": "215db951f18d1b9e986a3bd5d5f56158618226c9b8092399f47cf424e4632aae",
+   "killers": [
+    "tests/proxy/test_sandbox_status_line.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW68 free-text error lines: the 600-character cap is gone (a message can flood the log)": {
+   "hash": "56f88a9cda1399e98cc763c52fc43adb269df9e8c82e477c9423aafa1c7d6d4d",
+   "killers": [
+    "tests/proxy/test_sandbox_status_line.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW69 status check: a missing or unparseable status (None) proves the confinement": {
+   "hash": "156f05e288d9edc6d8107fff69419596486c9b568b2a3ae222d9bee66a3d12bc",
+   "killers": [
+    "tests/proxy/test_confine_precheck.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW7 open_grant walks an absolute write value from `/` (the write-directory ceiling is lost)": {
+   "hash": "cc9a87d0179bc1dde90243796aa06d9eb31fd4a8225932c3799ed7d1d6331517",
+   "killers": [
+    "tests/proxy/test_sandbox_write.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW70 status check: a truncated status still counts as proof": {
+   "hash": "dc5fc08e7cb7108839a33136b0521be04c0ac7ef1767d8a085881025e017da01",
+   "killers": [
+    "tests/proxy/test_sandbox_status_line.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW71 status line: no upper bound (an over-long status is written whole)": {
+   "hash": "692a02232cd96a55c5a0c0748701e9293af205d9877d65f80d287db024443b28",
+   "killers": [
+    "tests/proxy/test_sandbox_status_line.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW72 status line: a truncated status keeps its grant lists (cut by the bound, not dropped whole)": {
+   "hash": "3123f312b5a5f41b542e1fba7be7dd6a273080ecf5bf7d47dbf7049f471b544c",
+   "killers": [
+    "tests/proxy/test_sandbox_status_line.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW8 the spec accepts an absolute or `..` write value": {
+   "hash": "d918100e2685dccf512ccf9d6aa68e0253f319a0f99e833328bfa7b43e46fd92",
+   "killers": [
+    "tests/proxy/test_sandbox_grants_spec.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "WW9 the trampoline applies a write grant below Landlock ABI 3 (truncate is not mediated there)": {
+   "hash": "35f27d02e08c4d186dfa09e4b3a8337e8be486036c73b3a773610c7722854157",
+   "killers": [
+    "tests/proxy/test_write_grant.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X1 inbox auto-approves without a working monitor": {
+   "hash": "a4cb3e8ef5b93b721063d4bf9609bf44949e988d7701df48564c74349fb9c3f7",
+   "killers": [
+    "tests/server/test_inbox_hub.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X2 inbox ignores the monitor error counter": {
+   "hash": "0e5f99084bc67d67d9d18cc0eb2d57bea096d8bfc54e87b87170c8e6c0ec4bf1",
+   "killers": [
+    "tests/server/test_inbox_hub.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X3 inbox sockets work without a token": {
+   "hash": "e80aea9f4d7d1f6763bf6ed8c9ad1d787790f528690696c675b840e76209f283",
+   "killers": [
+    "tests/e2e/test_proxy_end_to_end.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X4 inbox accepts any decision value": {
+   "hash": "61035b2ea663f9fb50ad1742f69dfa55350ac880a77a9f053428040cb0295e3b",
+   "killers": [
+    "tests/server/test_inbox_hub.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X5 inbox turns every human decision into approve": {
+   "hash": "1a7eff676c8a617be0b50ffc18aa2f976fcc3a11a01609f8de5901504ec8a66e",
+   "killers": [
+    "tests/server/test_inbox_hub.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X6 proxy forwards a denied call": {
+   "hash": "24b931c92cbd60d860651cbfd0d7049136510e87884f21cd0c594deb2411c482",
+   "killers": [
+    "tests/e2e/test_proxy_end_to_end.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X7 cancelled call is still sent to the monitor/proxy as a decision": {
+   "hash": "3e2dc87d24be92556983eeabfd1bca1b042834686f8ed3e63377b6989017ee55",
+   "killers": [
+    "tests/server/test_inbox_hub.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X8 call cancelled while the monitor ran is still held": {
+   "hash": "6928dcf37f34cc5b9299e44334a6ab7863503be586602d47f556482300d739dc",
+   "killers": [
+    "tests/server/test_inbox_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "X9 proxy never tells the hub it abandoned a call": {
+   "hash": "32e33d2ed899ff916e02cf6efb85a95a7ff7391514530081cb850e8cbd1537f4",
+   "killers": [
+    "tests/e2e/test_eventlog_end_to_end.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Y1 a deny rule no longer beats allow/ask": {
+   "hash": "84fff1253edd52a98752d3ab7e05d13d51d14c24bbf834038107177e02e364dd",
+   "killers": [
+    "tests/server/test_inbox_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Y2 an alert no longer escalates an allow": {
+   "hash": "4ad509f78a2d8fd0f3fba4b7ec26422d5d67ee61d13303d4be167cc2fa39ecfe",
+   "killers": [
+    "tests/server/test_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Y3 a rule error no longer forces ask": {
+   "hash": "7568e5aac22a85a7d63d9fa2d146f793d7b19e7bd850e16143f8cfabfb8d67ef",
+   "killers": [
+    "tests/server/test_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Y4 the proxy auto flag is honoured in policy mode": {
+   "hash": "a465a5206aa862a9c07defd82afd780bdc52822eb323c9b9856bd7805f830f3d",
+   "killers": [
+    "tests/server/test_inbox_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Y5 a policy allow stands without a working monitor": {
+   "hash": "cdb1d9065de3244c11df27003097a20f5da5604564a44c8f4c225f7061bb1f9f",
+   "killers": [
+    "tests/server/test_inbox_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Y6 a failing policy evaluation allows": {
+   "hash": "5e118dbb838ad9b06d2b831b1fd3f3a2505bcb4c6ae0f0adf5e202327f210a75",
+   "killers": [
+    "tests/server/test_inbox_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Y7 the policy loader treats an int path as a file descriptor": {
+   "hash": "e73c4a206c504ce20b21d5944c3886ee705b45ac72fbd0e11fb769cf8b2cd727",
+   "killers": [
+    "tests/server/test_policy.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Z1 event log: a broken hash link is no longer reported": {
+   "hash": "35e764e5599ccc8ca6e655da5c3d64afa583bfdb5eff31021a628f651d2e94d6",
+   "killers": [
+    "tests/server/test_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Z2 event log: secret keys are no longer redacted": {
+   "hash": "a7f428d4b21c1626084dbf08e22e95d78eb5e38a3f0762726a5df284da6b42c6",
+   "killers": [
+    "tests/e2e/test_eventlog_end_to_end.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Z3 hub: an approve whose record cannot be written still goes out": {
+   "hash": "89c844c5f9875c3a5771e36d3609ba88fb644e7c4ab59034eb886d9b033b065f",
+   "killers": [
+    "tests/server/test_inbox_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Z4 hub: runs unlogged when the log is unusable": {
+   "hash": "5d0f6a3f95d078d73255348d907cdb305b7683fca4d1c381f83b2d7fe921f31b",
+   "killers": [
+    "tests/server/test_inbox_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Z5 hub: alert messages are logged unscrubbed": {
+   "hash": "7a5a10a9bff91707d324867015ef3b7d115bc02292ab5f2927654d7a50d57fb6",
+   "killers": [
+    "tests/server/test_eventlog_scrub.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Z6 hub: tool output is stored by default": {
+   "hash": "1ff3a24e8beb2bdec0aed38f7fec0883e410ae84e3eb750e726e065b770d319c",
+   "killers": [
+    "tests/server/test_inbox_eventlog.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "Z7 a UI is registered for broadcasts before its snapshot is sent": {
+   "hash": "b1f4eabaabfd40fa38959ffbe40aa5c38f06c36fee399da2bd37536b9ad06aea",
+   "killers": [
+    "tests/server/test_inbox_boundary.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  }
+ },
+ "mutants_hash": "1b07b78d1365588ac3340c9d382eeb211e96cb46b5070424c1eb3b8c619a4bd5",
+ "schema": 1
+}

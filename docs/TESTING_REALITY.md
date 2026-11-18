@@ -174,11 +174,66 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
 * **Changed-files mutants (`pr`).** `GATE_BASE` is the ref to diff against; the default `@origin` means origin's default branch
   (`refs/remotes/origin/HEAD`, else `origin/main`; run `git fetch origin` once). CI sets `origin/<PR base>` on pull requests and
   `origin/<default branch>` otherwise. What counts as changed: commits since the merge base, plus staged, unstaged and untracked files
-  (deletions included). Selection: a changed mutant target selects its mutants; a changed top-level gate test (`tests/test_*.py`) selects
-  every mutant of a gate script (`scripts/*`, `tests/*.py`), whose killers those tests are; **any other changed file under `tests/`, or
-  `pytest.ini`, selects EVERY mutant**: there is no cheap, reliable mutant-to-killer mapping, and a weakened test must not slip through
-  because its mutants' targets did not change (so a PR that edits ordinary tests runs the whole mutation check, about 25 min). Nothing
+  (deletions included; a rename counts as a deletion of the old path plus the new one: `git diff --no-renames`). Selection uses the
+  **killer map** `scripts/mutant_killers.json` (below), and every rule fails SAFE (more mutants, never fewer): a changed mutant target
+  selects its mutants; a changed, deleted or renamed test file selects the mutants it is a witness for; a mutant with no current map
+  entry always runs. A changed file that is not a test is matched against the witnesses that READ it (the test files whose text names its path,
+  its base name or its directory, `_readers`): **a doc, CI file, script or data file selects only those witnesses' mutants**, so a one-line edit
+  to `DECISIONS.md`, `README.md`, `docs/TESTING_REALITY.md`, `ci.yml` or `scripts/verify.sh` selects a handful, not all. A support file under
+  `tests/<dir>/` (conftest, helper, fixture, data) selects the witnesses under `tests/<dir>/` plus the tests that import or name it, so
+  `tests/proxy/conftest.py` selects only the proxy-witness mutants. **Only a change that can alter EVERY test run selects every pytest mutant**:
+  `pytest.ini`, `pyproject.toml`, `setup.cfg`, `tox.ini`, `requirements*.txt`, a root `conftest.py`, and the support files directly under
+  `tests/` (`conftest.py`, `no_skip_plugin.py`, `harness.py`, `reality_fixtures.py`, `__init__.py`). Frontend: vite/vitest/eslint/tsconfig/package
+  config and every non-test file under `frontend/src` select every vitest mutant. A changed test module also selects the mutants of every test that imports or names it, transitively to depth 4 (`from test_inbox_hub import Rig`:
+  editing that helper module selects the 58 mutants its importers witness, not 6). A non-target `.py` source file selects nothing (see the limits
+  below). A mutant killed by `"*"` (combination or unknown) is selected by any changed test file and by any support or doc change that reaches a
+  reader. A changed top-level gate test (`tests/test_*.py`) also still selects every gate-script mutant (`scripts/*`, `tests/*.py`).
+  `--max-selected N` (env `GATE_MUTATION_MAX`, CI pr: 150) turns a selection above N into a loud RED, "too many mutants selected for the PR tier
+  (N > limit): run the nightly mutation workflow", instead of a silent timeout; the pr job runs the selection 4 at a time (`GATE_MUTATION_JOBS`).
+  No usable map (missing, unreadable, other schema) falls back to the old rule: any change under `tests/` selects every mutant. Nothing
   selected = a quick pass that says so. A missing or unknown base ref is RED, never "nothing changed".
+* **The killer map (`scripts/mutant_killers.json`, `mutation_check.py --build-killer-map`).** Per mutant: its definition hash, the WITNESS test
+  files, the runner (pytest / vitest), the tier of the failing test and a `kind`. Attribution reuses the check's own machinery: each mutant is
+  applied to a throwaway copy, the suite runs serially with `-x`, and the failing file is the witness, which is then re-run ALONE on the mutant
+  to prove it kills by itself (`kind: single`). Order matters for what the witness is: the tests that name the mutated module run first
+  (`candidate_tests`, one pytest run per directory because `tests/e2e/conftest.py` and `tests/proxy/conftest.py` are both imported as `conftest`),
+  then the whole suite, and `tests/docker/test_image_context.py::test_the_fast_backend_tests_pass_in_a_tree_made_only_of_what_the_test_stage_copies`
+  (it re-runs a quarter of the suite in a nested tree and sorts first) runs LAST, alone. The witness set is SUFFICIENT, not exhaustive: as long
+  as no witness file is touched the mutant is still killed by it, so other tests that also kill it need not be listed. Granularity: one test
+  FILE. A mutant whose witness file passes alone, or whose failure names no test file, is a **combination** kill: killer `"*"`, selected by ANY
+  changed test file of its runner (the union of everything that could be a killer). A mutant that survives attribution is a hole in the suite:
+  the build exits RED and prints it. Frontend mutants are attributed to their vitest file (`frontend/src/**/*.test.ts(x)`); that closes an old
+  gap, where editing a vitest file selected nothing, while a pytest edit re-ran the vitest mutants. The build saves the map as results arrive
+  (a restart resumes; `--rebuild-all` first empties it) and takes about 4 hours on 4 cores because the check is real now (below).
+* **The unmutated tree must be green (`require_clean_backend_tree`).** The throwaway copy used to omit `frontend/`, so
+  `tests/contract/test_ui_threshold.py` failed in EVERY tree, mutated or not, and with `-x` about 220 backend mutants read as "killed" by a
+  test that failed for the wrong reason: the mutation stage proved nothing for them. Now the copy keeps `frontend/` (without `node_modules` and
+  `dist`), and before any backend mutant runs (the full check, `--changed-since` with a selection, `--build-killer-map`, attribution) the whole
+  suite runs once on the UNMUTATED copy (`-n 4`, about 7 min); red = the run REFUSES with the failing tests named. Tests that read the committed
+  map skip inside a mutation run (`MUTATION_CHECK_RUN=1`) so a stale map can never make a survivor look killed.
+  `--jobs N` (env `GATE_MUTATION_JOBS`) runs N mutants at a time, each serial in its own copy; `--log FILE` (env `GATE_MUTATION_LOG`) appends each
+  verdict and a rerun skips what is recorded.
+* **Keeping the map current.** `python scripts/mutation_check.py --check-killer-map` is a push-tier stage (and `tests/test_mutation_check.py`
+  runs the same check): it is RED when a mutant has no entry, its definition hash differs, an entry names a mutant that is gone, a killer file
+  no longer exists, or the map's `mutants_hash` does not match. The fix is `python scripts/mutation_check.py --build-killer-map`, which
+  re-attributes ONLY the missing/stale entries (`--rebuild-all` redoes all). Adding a mutant therefore means committing its map entry too.
+* **The full check in CI (`full` and `weekly`) is its own job.** It is hours of serial pytest runs, so `.github/workflows/ci.yml` runs it as the
+  job `mutation`: 4 shards (`--shard i/4`: sha256 of the mutant name mod 4, every mutant in exactly one shard), each 3 mutants at a time, timeout 350
+  min, with every verdict appended to a cached log (`--log`, `actions/cache`) so a rerun of the same workflow run resumes. The `gate` job in those tiers
+  runs with `GATE_MUTATION_FULL=external`: its mutation stage only re-proves the targets and names the job. Locally `GATE_TIER=full bash
+  scripts/verify.sh` still runs the whole check unsharded (`GATE_MUTATION_JOBS=N` for N at a time; `GATE_MUTATION_SHARD=i/N` for one shard).
+  Estimate, not measured on GitHub: the whole check is about 4 h of 4-core work, so roughly 2-3 h per shard. The workflow has been parsed and its
+  wiring tested, not run.
+* **What counts as a kill.** pytest exit 5 ("no tests collected": a group made only of tests deselected by the default `-m`, e.g. `tests/live`)
+  is NOT a kill and the next group runs; a mutant reads KILLED only with a named failing test or a timeout (a hung mutant is killed), and a non-zero
+  exit that names no test is RED ("inconclusive"), never a silent kill.
+* **Selection versus the old rule.** For SOURCE-file changes (no test file touched) the selection is a superset of the old one (a target change
+  selects its mutants as before; shared-support files only add). For TEST-only changes it is a strict subset (the old rule selected everything);
+  that is the point, and the safety is the witness argument above.
+* **Safety net.** `full` (nightly) and `weekly` run the whole mutation check without the map, so a weakened test that the map's shortcut
+  missed is found the next night. Known limits of the shortcut: like the old rule it only looks at the changed files, so a change to a
+  NON-target source file that stops a witness test from killing a mutant is not seen until the nightly run; and a data file outside `tests/`
+  that a test reads is not "shared support" (only `contracts.ts` is listed).
 * **Non-root pass (opt-in, in no tier): `GATE_AS_USER=1`.** CI's runner is unprivileged; a dev box or a container is usually root, and root hides bugs
   (a test once depended on network-namespace support only root has, and passed locally). `GATE_AS_USER=1 bash scripts/verify.sh` adds ONE stage,
   `non-root pass`, to whatever tier you run (`GATE_LIST=1` shows it; without the variable no tier lists it, so CI time does not grow);
@@ -229,7 +284,7 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   to survive the whole suite to count as a survivor. Other mutants run the whole suite directly, as before.
 * **CI** (`.github/workflows/ci.yml`, not run here: validated with actionlint 1.7.7 and a YAML load; tracked although `.gitignore` ignores
   dotfiles, via `!.github/`, tested): one job, tier from the trigger, concurrency group per trigger and ref (a newer run cancels the
-  superseded one), timeouts 25 / 90 / 240 min (the pr tier outgrew 50: a PR that edits a test runs every mutant), pip / npm / MiniLM / Playwright / `.realdeps` caches (the `.realdeps` key includes the exact
+  superseded one), timeouts 25 / 120 (pr) / 150 (nightly gate job) / 350 (each mutation shard) min (the pr tier outgrew 50 when a PR that edited a test ran every mutant; the killer map now selects only the mutants that test witnesses), pip / npm / MiniLM / Playwright / `.realdeps` caches (the `.realdeps` key includes the exact
   Python version and `scripts/realdeps_setup.sh`; the script pins `mcp-server-time` and rebuilds its venv when the interpreter does not run
   or the version is not the pin; that server's own dependencies are not pinned), `HF_HUB_OFFLINE=1` after the one model fetch, CPU torch,
   Chromium via `npx playwright install` with `CHROMIUM_PATH` from Playwright, the events file and junit (`GATE_JUNIT_DIR`: backend stages

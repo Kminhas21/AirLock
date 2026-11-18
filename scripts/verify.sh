@@ -17,6 +17,7 @@ gate_take_claude_key   # SENTINEL_CLAUDE_API_KEY: only the claude stage sees it 
 XD="env OMP_NUM_THREADS=${OMP_NUM_THREADS:-1} python -m pytest -n ${GATE_PYTEST_WORKERS:-4}"
 run "preflight: opted-in stages can work at all (Docker daemon + proxy CA, claude CLI), in seconds instead of hours later" gate_preflight
 run "mutation targets are current (fast: stale mutants fail here, not at the end)" python scripts/mutation_check.py --check-targets
+run "mutant killer map is current (fast: a stale scripts/mutant_killers.json would let a PR skip mutants on a guess; --build-killer-map re-attributes only the stale ones)" python scripts/mutation_check.py --check-killer-map
 run "live coverage map, static (every user workflow has a live test or a declared gap; referenced files exist; live specs are run)" python scripts/check_live_coverage.py
 # Backend pytest, split by marker (GATE_PYTEST_* in scripts/gate_lib.sh): every collected test is in exactly one of these three stages.
 run "backend pytest, fast (unmarked tests, parallel)" $XD -m "$GATE_PYTEST_PUSH" ${GATE_JUNIT_DIR:+--junitxml=$GATE_JUNIT_DIR/backend-fast.xml}
@@ -124,13 +125,20 @@ if at_tier full; then
   # signed-in `claude` CLI, costs real model calls, ~30 s, measured $0.04-0.12 per run). Opted in, a missing or signed-out CLI FAILS. CLAUDE_TEST_MODEL picks the model.
   [ "${RUN_CLAUDE_TESTS:-0}" = "1" ] && run "claude code: a real Claude Code client behind SENTINEL (filesystem + note; Desktop Commander + starter)" gate_with_claude_key env REALDEPS_REQUIRED=1 $NS -m claude_live tests/claude
 fi
-# Mutation check: every mutant at full; at pr only the mutants selected by the changes since the merge base with GATE_BASE (default @origin =
-# origin's default branch; no such ref is RED): a changed target selects its mutants, a changed test file selects every mutant.
+# Mutation check: every mutant at full (nightly, the safety net behind the killer map); at pr only the mutants selected by the changes since the
+# merge base with GATE_BASE (default @origin = origin's default branch; no such ref is RED): a changed target selects its mutants, a changed test
+# file selects the mutants it is a witness for (scripts/mutant_killers.json), a changed pytest.ini / conftest.py / shared test support file selects all.
 if at_tier full; then
-  run "mutation check (tests must catch re-introduced bugs)" python scripts/mutation_check.py
+  if [ "${GATE_MUTATION_FULL:-inline}" = external ]; then
+    # CI (.github/workflows/ci.yml): the whole check takes hours, so it is its own sharded job `mutation` (nightly and weekly); this job only
+    # re-proves the targets. Locally (default) the full tier runs the whole check unsharded, here; GATE_MUTATION_JOBS=N runs N mutants at a time.
+    run "mutation check (full): runs in the sharded CI job \`mutation\`; this stage re-proves the targets" python scripts/mutation_check.py --check-targets
+  else
+    run "mutation check (tests must catch re-introduced bugs)" python scripts/mutation_check.py ${GATE_MUTATION_SHARD:+--shard "$GATE_MUTATION_SHARD"}
+  fi
 elif at_tier pr; then
   BASE="${GATE_BASE:-@origin}"
-  run "mutation check, changed files only (mutants of what changed since $BASE)" python scripts/mutation_check.py --changed-since "$BASE"
+  run "mutation check, changed files only (mutants of changed targets and of changed killer tests since $BASE)" python scripts/mutation_check.py --changed-since "$BASE"
 fi
 if [ "${GATE_LIST:-0}" = 1 ]; then echo; echo "GATE: LISTED (GATE_TIER=${GATE_TIER:-full}; nothing ran)"; exit 2; fi
 echo; [ $fail -eq 0 ] && echo "GATE: GREEN" || echo "GATE: RED"

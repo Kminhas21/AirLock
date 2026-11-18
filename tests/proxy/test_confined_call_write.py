@@ -500,3 +500,31 @@ async def test_before_images_past_the_retention_window_are_removed_at_the_next_w
     finally:
         await stack.aclose()
     assert not old.exists() and fresh.exists()
+
+
+async def test_the_worker_path_itself_refuses_a_write_decision_that_yields_no_write_grant(world):
+    """WW22: the precheck in `call` usually refuses first; `_call_worker` must hold the same line when it is reached directly (a decision whose
+    `write` names a path the proxy cannot walk beneath a write directory) and start no worker."""
+    p, link, stack, spy = await running(world, POLICY_WRITE)
+    try:
+        res = await p._call_worker(p.cfg.servers["fs"], "cid-x", "try_write", {"path": "/nonexistent/elsewhere.md", "content": "x"}, [], {"path": "write"})
+    finally:
+        await stack.aclose()
+    assert res.is_error and text(res) == "Denied by SENTINEL: write_unsupported"
+    assert spy.specs == [] and spy.calls == [] and link.results == [("cid-x", "error", "write_unsupported", None)]
+
+
+async def test_taking_a_before_image_first_removes_the_expired_ones(world):
+    """WW48: `_take_snapshots` prunes by itself (the precheck's prune can be a long time before it, or skipped)."""
+    import time
+    old = Path(world.undo) / "old-call"
+    old.mkdir(parents=True, mode=0o700)
+    (old / "0").write_text("x")
+    t = time.time() - 40 * 86400
+    os.utime(old, (t, t))
+    p, link, stack, spy = await running(world, POLICY_WRITE)
+    try:
+        snaps = p._take_snapshots([[str(world.w), "a.md", "write"]], {"path": str(world.w / "a.md")}, "call-new")
+    finally:
+        await stack.aclose()
+    assert snaps and not old.exists()

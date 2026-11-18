@@ -2,8 +2,11 @@
 #   push          GATE_TIER=push    fast backend tests (parallel), static checks, frontend checks          target < 8 min
 #   pull_request  GATE_TIER=pr      + slow backend files, reality stages + live-coverage proof, browser stages
 #                                     for the shipped default (action_sim), mutants of the files the PR changed  target ~15 min
-#   nightly       GATE_TIER=full    + the whole mutation check, Docker, user journeys
+#   nightly       GATE_TIER=full    + Docker, user journeys. The WHOLE mutation check is its own job below (`mutation`: 4 shards, resumable),
+#                                   not a stage of this one: it takes hours; this job only re-proves the mutant targets (GATE_MUTATION_FULL=external)
 #   weekly        GATE_TIER=weekly  + research detectors (D7-D9c) parity, and the real Claude Code client only if ANTHROPIC_API_KEY is set
+#                                   (the `mutation` job runs on this schedule too)
+# NOT RUN HERE: this workflow has only been parsed and its tier wiring tested (tests/test_gate_tiers.py), never executed on GitHub.
 # The verdict is scripts/verify.sh's exit code; the per-stage event log and the junit XML are uploaded as artifacts.
 name: gate
 
@@ -32,7 +35,7 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ github.event_name == 'push' && 25 || github.event_name == 'pull_request' && 90 || 240 }}
+    timeout-minutes: ${{ github.event_name == 'push' && 25 || github.event_name == 'pull_request' && 120 || 150 }}
     env:
       EVENT: ${{ github.event_name }}
       SCHEDULE: ${{ github.event.schedule }}
@@ -139,6 +142,11 @@ jobs:
           # changed-files mutants (pr tier) diff against the PR's base, otherwise against the default branch; a missing ref is RED
           GATE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || format('origin/{0}', github.event.repository.default_branch) }}
           GATE_PYTEST_WORKERS: auto
+          # pr tier: the selected mutants run 4 at a time, and a selection above the cap is a loud RED (run the nightly workflow), never a timeout
+          GATE_MUTATION_JOBS: "4"
+          GATE_MUTATION_MAX: "150"
+          # nightly / weekly: the whole mutation check is the separate sharded job `mutation`
+          GATE_MUTATION_FULL: external
           SENTINEL_SANDBOX_REQUIRED: "1"
           # nightly and weekly: Docker (the runner's own daemon, no proxy variables) and the user journeys
           RUN_DOCKER_TESTS: ${{ (steps.tier.outputs.tier == 'full' || steps.tier.outputs.tier == 'weekly') && '1' || '0' }}
@@ -173,5 +181,95 @@ jobs:
         with:
           name: gate-${{ steps.tier.outputs.tier }}-${{ github.run_id }}
           path: ${{ runner.temp }}/gate/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The WHOLE mutation check (every mutant, no killer map: the safety net behind the PR tier's selection). It is hours of serial pytest runs, so it is
+  # split into 4 shards by a stable hash of the mutant name (scripts/mutation_check.py --shard i/4), each shard runs 3 mutants at a time and appends every
+  # verdict to a log that is cached, so a rerun of a failed or timed-out shard resumes instead of starting over. Estimate (not measured on GitHub):
+  # about 4 h of 4-core work in total here, so roughly 2-3 h per shard on a 4-core runner; the timeout leaves headroom.
+  mutation:
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.tier == 'full' || inputs.tier == 'weekly'))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      OMP_NUM_THREADS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      SENTINEL_SANDBOX_REQUIRED: "1"
+      GATE_MUTATION_JOBS: "3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            requirements-proxy.txt
+            server/requirements.txt
+            seismograph/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Python dependencies (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-dev.txt
+
+      - name: Cache the MiniLM model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-MiniLM-L6-v2-v1
+
+      - name: Fetch the MiniLM model (once; every later step runs with HF_HUB_OFFLINE=1)
+        run: |
+          python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+          echo "HF_HUB_OFFLINE=1" >> "$GITHUB_ENV"
+
+      - name: Frontend dependencies (the frontend mutants run vitest)
+        run: cd frontend && npm ci --no-audit --no-fund
+
+      - name: Allow the sandbox tests' user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Restore this shard's verdict log (a rerun of the same run resumes)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/mutation
+          key: mutation-log-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutation-log-${{ matrix.shard }}-${{ github.run_id }}-
+
+      - name: Mutation check, shard ${{ matrix.shard }} of 4
+        env:
+          GATE_MUTATION_LOG: ${{ runner.temp }}/mutation/verdicts-${{ matrix.shard }}.jsonl
+        run: |
+          mkdir -p "${{ runner.temp }}/mutation"
+          python scripts/mutation_check.py --shard ${{ matrix.shard }}/4 --jobs 3 --log "$GATE_MUTATION_LOG"
+
+      - name: Save this shard's verdict log
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/mutation
+          key: mutation-log-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload the verdicts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-verdicts-${{ matrix.shard }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/mutation/
           if-no-files-found: warn
           retention-days: 14

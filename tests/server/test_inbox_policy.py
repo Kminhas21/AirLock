@@ -248,3 +248,13 @@ async def test_health_policy_views(monkeypatch, tmp_path):
     assert (await _health(monkeypatch))["policy"] == {"digest": None, "rules": 0, "usable": False}
     monkeypatch.delenv("SENTINEL_POLICY")
     assert "policy" not in await _health(monkeypatch)
+
+
+async def test_the_pending_card_and_the_log_record_auto_false_in_policy_mode_whatever_the_proxy_sent(monkeypatch, tmp_path):
+    """Y4: the proxy's `auto` flag is IGNORED in policy mode, also in what is shown and written (it would otherwise claim an allow-list
+    the policy never granted)."""
+    use(monkeypatch, tmp_path)
+    r = await Rig().start()
+    await r.send(call(tool="write_file", auto=True))
+    await wait_for(lambda: r.ui.events("inbox_pending"))
+    assert r.ui.events("inbox_pending")[0]["auto"] is False
