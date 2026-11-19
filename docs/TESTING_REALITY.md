@@ -227,15 +227,17 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   no longer exists, or the map's `mutants_hash` does not match. The fix is `python scripts/mutation_check.py --build-killer-map`, which
   re-attributes ONLY the missing/stale entries (`--rebuild-all` redoes all). Adding a mutant therefore means committing its map entry too.
 * **The full check in CI (`full` and `weekly`) is its own job.** It is hours of serial pytest runs, so `.github/workflows/ci.yml` runs it as the
-  job `mutation`: 4 shards (`--shard i/4`: sha256 of the mutant name mod 4, every mutant in exactly one shard), each 3 mutants at a time, timeout 120
-  min (2.5x the slowest measured shard job), with every verdict appended to a cached log (`--log`, `actions/cache`) so a rerun of the same workflow run resumes. The `gate` job in those tiers
+  job `mutation`: 4 shards (`--shard i/4`: sha256 of the mutant name mod 4, every mutant in exactly one shard), each 3 mutants at a time, timeout 75
+  min (1.6x the slowest measured shard job; short on purpose, a hung shard must not burn runner minutes), with every verdict appended to a cached log (`--log`, `actions/cache`) so a rerun of the same workflow run resumes. The `gate` job in those tiers
   runs with `GATE_MUTATION_FULL=external`: its mutation stage only re-proves the targets and names the job. Locally `GATE_TIER=full bash
   scripts/verify.sh` still runs the whole check unsharded (`GATE_MUTATION_JOBS=N` for N at a time; `GATE_MUTATION_SHARD=i/N` for one shard).
   Measured on GitHub (runs 44400641698 and 44414893564, two runs x four shards, 4-core runners): shard JOB times 30-47 min (mutation step 28-45 min): run 1
   36.7 / 41.2 / 30.1 / 46.5, run 2 31.9 / 41.1 / 29.9 / 33.1 (shards 1-4 in order of the job names; run 1 steps 35.7 / 39.4 / 28.7 / 44.8). The shard
   sizes (69 / 67 / 75 / 76 mutants) do not explain the spread (the 75-mutant shard was fastest twice; shard 4 swung 32 -> 45 min between two runs), so the hash
-  split and `--jobs 3` stay; the timeout 120 is 2.5x the slowest. The full-tier `gate` job (without the mutation check) took 25-29 min, a push 3.1 min,
-  the pr tier 47 min with its mutants serial.
+  split and `--jobs 3` stay; the timeout 75 is 1.6x the slowest. The full-tier `gate` job (without the mutation check) took 25-29 min, a push 3.1 min,
+  the pr tier 47 min with its mutants serial. **Runner-minute cost:** the 4 shards cost about 160 runner-minutes (4 x ~38), so on the schedule only the Sunday (weekly)
+  cron runs them, not every night (the nightly `full` run is the `gate` job alone, about 27 min); by hand `gh workflow run gate -f tier=full -f mutation=false` skips them.
+  All `gate` jobs but a push time out at 60 min.
 * **What counts as a kill.** pytest exit 5 ("no tests collected": a group made only of tests deselected by the default `-m`, e.g. `tests/live`)
   is NOT a kill and the next group runs; a mutant reads KILLED only with a named failing test or a timeout (a hung mutant is killed), and a non-zero
   exit that names no test is RED ("inconclusive"), never a silent kill.

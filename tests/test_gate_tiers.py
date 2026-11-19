@@ -247,19 +247,23 @@ def test_the_ci_workflow_has_a_sharded_resumable_mutation_job_and_the_gate_job_d
     assert set(jobs) >= {"gate", "mutation"}
     mut = jobs["mutation"]
     assert mut["strategy"]["matrix"]["shard"] == [1, 2, 3, 4] and mut["strategy"]["fail-fast"] is False
-    # measured on GitHub (runs 44400641698 and 44414893564, 4 shards each): slowest shard job 46.5 min (mutation step 44.8), typical 30-41; 2.5x the slowest
-    assert 2.5 * 46.5 <= mut["timeout-minutes"] <= 150, mut["timeout-minutes"]
+    # measured on GitHub (runs 44400641698, 44414893564, 44466951686, 44477505120, 44488473730; 4 shards each): slowest shard job 46.5 min, typical 30-41.
+    # Enough headroom (1.5x the slowest) but short: a hung shard is cancelled instead of burning runner minutes (the verdict log is cached, a rerun resumes)
+    assert 1.5 * 46.5 <= mut["timeout-minutes"] <= 90, mut["timeout-minutes"]
     text = CI.read_text()
     assert "--shard ${{ matrix.shard }}/4" in text and "--log" in text and "--jobs 3" in text or "GATE_MUTATION_JOBS: \"3\"" in text
     assert "actions/cache" in text and "mutation-log" in text                                  # a rerun resumes from the verdict log
     cond = mut["if"]
-    assert "schedule" in cond and "full" in cond and "weekly" in cond                            # nightly and weekly, never on a push or a PR
+    assert "schedule" in cond and "full" in cond and "weekly" in cond                            # scheduled or by hand, never on a push or a PR
+    # cost control: on the schedule ONLY the Sunday (weekly) cron runs the ~160 runner-minute mutation shards, not every night; by hand it can be switched off
+    assert "github.event.schedule == '23 2 * * 0'" in cond and "inputs.mutation" in cond, cond
+    assert "'23 2 * * 0'" in text and wf[True]["workflow_dispatch"]["inputs"]["mutation"]["default"] is True
     steps = " ".join(str(s.get("run", "")) + str(s.get("env", "")) for s in jobs["gate"]["steps"])
     assert "GATE_MUTATION_FULL" in steps and "external" in steps
     assert "GATE_MUTATION_JOBS" in steps and "GATE_MUTATION_MAX" in steps                      # the pr tier: parallel and capped
     t = jobs["gate"]["timeout-minutes"]
     # measured: push 3.1 min; the full-tier gate job 25-29 min (without the mutation check); the pr tier up to 47 min with its mutants run serially
-    assert "push' && 15" in t and t.rstrip(" }").endswith("|| 120"), t
+    assert "push' && 15" in t and t.rstrip(" }").endswith("|| 60"), t               # 60: measured 25-29 min (full), about 45 estimated for weekly, pr up to 47
 
 
 def test_the_pr_tier_finds_a_green_full_mutation_run_for_the_pr_head_and_fails_closed_without_one():

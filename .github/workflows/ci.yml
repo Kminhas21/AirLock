@@ -23,6 +23,10 @@ on:
         type: choice
         options: [push, pr, full, weekly]
         default: pr
+      mutation:
+        description: also run the 4 sharded mutation jobs (full / weekly tiers; about 160 runner-minutes; the only way to lift the PR cap)
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -37,8 +41,8 @@ jobs:
   gate:
     runs-on: ubuntu-24.04
     # measured on GitHub (runs 44400641698, 44414893564, 44235118971): push 3.1 min; full-tier gate job 25-29 min (the mutation check is its own job);
-    # pr 47 min with its mutants serial, <= 120 at the cap of 150 mutants run 4 at a time; weekly adds the research parity stages (about 15 more, estimated)
-    timeout-minutes: ${{ github.event_name == 'push' && 15 || 120 }}
+    # pr 47 min with its mutants serial, about 35 at the cap of 150 mutants run 4 at a time; weekly adds the research parity stages (about 15 more, estimated); 60 for all but push
+    timeout-minutes: ${{ github.event_name == 'push' && 15 || 60 }}
     env:
       EVENT: ${{ github.event_name }}
       SCHEDULE: ${{ github.event.schedule }}
@@ -213,12 +217,13 @@ jobs:
   # split into 4 shards by a stable hash of the mutant name (scripts/mutation_check.py --shard i/4), each shard runs 3 mutants at a time and appends every
   # verdict to a log that is cached, so a rerun of a failed or timed-out shard resumes instead of starting over. Measured on GitHub: 30-47 min per shard job.
   mutation:
-    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.tier == 'full' || inputs.tier == 'weekly'))
+    # on the schedule only the weekly (Sunday) run pays for it: ~160 runner-minutes, not every night; by hand with tier full / weekly and mutation = true
+    if: (github.event_name == 'schedule' && github.event.schedule == '23 2 * * 0') || (github.event_name == 'workflow_dispatch' && inputs.mutation && (inputs.tier == 'full' || inputs.tier == 'weekly'))
     runs-on: ubuntu-24.04
     # measured (runs 44400641698 and 44414893564, two runs x 4 shards): slowest shard JOB 46.5 min (its mutation step 44.8), the others 30-41 min.
-    # 120 = 2.5x the slowest. The shard sizes (69/67/75/76 mutants) are not what drives the time (the 75-mutant shard was the fastest; one shard
+    # 75 = 1.6x the slowest (a hung shard is cancelled sooner; the log is cached, so a rerun resumes). The shard sizes (69/67/75/76 mutants) are not what drives the time (the 75-mutant shard was the fastest; one shard
     # swung 32 -> 45 min between runs), so the hash split stays; --jobs 3 per 4-core runner stays too.
-    timeout-minutes: 120
+    timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
