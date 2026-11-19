@@ -183,6 +183,14 @@ def _clean_tree_is_green_unless_a_test_says_otherwise():
     mc._CLEAN.clear()
 
 
+@pytest.fixture(autouse=True)
+def _no_ambient_cap_proof(monkeypatch):
+    """The PR job exports GATE_MUTATION_PROOF / GATE_HEAD_SHA once a full run of the commit is green; the cap tests must not inherit it (they
+    passed locally and went red only in that job: the proof they were not meant to see lifted the cap)."""
+    for k in ("GATE_MUTATION_PROOF", "GATE_HEAD_SHA"):
+        monkeypatch.delenv(k, raising=False)
+
+
 def _m(name, rel="server/a.py", old="o", new="n", count=1):
     return (name, rel, old, new, count)
 
