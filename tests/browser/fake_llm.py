@@ -175,5 +175,15 @@ async def reset():
     return {"ok": True}
 
 
+# uvicorn closes an idle keep-alive connection after 5 s by default. Playwright's `request` fixture reuses a process-wide keep-alive socket (and does not
+# retry), and a spec's tests last about 5 s, so frontend/e2e/live.spec.ts's beforeEach hit `read ECONNRESET` on a socket the server was closing (full-tier run
+# 44477505120). The server must outlive any gap between two tests, so the idle timeout is long; httpx clients (the backend's) expire their own idle sockets after 5 s.
+KEEP_ALIVE_S = 75
+
+
+def server_config(port: int) -> dict:
+    return {"host": "127.0.0.1", "port": port, "log_level": "warning", "timeout_keep_alive": KEEP_ALIVE_S}
+
+
 if __name__ == "__main__":
-    uvicorn.run(app, host="127.0.0.1", port=int(sys.argv[1]), log_level="warning")
+    uvicorn.run(app, **server_config(int(sys.argv[1])))

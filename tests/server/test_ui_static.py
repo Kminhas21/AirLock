@@ -244,3 +244,50 @@ def test_guard_a_rule_that_does_not_exist_is_red_on_a_broken_copy():
     text = _scratch("j4-policy.spec.ts", "allow-echo-n", "allow-read-project")
     assert missing_rule_problems(text, _policy_rules(text))
     assert missing_rule_problems('data-rule-id="a" auto-allowed by rule b', {"a"}) == ["rule b does not exist in the policy this journey uses"]
+
+
+# ------------------------------------------------------------------------------------------------------------------------------------ the mock LLM's keep-alive
+# Full-tier run 44477505120: live.spec.ts's beforeEach `request.post(.../_reset)` died with `read ECONNRESET` 28 ms into the second test. Playwright's APIRequestContext
+# sends through a process-wide keep-alive http.Agent (playwright-core happyEyeballs `{keepAlive: true}`, maxRetries 0 by default), so the first test's connection to the mock
+# is reused by the next test. uvicorn closes an idle keep-alive connection after 5 s by default, and the first test took 4.7 s: the client wrote on a socket the server was closing
+# (the classic idle-reset race). The race is open for any gap near the server's timeout, so the mock's timeout must be far beyond any gap between two tests.
+def test_the_mock_llm_keeps_idle_connections_far_longer_than_a_test_lasts(monkeypatch):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("fake_llm_ka", _ROOT / "tests" / "browser" / "fake_llm.py")
+    fl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fl)
+    cfg = fl.server_config(9101)
+    assert cfg["timeout_keep_alive"] >= 60, "uvicorn's default 5 s is the length of a typical e2e test: the idle-reset race"
+    assert cfg["host"] == "127.0.0.1" and cfg["port"] == 9101
+
+
+def test_the_mock_llm_really_serves_a_second_request_on_a_connection_idle_for_longer_than_uvicorns_default():
+    import http.client
+    import importlib.util
+    import socket
+    import threading
+    import time
+    import uvicorn
+    spec = importlib.util.spec_from_file_location("fake_llm_ka2", _ROOT / "tests" / "browser" / "fake_llm.py")
+    fl = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fl)
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+    server = uvicorn.Server(uvicorn.Config(fl.app, **{**fl.server_config(port), "log_level": "warning"}))
+    t = threading.Thread(target=server.run, daemon=True)
+    t.start()
+    try:
+        for _ in range(100):
+            if server.started:
+                break
+            time.sleep(0.05)
+        c = http.client.HTTPConnection("127.0.0.1", port)
+        c.request("POST", "/_reset")
+        assert c.getresponse().read()
+        time.sleep(6.0)                                    # longer than uvicorn's default 5 s idle timeout, shorter than ours
+        c.request("POST", "/_reset")                       # the SAME connection: a 5 s server would have closed it
+        assert c.getresponse().status == 200
+    finally:
+        server.should_exit = True
+        t.join(timeout=10)

@@ -689,7 +689,8 @@ async def test_cancel_racing_approve_either_order():
     await r.send(call())
     await wait_for(lambda: r.ui.events("inbox_pending"))
     await asyncio.gather(r.decide("c1", "approve"), r.send(cancel()))
-    await wait_for(lambda: r.decisions())
+    # two channels (the proxy's decision, the UI's inbox_resolved): wait for BOTH, not just the first (this raced under load: IndexError on the second)
+    await wait_for(lambda: r.decisions() and r.ui.events("inbox_resolved"))
     assert r.decisions()[0]["decision"] == "approve" and r.ui.events("inbox_resolved")[0]["decision"] == "approve"
     # cancel first: the approve is ignored, nothing is approved
     r = await Rig(SpyMonitor()).start()
