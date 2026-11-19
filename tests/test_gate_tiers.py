@@ -247,7 +247,8 @@ def test_the_ci_workflow_has_a_sharded_resumable_mutation_job_and_the_gate_job_d
     assert set(jobs) >= {"gate", "mutation"}
     mut = jobs["mutation"]
     assert mut["strategy"]["matrix"]["shard"] == [1, 2, 3, 4] and mut["strategy"]["fail-fast"] is False
-    assert mut["timeout-minutes"] == 350
+    # measured on GitHub (runs 44400641698 and 44414893564, 4 shards each): slowest shard job 46.5 min (mutation step 44.8), typical 30-41; 2.5x the slowest
+    assert 2.5 * 46.5 <= mut["timeout-minutes"] <= 150, mut["timeout-minutes"]
     text = CI.read_text()
     assert "--shard ${{ matrix.shard }}/4" in text and "--log" in text and "--jobs 3" in text or "GATE_MUTATION_JOBS: \"3\"" in text
     assert "actions/cache" in text and "mutation-log" in text                                  # a rerun resumes from the verdict log
@@ -257,4 +258,21 @@ def test_the_ci_workflow_has_a_sharded_resumable_mutation_job_and_the_gate_job_d
     assert "GATE_MUTATION_FULL" in steps and "external" in steps
     assert "GATE_MUTATION_JOBS" in steps and "GATE_MUTATION_MAX" in steps                      # the pr tier: parallel and capped
     t = jobs["gate"]["timeout-minutes"]
-    assert "pull_request' && 120" in t
+    # measured: push 3.1 min; the full-tier gate job 25-29 min (without the mutation check); the pr tier up to 47 min with its mutants run serially
+    assert "push' && 15" in t and t.rstrip(" }").endswith("|| 120"), t
+
+
+def test_the_pr_tier_finds_a_green_full_mutation_run_for_the_pr_head_and_fails_closed_without_one():
+    import yaml
+    wf = yaml.safe_load(CI.read_text())
+    assert wf["permissions"].get("actions") == "read"                    # the lookup lists workflow runs and their jobs
+    steps = wf["jobs"]["gate"]["steps"]
+    look = next(s for s in steps if "green full mutation run" in s.get("name", ""))
+    assert "pull_request" in look["if"] and look["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
+    run = look["run"]
+    for needle in ("GATE_HEAD_SHA=$HEAD_SHA", "GATE_MUTATION_PROOF=", "head_sha=$HEAD_SHA", "mutation (", "success"):
+        assert needle in run, needle
+    names = [s.get("name", "") for s in steps]
+    assert names.index(look["name"]) < names.index("Gate")              # before the gate runs, so the check can use it
+    gate_env = next(s for s in steps if s.get("name") == "Gate")["env"]
+    assert gate_env["GATE_MUTATION_MAX"] == "150"                        # the cap itself is unchanged: only a proof for the same commit lifts it

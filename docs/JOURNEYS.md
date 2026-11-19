@@ -19,3 +19,11 @@ Negative check done by hand: with `SENTINEL_EMBEDDER=stub` the recomputation dis
 
 Honest limits: agents are scripted MCP clients behind the real proxy (not Claude Desktop); W5 needs Landlock/user namespaces (Linux);
 The novel LLM is synthetic (it is not a model); the real-model test is the only one with unscripted model text and its alerts depend on the model. W9 uses the `EMBEDDINGS=0` image (stub embedder inside the container) unless `JOURNEY_DOCKER_IMAGE` is set.
+
+## Guards that keep the journeys honest (tests/server/test_ui_static.py)
+
+The journeys run only in the nightly tier, so they went stale twice (D31: unsandboxed servers ask every time and rules moved; the sandbox trampoline needs an absolute
+interpreter on a GitHub runner). Three structural guards now parse every `frontend/journeys/*.spec.ts` on every push: (1) a server config with a `sandbox` or `runtime`
+and a non-absolute string `command` is red; (2) a call with a path-like argument that the journey awaits directly and expects to succeed (no card, no click) needs
+its agent started with a sandboxed server with `runtime` (`lib.ts` `sandboxedServer()`); (3) every rule id a journey names must exist in the policy it uses. Each guard is
+proven red against a deliberately broken copy of the real journeys in the same file.

@@ -6,7 +6,7 @@
 #                                   not a stage of this one: it takes hours; this job only re-proves the mutant targets (GATE_MUTATION_FULL=external)
 #   weekly        GATE_TIER=weekly  + research detectors (D7-D9c) parity, and the real Claude Code client only if ANTHROPIC_API_KEY is set
 #                                   (the `mutation` job runs on this schedule too)
-# NOT RUN HERE: this workflow has only been parsed and its tier wiring tested (tests/test_gate_tiers.py), never executed on GitHub.
+# Timings in the comments below were measured on GitHub (runs 44400641698, 44414893564); the wiring is tested in tests/test_gate_tiers.py.
 # The verdict is scripts/verify.sh's exit code; the per-stage event log and the junit XML are uploaded as artifacts.
 name: gate
 
@@ -26,6 +26,7 @@ on:
 
 permissions:
   contents: read
+  actions: read   # the pr tier looks up the full `mutation` run of the PR head commit (lifts the selection cap only with a green one)
 
 concurrency:
   # a newer run on the same ref (and trigger) cancels the superseded one
@@ -35,7 +36,9 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-24.04
-    timeout-minutes: ${{ github.event_name == 'push' && 25 || github.event_name == 'pull_request' && 120 || 150 }}
+    # measured on GitHub (runs 44400641698, 44414893564, 44235118971): push 3.1 min; full-tier gate job 25-29 min (the mutation check is its own job);
+    # pr 47 min with its mutants serial, <= 120 at the cap of 150 mutants run 4 at a time; weekly adds the research parity stages (about 15 more, estimated)
+    timeout-minutes: ${{ github.event_name == 'push' && 15 || 120 }}
     env:
       EVENT: ${{ github.event_name }}
       SCHEDULE: ${{ github.event.schedule }}
@@ -135,6 +138,28 @@ jobs:
         if: steps.tier.outputs.tier == 'weekly' && env.HAS_CLAUDE_KEY == 'true'
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Look for a green full mutation run for this PR head (the only way past the pr tier's selection cap)
+        if: steps.tier.outputs.tier == 'pr' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # scripts/mutation_check.py `over_cap`: a selection above GATE_MUTATION_MAX is RED unless this variable names a full sharded run
+          # (all four `mutation (N)` jobs green) of THIS commit. Not an event or label: evidence. Dispatch one with
+          #   gh workflow run gate --ref <branch> -f tier=full
+          echo "GATE_HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$HEAD_SHA&per_page=50" \
+                        --jq '.workflow_runs[] | select(.event=="workflow_dispatch") | .id' || true); do
+            # exactly the four shards by name, each green; an API hiccup counts as "no proof" (the cap then stays RED), never as a step failure
+            ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100" \
+                   --jq '[.jobs[] | select(.conclusion=="success" and (.name | test("^mutation \\([1-4]\\)$"))) | .name] | unique | length') || ok=0
+            if [ "$ok" = 4 ]; then
+              echo "GATE_MUTATION_PROOF=$id:$HEAD_SHA" >> "$GITHUB_ENV"
+              echo "full mutation run $id is green for $HEAD_SHA"
+              break
+            fi
+          done
+
       - name: Gate
         env:
           GATE_EVENTS: ${{ runner.temp }}/gate/events.log
@@ -186,12 +211,14 @@ jobs:
 
   # The WHOLE mutation check (every mutant, no killer map: the safety net behind the PR tier's selection). It is hours of serial pytest runs, so it is
   # split into 4 shards by a stable hash of the mutant name (scripts/mutation_check.py --shard i/4), each shard runs 3 mutants at a time and appends every
-  # verdict to a log that is cached, so a rerun of a failed or timed-out shard resumes instead of starting over. Estimate (not measured on GitHub):
-  # about 4 h of 4-core work in total here, so roughly 2-3 h per shard on a 4-core runner; the timeout leaves headroom.
+  # verdict to a log that is cached, so a rerun of a failed or timed-out shard resumes instead of starting over. Measured on GitHub: 30-47 min per shard job.
   mutation:
     if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && (inputs.tier == 'full' || inputs.tier == 'weekly'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 350
+    # measured (runs 44400641698 and 44414893564, two runs x 4 shards): slowest shard JOB 46.5 min (its mutation step 44.8), the others 30-41 min.
+    # 120 = 2.5x the slowest. The shard sizes (69/67/75/76 mutants) are not what drives the time (the 75-mutant shard was the fastest; one shard
+    # swung 32 -> 45 min between runs), so the hash split stays; --jobs 3 per 4-core runner stays too.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:

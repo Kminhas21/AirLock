@@ -243,7 +243,7 @@ def test_a_mutant_with_no_entry_or_a_stale_entry_is_selected_even_when_no_test_c
 
 
 @pytest.mark.parametrize("f", ["pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini", "conftest.py", "tests/conftest.py", "tests/no_skip_plugin.py",
-                               "tests/harness.py", "tests/reality_fixtures.py", "tests/__init__.py", "requirements.txt", "requirements-dev.txt"])
+                               "tests/harness.py", "tests/reality_fixtures.py", "tests/__init__.py"])
 def test_a_file_that_affects_every_test_selects_every_pytest_mutant(f, monkeypatch):
     monkeypatch.setattr(mc, "_test_texts", lambda: {})
     ms = [_m("A"), _m("B", "scripts/gate_lib.sh")]
@@ -882,3 +882,84 @@ def test_the_cap_message_says_what_actually_triggered_the_selection(monkeypatch,
     monkeypatch.setattr(mc, "changed_files", lambda ref, root=None: {"pytest.ini"})
     assert mc.main(["--changed-since", "main", "--max-selected", "2"]) == 1
     assert "shared test support" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------
+# Ticket 1: a selection above the PR-tier cap is RED unless the SAME commit already has a green full (sharded) mutation run; dependency-only
+# changes select a smoke subset instead of every mutant.
+# ---------------------------------------------------------------------------------------------------------------------------------------
+SHA = "a" * 40
+
+
+def _capped(monkeypatch, capsys, env, argv_extra=()):
+    ms = [_m(f"M{i}", f"server/m{i}.py") for i in range(5)]
+    monkeypatch.setattr(mc, "MUTANTS", ms); monkeypatch.setattr(mc, "FRONTEND_MUTANTS", [])
+    monkeypatch.setattr(mc, "load_killer_map", lambda path=None: _map(ms))
+    monkeypatch.setattr(mc, "changed_files", lambda ref, root=None: {f"server/m{i}.py" for i in range(5)})
+    ran = []
+    monkeypatch.setattr(mc, "run_backend", lambda ms_, s, st: ran.extend(m[0] for m in ms_))
+    monkeypatch.setattr(mc, "run_frontend", lambda *a: None)
+    for k in ("GATE_MUTATION_PROOF", "GATE_HEAD_SHA"):
+        monkeypatch.delenv(k, raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    rc = mc.main(["--changed-since", "main", "--max-selected", "2", *argv_extra])
+    return rc, capsys.readouterr().out, ran
+
+
+def test_a_capped_selection_without_proof_is_red_and_says_exactly_what_to_run(monkeypatch, capsys):
+    rc, out, ran = _capped(monkeypatch, capsys, {})
+    assert rc == 1 and ran == []
+    assert "5 > 2" in out and "gh workflow run gate" in out and "-f tier=full" in out and "mutation" in out and "Run workflow" in out
+
+
+def test_a_green_full_run_for_this_very_commit_lets_a_capped_selection_through_loudly(monkeypatch, capsys):
+    rc, out, ran = _capped(monkeypatch, capsys, {"GATE_MUTATION_PROOF": f"123456:{SHA}", "GATE_HEAD_SHA": SHA})
+    assert rc == 0 and ran == []                                  # nothing is re-run: the full run IS the check
+    assert "PROOF" in out and "123456" in out and SHA[:12] in out and "5 > 2" in out
+
+
+@pytest.mark.parametrize("proof, head", [(f"123456:{SHA}", "b" * 40), (f"123456:{SHA}", ""), ("garbage", SHA), ("123456:short", "short"),
+                                        (f":{SHA}", SHA), ("", SHA)])
+def test_a_proof_for_another_commit_or_a_malformed_one_is_still_red(monkeypatch, capsys, proof, head):
+    rc, out, ran = _capped(monkeypatch, capsys, {"GATE_MUTATION_PROOF": proof, "GATE_HEAD_SHA": head})
+    assert rc == 1 and ran == [] and "gh workflow run gate" in out
+
+
+def test_no_cap_in_force_means_no_proof_is_needed(monkeypatch, capsys):
+    ms = [_m("A")]
+    monkeypatch.setattr(mc, "MUTANTS", ms); monkeypatch.setattr(mc, "FRONTEND_MUTANTS", [])
+    monkeypatch.setattr(mc, "load_killer_map", lambda path=None: _map(ms))
+    monkeypatch.setattr(mc, "changed_files", lambda ref, root=None: {"server/a.py"})
+    monkeypatch.setattr(mc, "run_backend", lambda ms_, s, st: None); monkeypatch.setattr(mc, "run_frontend", lambda *a: None)
+    assert mc.main(["--changed-since", "main", "--max-selected", "5"]) == 0
+
+
+def _dep_map():
+    ms = [_m(f"M{i}") for i in range(9)] + [_m("ANY"), _m("F", "frontend/src/a.tsx")]
+    killers = {f"M{i}": [f"tests/x/test_{i // 3}.py"] for i in range(9)}                 # three witness files, three mutants each
+    killers["ANY"] = ["*"]
+    km = _map(ms, killers)
+    km["mutants"]["ANY"]["kind"] = "combination"
+    km["mutants"]["F"] = mc.make_entry(ms[-1], ["frontend/src/a.test.tsx"], runner="vitest")
+    return ms, km
+
+
+def test_a_dependency_only_change_selects_a_smoke_subset_one_mutant_per_witness_file(monkeypatch):
+    """requirements*.txt cannot weaken a test the way an edit can: it can only change how the witnesses behave. Every witness file must still be
+    exercised once (plus every `*` mutant), not all of the pytest mutants."""
+    monkeypatch.setattr(mc, "_test_texts", lambda: {})
+    ms, km = _dep_map()
+    got = _names(mc.select_changed(ms, {"requirements-dev.txt"}, km))
+    assert got == ["M0", "M3", "M6", "ANY"]                      # the first mutant of each witness file, and the combination mutant
+    assert _names(mc.select_changed(ms, {"requirements.txt", "pytest.ini"}, km)) == [m[0] for m in ms if m[0] != "F"]    # pytest.ini wins: everything
+
+
+@needs_committed_map
+def test_the_real_map_dependency_smoke_subset_fits_under_the_pr_cap_and_covers_every_witness_file():
+    km = mc.load_killer_map()
+    allm = mc.MUTANTS + mc.FRONTEND_MUTANTS
+    sel = {m[0] for m in mc.select_changed(allm, {"requirements-dev.txt"}, km)}
+    files = {k for e in km["mutants"].values() if e["runner"] == "pytest" for k in e["killers"] if k != mc.ANY_TEST}
+    got = {k for n in sel for k in km["mutants"][n]["killers"]}
+    assert files <= got and len(sel) < len([m for m in allm if km["mutants"][m[0]]["runner"] == "pytest"])

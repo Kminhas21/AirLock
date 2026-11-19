@@ -182,14 +182,23 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   to `DECISIONS.md`, `README.md`, `docs/TESTING_REALITY.md`, `ci.yml` or `scripts/verify.sh` selects a handful, not all. A support file under
   `tests/<dir>/` (conftest, helper, fixture, data) selects the witnesses under `tests/<dir>/` plus the tests that import or name it, so
   `tests/proxy/conftest.py` selects only the proxy-witness mutants. **Only a change that can alter EVERY test run selects every pytest mutant**:
-  `pytest.ini`, `pyproject.toml`, `setup.cfg`, `tox.ini`, `requirements*.txt`, a root `conftest.py`, and the support files directly under
-  `tests/` (`conftest.py`, `no_skip_plugin.py`, `harness.py`, `reality_fixtures.py`, `__init__.py`). Frontend: vite/vitest/eslint/tsconfig/package
+  `pytest.ini`, `pyproject.toml`, `setup.cfg`, `tox.ini`, a root `conftest.py`, and the support files directly under `tests/` (`conftest.py`,
+  `no_skip_plugin.py`, `harness.py`, `reality_fixtures.py`, `__init__.py`). **`requirements*.txt` selects a smoke subset**, not all: a dependency bump cannot weaken a
+  test the way an edit can, it can only change how witnesses behave, so one mutant per distinct witness set (plus every `*` mutant) runs: every witness file
+  is exercised once and the selection stays under the PR cap. Residual risk, accepted: a bump that breaks a witness for a mutant OTHER than the sampled one
+  of that file is found by the nightly full run (the same bump already ran every test green in the other stages). Frontend: vite/vitest/eslint/tsconfig/package
   config and every non-test file under `frontend/src` select every vitest mutant. A changed test module also selects the mutants of every test that imports or names it, transitively to depth 4 (`from test_inbox_hub import Rig`:
   editing that helper module selects the 58 mutants its importers witness, not 6). A non-target `.py` source file selects nothing (see the limits
   below). A mutant killed by `"*"` (combination or unknown) is selected by any changed test file and by any support or doc change that reaches a
   reader. A changed top-level gate test (`tests/test_*.py`) also still selects every gate-script mutant (`scripts/*`, `tests/*.py`).
   `--max-selected N` (env `GATE_MUTATION_MAX`, CI pr: 150) turns a selection above N into a loud RED, "too many mutants selected for the PR tier
   (N > limit): run the nightly mutation workflow", instead of a silent timeout; the pr job runs the selection 4 at a time (`GATE_MUTATION_JOBS`).
+  **The only way past the cap is evidence, never a label or a flag**: a green full sharded run of the SAME commit. The pr job's step "Look for a green
+  full mutation run for this PR head" lists the workflow's `workflow_dispatch` / `schedule` runs for `github.event.pull_request.head.sha` and, when one
+  has all four `mutation (N)` jobs green, exports `GATE_MUTATION_PROOF=<run id>:<head sha>` (and `GATE_HEAD_SHA`); `over_cap` accepts it only if both match
+  (a 40-hex sha equal to the PR head, not the CI merge commit), prints a loud `PROOF:` line and re-runs nothing (the full run already checked every mutant).
+  Otherwise it is RED and prints the command: `gh workflow run gate --ref <this PR's branch> -f tier=full` (or Actions > gate > Run workflow > branch = the
+  PR branch, tier = full), then re-run the PR job once the four `mutation` jobs are green. A new push changes the head sha, so the proof lapses with it.
   No usable map (missing, unreadable, other schema) falls back to the old rule: any change under `tests/` selects every mutant. Nothing
   selected = a quick pass that says so. A missing or unknown base ref is RED, never "nothing changed".
 * **The killer map (`scripts/mutant_killers.json`, `mutation_check.py --build-killer-map`).** Per mutant: its definition hash, the WITNESS test
@@ -218,12 +227,15 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   no longer exists, or the map's `mutants_hash` does not match. The fix is `python scripts/mutation_check.py --build-killer-map`, which
   re-attributes ONLY the missing/stale entries (`--rebuild-all` redoes all). Adding a mutant therefore means committing its map entry too.
 * **The full check in CI (`full` and `weekly`) is its own job.** It is hours of serial pytest runs, so `.github/workflows/ci.yml` runs it as the
-  job `mutation`: 4 shards (`--shard i/4`: sha256 of the mutant name mod 4, every mutant in exactly one shard), each 3 mutants at a time, timeout 350
-  min, with every verdict appended to a cached log (`--log`, `actions/cache`) so a rerun of the same workflow run resumes. The `gate` job in those tiers
+  job `mutation`: 4 shards (`--shard i/4`: sha256 of the mutant name mod 4, every mutant in exactly one shard), each 3 mutants at a time, timeout 120
+  min (2.5x the slowest measured shard job), with every verdict appended to a cached log (`--log`, `actions/cache`) so a rerun of the same workflow run resumes. The `gate` job in those tiers
   runs with `GATE_MUTATION_FULL=external`: its mutation stage only re-proves the targets and names the job. Locally `GATE_TIER=full bash
   scripts/verify.sh` still runs the whole check unsharded (`GATE_MUTATION_JOBS=N` for N at a time; `GATE_MUTATION_SHARD=i/N` for one shard).
-  Estimate, not measured on GitHub: the whole check is about 4 h of 4-core work, so roughly 2-3 h per shard. The workflow has been parsed and its
-  wiring tested, not run.
+  Measured on GitHub (runs 44400641698 and 44414893564, two runs x four shards, 4-core runners): shard JOB times 30-47 min (mutation step 28-45 min): run 1
+  36.7 / 41.2 / 30.1 / 46.5, run 2 31.9 / 41.1 / 29.9 / 33.1 (shards 1-4 in order of the job names; run 1 steps 35.7 / 39.4 / 28.7 / 44.8). The shard
+  sizes (69 / 67 / 75 / 76 mutants) do not explain the spread (the 75-mutant shard was fastest twice; shard 4 swung 32 -> 45 min between two runs), so the hash
+  split and `--jobs 3` stay; the timeout 120 is 2.5x the slowest. The full-tier `gate` job (without the mutation check) took 25-29 min, a push 3.1 min,
+  the pr tier 47 min with its mutants serial.
 * **What counts as a kill.** pytest exit 5 ("no tests collected": a group made only of tests deselected by the default `-m`, e.g. `tests/live`)
   is NOT a kill and the next group runs; a mutant reads KILLED only with a named failing test or a timeout (a hung mutant is killed), and a non-zero
   exit that names no test is RED ("inconclusive"), never a silent kill.
@@ -284,7 +296,7 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   to survive the whole suite to count as a survivor. Other mutants run the whole suite directly, as before.
 * **CI** (`.github/workflows/ci.yml`, not run here: validated with actionlint 1.7.7 and a YAML load; tracked although `.gitignore` ignores
   dotfiles, via `!.github/`, tested): one job, tier from the trigger, concurrency group per trigger and ref (a newer run cancels the
-  superseded one), timeouts 25 / 120 (pr) / 150 (nightly gate job) / 350 (each mutation shard) min (the pr tier outgrew 50 when a PR that edited a test ran every mutant; the killer map now selects only the mutants that test witnesses), pip / npm / MiniLM / Playwright / `.realdeps` caches (the `.realdeps` key includes the exact
+  superseded one), timeouts 15 (push) / 120 (every other gate job) / 120 (each mutation shard) min, from the measured times in "The full check in CI" (the pr tier outgrew 50 when a PR that edited a test ran every mutant; the killer map now selects only the mutants that test witnesses), pip / npm / MiniLM / Playwright / `.realdeps` caches (the `.realdeps` key includes the exact
   Python version and `scripts/realdeps_setup.sh`; the script pins `mcp-server-time` and rebuilds its venv when the interpreter does not run
   or the version is not the pin; that server's own dependencies are not pinned), `HF_HUB_OFFLINE=1` after the one model fetch, CPU torch,
   Chromium via `npx playwright install` with `CHROMIUM_PATH` from Playwright, the events file and junit (`GATE_JUNIT_DIR`: backend stages

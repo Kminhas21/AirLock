@@ -1166,7 +1166,7 @@
    "tier": "push"
   },
   "T23 a changed shared test-support file (conftest, plugin, helper) selects only its own mutants": {
-   "hash": "dcee743c78566252ef2eb6267151b6f0adac1029e768f20d9f5d28ece0347d1d",
+   "hash": "49d9e5b32d5e0eaf80c5e8be64be32c0141681f7a36efa97df151de0608fa65c",
    "killers": [
     "tests/test_mutation_check.py"
    ],
@@ -1338,6 +1338,33 @@
   },
   "T40 a changed test module selects none of the tests that import it (a weakened helper slips through its importers)": {
    "hash": "b1801169b3893a01c2d6821931860876c99ed927a155a74d98cde9f4c74e0061",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T41 a proof for another commit is accepted above the PR-tier cap (a green run of different code passes this one)": {
+   "hash": "8cd77503094fe504c745ffae80e73a73008f7acbc1a0e896e6513544c8a32bde",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T42 a dependency-only change selects no mutant at all (a dependency that breaks a witness slips through)": {
+   "hash": "4dfad0452ad3c4efb772b6ef1e82f6976675ad65c13b4374413e4741b9f74271",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T43 the dependency smoke subset is every pytest mutant again (the PR tier is red for a requirements bump)": {
+   "hash": "b11d516482b863de507f5675a233d7057e074fc0c9b5c2afdc700d3c34fad897",
    "killers": [
     "tests/test_mutation_check.py"
    ],
@@ -2597,6 +2624,6 @@
    "tier": "push"
   }
  },
- "mutants_hash": "1b07b78d1365588ac3340c9d382eeb211e96cb46b5070424c1eb3b8c619a4bd5",
+ "mutants_hash": "e3a4fb4c0fefeeceafb4604938c0742bb6412571d3f84940146c3a5bc8847157",
  "schema": 1
 }

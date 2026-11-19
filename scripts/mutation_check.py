@@ -501,7 +501,7 @@ MUTANTS = [
     ("T22 a changed killer test selects none of the mutants it is the witness for (a weakened killer slips through)", "scripts/mutation_check.py",
      "if hit or killers " "& changed or killers & closure:", "if hit:", 1),
     ("T23 a changed shared test-support file (conftest, plugin, helper) selects only its own mutants", "scripts/mutation_check.py",
-     "hit = (every" "thing or (ANY_TEST", "hit = (False or (ANY_TEST", 1),
+     "hit = (every" "thing or m[0] in smoke or (ANY_TEST", "hit = (False or m[0] in smoke or (ANY_TEST", 1),
     ("T24 a mutant with a missing or stale killer-map entry is not selected", "scripts/mutation_check.py",
      "if m[1] in changed or not " "_entry_ok(m, e):", "if m[1] in changed:", 1),
     ("T25 a renamed test file lists only its new name (the old killer is never seen)", "scripts/mutation_check.py",
@@ -536,6 +536,12 @@ MUTANTS = [
      'return f.startswith("tests/") and f.count("/") ' '== 1 and not _is_pytest_test(f)', "return False", 1),
     ("T40 a changed test module selects none of the tests that import it (a weakened helper slips through its importers)", "scripts/mutation_check.py",
      "if hit or killers & changed or killers" " & closure:", "if hit or killers & changed:", 1),
+    ("T41 a proof for another commit is accepted above the PR-tier cap (a green run of different code passes this one)", "scripts/mutation_check.py",
+     "if mt and mt.group(2) " "== head:", "if mt:", 1),
+    ("T42 a dependency-only change selects no mutant at all (a dependency that breaks a witness slips through)", "scripts/mutation_check.py",
+     "smoke = _smoke_set(mutants, " "ents) if", "smoke = set() if", 1),
+    ("T43 the dependency smoke subset is every pytest mutant again (the PR tier is red for a requirements bump)", "scripts/mutation_check.py",
+     "elif key not " "in seen:", "else:", 1),
 ]
 
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.
@@ -613,6 +619,35 @@ def shard_of(name: str, n: int) -> int:
 def in_shard(name: str, i: int, n: int) -> bool:
     """`i` is 1-based (--shard i/n)."""
     return shard_of(name, n) == i - 1
+
+
+PROOF_RE = re.compile(r"(\d+):([0-9a-f]{40})")
+
+
+def over_cap(selected: list, limit: int, changed: set[str], base: str) -> int:
+    """The selection is larger than the PR tier can run. FAIL CLOSED: green only when the SAME commit (env GATE_HEAD_SHA: the PR head, not the
+    CI merge commit) already has a green full sharded `mutation` run (env GATE_MUTATION_PROOF = "<run id>:<sha>", set by ci.yml's lookup step); every
+    other case is RED and says which command or click produces the proof."""
+    n = len(selected)
+    proof, head = os.environ.get("GATE_MUTATION_PROOF", ""), os.environ.get("GATE_HEAD_SHA", "")
+    mt = PROOF_RE.fullmatch(proof)
+    if mt and mt.group(2) == head:
+        print(f"mutation check: {n} mutants selected, above the PR-tier cap ({n} > {limit}); PROOF: the full sharded mutation run {mt.group(1)} is green "
+              f"for this commit ({head[:12]}), which checks every mutant: nothing is re-run here")
+        return 0
+    shared = sorted(f for f in changed if _is_everything(f) or _vitest_shared(f))
+    why = [f"{len({m[1] for m in selected} & changed)} changed mutant target(s)",
+           f"{sum(1 for f in changed if _is_pytest_test(f) or _is_vitest_test(f))} changed test file(s)"]
+    if shared:
+        why.append(f"shared test support changed: {shared[:5]}")
+    why = "; ".join(why)
+    state = ("a proof was given but it is not a green full run for THIS commit" if proof else "no green full mutation run is known for this commit")
+    print(f"mutation check FAILED: too many mutants selected for the PR tier ({n} > {limit}): run the nightly mutation workflow ({why}); {state}.\n"
+          f"  To clear it, run the full sharded check on THIS commit and re-run this job when its four `mutation` jobs are green:\n"
+          f"    gh workflow run gate --ref <this PR's branch> -f tier=full\n"
+          f"  (or GitHub: Actions > gate > Run workflow > branch = this PR's branch, tier = full). The PR tier then finds that run for the PR head\n"
+          f"  commit and accepts it as proof (scripts/mutation_check.py `over_cap`; docs/TESTING_REALITY.md). There is no other way through.")
+    return 1
 
 
 def parse_shard(text: str) -> tuple[int, int]:
@@ -786,11 +821,33 @@ def import_closure(changed: set[str], texts: dict[str, str], depth: int = IMPORT
     return seen
 
 
+def _is_dependency(f: str) -> bool:
+    """requirements*.txt: a dependency change cannot weaken a test the way an edit can, it can only change how the witnesses behave, so it
+    selects a smoke subset (`_smoke_set`) rather than every pytest mutant."""
+    return _REQUIREMENTS.match(f.rsplit("/", 1)[-1]) is not None
+
+
+def _smoke_set(mutants: list, ents: dict) -> set[str]:
+    """One mutant per distinct witness set (the first in list order), plus every `*` mutant: each witness file runs at least once."""
+    seen, out = set(), set()
+    for m in mutants:
+        e = ents.get(m[0])
+        if not _entry_ok(m, e) or e["runner"] != "pytest":
+            continue
+        key = tuple(sorted(e["killers"]))
+        if ANY_TEST in key:
+            out.add(m[0])
+        elif key not in seen:
+            seen.add(key)
+            out.add(m[0])
+    return out
+
+
 def _is_everything(f: str) -> bool:
     """A change that can alter ANY pytest run: pytest config, requirements, a root conftest, and test support at the top of tests/ (conftest,
     no_skip_plugin, harness, fixtures, __init__)."""
     b = f.rsplit("/", 1)[-1]
-    if f in _PYTEST_CONFIG or _REQUIREMENTS.match(b) or f == "conftest.py":
+    if f in _PYTEST_CONFIG or f == "conftest.py":
         return True
     return f.startswith("tests/") and f.count("/") == 1 and not _is_pytest_test(f)
 
@@ -903,6 +960,7 @@ def select_changed(mutants: list, changed: set[str], killer_map=None) -> list:
     vitest_tests = {f for f in changed if _is_vitest_test(f)}
     vitest_shared = any(_vitest_shared(f) for f in changed)
     gate_tests = {f for f in changed if _is_gate_test(f)}
+    smoke = _smoke_set(mutants, ents) if any(_is_dependency(f) for f in changed) else set()
     texts = _test_texts() if pytest_tests else {}
     closure = import_closure(pytest_tests, texts) if pytest_tests else set()
     everything, readers, dirs = _pytest_scope(changed, _test_texts() if any(not (_is_pytest_test(f) or _is_vitest_test(f)) and
@@ -917,7 +975,7 @@ def select_changed(mutants: list, changed: set[str], killer_map=None) -> list:
         if e["runner"] == "vitest":
             hit = vitest_shared or (ANY_TEST in killers and vitest_tests)
         else:
-            hit = (everything or (ANY_TEST in killers and (pytest_tests or readers or dirs))
+            hit = (everything or m[0] in smoke or (ANY_TEST in killers and (pytest_tests or readers or dirs))
                    or any(k in readers or any(k.startswith(d + "/") for d in dirs) for k in killers)
                    or (gate_tests and m[1].startswith(GATE_SCRIPTS)))
         if hit or killers & changed or killers & closure:
@@ -1257,15 +1315,7 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         limit = a.max_selected if a.max_selected is not None else int(os.environ.get("GATE_MUTATION_MAX") or 0)
         if limit and len(backend) + len(frontend) > limit:
-            sel = backend + frontend
-            shared = sorted(f for f in changed if _is_everything(f) or _vitest_shared(f))
-            why = [f"{len({m[1] for m in sel} & changed)} changed mutant target(s)",
-                   f"{sum(1 for f in changed if _is_pytest_test(f) or _is_vitest_test(f))} changed test file(s)"]
-            if shared:
-                why.append(f"shared test support changed: {shared[:5]}")
-            print(f"mutation check FAILED: too many mutants selected for the PR tier ({len(sel)} > {limit}): "
-                  f"run the nightly mutation workflow ({'; '.join(why)})")
-            return 1
+            return over_cap(backend + frontend, limit, changed, base)
         tests = sorted(f for f in changed if f.startswith("tests/") or _is_vitest_test(f) or _is_everything(f) or _vitest_shared(f))
         print(f"mutation check: {len(backend) + len(frontend)} of {len(MUTANTS) + len(FRONTEND_MUTANTS)} mutants selected by the changes "
               f"since {base} (targets: {sorted({m[1] for m in backend + frontend} & changed)}; tests changed: {tests[:10]}"
