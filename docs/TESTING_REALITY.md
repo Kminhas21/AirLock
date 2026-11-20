@@ -123,6 +123,20 @@ verified with 5,879 events. The hub is single-process by design, so this is its 
   (`CLAUDE_TEST_MODEL`, `CLAUDE_TEST_BUDGET_USD`). `scripts/realdeps_setup.sh` installs the pinned servers into `.realdeps/` (`npm ci --ignore-scripts`, re-run only when
   the lockfile changes). `python scripts/check_live_coverage.py` checks the map statically; add `--junit DIR` after running the stages with `--junitxml=DIR/x.xml`.
 
+## Hunting flaky tests locally (`scripts/flake_hunt.sh`)
+
+A real CI run is a bad place to find a test-side race. `scripts/flake_hunt.sh` is a local tool (not in verify.sh, not in any CI tier) that runs a pytest
+selection N times with xdist oversubscribed (default `-n 8`) while CPU burners (default 4 x `python -c 'while 1: pass'`) starve the workers, then
+writes `summary.txt` with a count per failing test id and its first failure text. Exit 0: nothing failed; 1: some test failed in some rounds but not
+all (flaky); 2: some test failed in every round (broken); 3: bad usage. Burners are always killed on exit.
+
+    scripts/flake_hunt.sh -r 8 -o /tmp/hunt -- -m 'not reality and not claude_live and not slow and not research'   # the fast backend stage
+    scripts/flake_hunt.sh -r 4 -t 1800 -- -m 'slow and not research and not reality and not claude_live'            # the slow stage
+    scripts/flake_hunt.sh -r 10 -- tests/server/test_inbox_hub.py                                                    # one file
+
+Options: `-r` rounds, `-n` xdist workers, `-b` burners, `-o` output dir, `-t` seconds after which no new round starts. Fixes should wait for the
+condition the assertion reads (never a longer sleep), or measure CPU time instead of wall time; do not retry or skip.
+
 ## Hearing about failures immediately (not hours later)
 
 A full gate with every opt-in stage takes hours, and the Docker stage runs near the end. One real run went RED after about two hours

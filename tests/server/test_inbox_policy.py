@@ -51,7 +51,7 @@ async def test_deny_rule_replies_policy_registers_denial_and_never_holds(monkeyp
     _, pol = use(monkeypatch, tmp_path)
     r = await Rig().start()
     await r.send(call(tool="delete_file"))
-    await wait_for(lambda: r.decisions())
+    await wait_for(lambda: r.decisions() and r.ui.events("inbox_resolved"))   # two channels (proxy reply, UI broadcast): wait for both before asserting either
     assert r.decisions() == [{"event": "proxy_decision", "call_id": "c1", "decision": "deny", "reason": "policy"}]
     assert r.monitor.decisions == [("delete_file", {"p": 1}, "deny")]       # the monitor learned the denial
     assert not r.ui.events("inbox_pending")
@@ -64,7 +64,7 @@ async def test_allow_rule_with_working_monitor_is_approved_without_a_card(monkey
     _, pol = use(monkeypatch, tmp_path)
     r = await Rig().start()
     await r.send(call(tool="read_file"))          # auto flag False: the proxy did not allow-list it
-    await wait_for(lambda: r.decisions())
+    await wait_for(lambda: r.decisions() and r.ui.events("inbox_resolved"))   # two channels (proxy reply, UI broadcast): wait for both before asserting either
     assert r.decisions()[0] == {"event": "proxy_decision", "call_id": "c1", "decision": "approve", "reason": "policy"}
     assert r.monitor.decisions == [("read_file", {"p": 1}, "approve")]
     assert not r.ui.events("inbox_pending")
@@ -115,7 +115,7 @@ async def test_default_verdict(monkeypatch, tmp_path, default, expect_hold):
         await wait_for(lambda: r.ui.events("inbox_pending"))
         assert r.ui.events("inbox_pending")[0]["rule_id"] is None and r.decisions() == []
     else:
-        await wait_for(lambda: r.decisions())
+        await wait_for(lambda: r.decisions() and r.ui.events("inbox_resolved"))   # both channels before asserting either
         assert r.decisions()[0]["decision"] == ("approve" if default == "allow" else "deny")
         assert r.decisions()[0]["reason"] == "policy"
         assert r.ui.events("inbox_resolved")[0]["rule_id"] is None
@@ -167,7 +167,7 @@ async def test_session_keeps_its_policy_when_the_file_changes(monkeypatch, tmp_p
     r2.hub = r.hub
     # the first session still allows read_file under the OLD policy
     await r.send(call(tool="read_file"))
-    await wait_for(lambda: r.decisions())
+    await wait_for(lambda: r.decisions() and r.ui.events("inbox_resolved"))   # two channels (proxy reply, UI broadcast): wait for both before asserting either
     assert r.decisions()[0]["decision"] == "approve"
     assert r.ui.events("inbox_resolved")[0]["policy_digest"] == pol1.digest()
     # a NEW session gets the new policy

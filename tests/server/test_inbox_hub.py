@@ -73,7 +73,7 @@ async def settle(n=20):
         await asyncio.sleep(0)
 
 
-async def wait_for(pred, tries=200):
+async def wait_for(pred, tries=2000):      # >= 10 s: a stalled worker under load is not a failure, only a condition that never comes is
     for _ in range(tries):
         if pred():
             return
@@ -305,7 +305,7 @@ async def test_multiple_uis_all_receive_and_any_can_decide():
 async def test_auto_approve_without_alert():
     r = await Rig().start()
     await r.send(call(auto=True, tool="read_file"))
-    await wait_for(lambda: r.decisions())
+    await wait_for(lambda: r.decisions() and r.ui.events("inbox_resolved"))   # two channels (proxy reply, UI broadcast): wait for BOTH, then assert
     assert r.decisions() == [{"event": "proxy_decision", "call_id": "c1", "decision": "approve", "reason": "auto"}]
     assert r.monitor.proposals and r.monitor.decisions == [("read_file", {"p": 1}, "approve")]
     assert not r.ui.events("inbox_pending")

@@ -179,7 +179,7 @@ async def test_policy_allow_with_secrets_true_approves_the_credentialed_call(mon
     use(monkeypatch, tmp_path, [{"id": "creds-ok", "verdict": "allow", "when": {"tool": ["read_file"], "secrets": True, "arg_keys": ["p"]}, "confine": {}}])
     r = await Rig().start()
     await r.send(call("creds", tool="read_file", secrets_used=["API_TOKEN"]))
-    await wait_for(lambda: r.decisions())
+    await wait_for(lambda: r.decisions() and r.ui.events("inbox_resolved"))   # two channels (proxy reply, UI broadcast): wait for both before asserting either
     assert r.decisions()[0] == {"event": "proxy_decision", "call_id": "creds", "decision": "approve", "reason": "policy"}
     assert r.ui.events("inbox_resolved")[0]["rule_id"] == "creds-ok"
 

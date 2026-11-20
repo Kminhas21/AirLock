@@ -284,7 +284,7 @@ async def test_hub_auto_allows_a_read_with_a_working_monitor_and_holds_a_write(m
     monkeypatch.setenv("SENTINEL_POLICY", "builtin:starter")
     r = await Rig().start()
     await r.send(call("c1", tool="list_directory", args={"path": "/project"}, confinable=True))
-    await wait_for(lambda: r.decisions())
+    await wait_for(lambda: r.decisions() and r.ui.events("inbox_resolved"))   # two channels (proxy reply, UI broadcast): wait for both before asserting either
     assert r.decisions()[0]["decision"] == "approve" and r.decisions()[0]["reason"] == "policy"
     assert r.decisions()[0]["confine"] == {"path": "list"}
     assert not r.ui.events("inbox_pending")

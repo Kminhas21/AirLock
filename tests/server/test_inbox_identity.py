@@ -800,7 +800,8 @@ async def test_concurrent_decisions_and_escalations_per_tenant_do_not_cross():
     assert [c.name for c, _ in w.notifier.sent] == ["oncall"] and w.notifier.sent[0][1]["tenant"] == "acme"
     assert w.uis["dave"].events("inbox_escalated") == []
     await asyncio.gather(w.decide("alice", "s", "c1", "deny"), w.decide("dave", "s", "c1", "approve"))
-    await wait_for(lambda: w.proxies["s"].events("proxy_decision") and w.gpeer.events("proxy_decision"))
+    await wait_for(lambda: w.proxies["s"].events("proxy_decision") and w.gpeer.events("proxy_decision")   # all four channels (two proxies, two UIs) before asserting any
+                   and w.uis["alice"].events("inbox_resolved") and w.uis["dave"].events("inbox_resolved"))
     assert w.proxies["s"].events("proxy_decision")[0]["decision"] == "deny"
     assert w.gpeer.events("proxy_decision")[0]["decision"] == "approve"
     assert w.uis["alice"].events("inbox_resolved")[0]["operator"] == "alice"

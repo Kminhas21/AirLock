@@ -10,7 +10,9 @@ from eval import effects
 # did, at 1.26 s on a parallel GitHub runner) while the bugs still fail on every case they slow down:
 #   * inside the scanned window, 4x the input may cost about 4x (healthy: 4.0-4.1x); the quadratic pattern (mutant H1) costs ~16x;
 #   * beyond the window the cost must stay flat (healthy 3 MB: within ~0.05 s of 20 KB); scanning the whole input (H2) costs ~150x.
-# Times are the minimum of 3 runs (load only ever adds time). The 30 s ceiling per call is a backstop.
+# Times are the minimum of 3 runs of THREAD CPU time (time.thread_time), not wall time: a preempted worker (oversubscribed xdist, a busy runner)
+# stops accruing CPU time, so load cannot inflate the ratios (the wall-clock minimum of 3 still failed at 8.8x and 'bound' failures under
+# scripts/flake_hunt.sh). The 30 s ceiling per call is a backstop.
 UNITS = {"A": "A", "a.": "a.", "words": "x" * 100 + " ", "slashes": "/", "unicode": "é" * 50 + "."}
 
 
@@ -21,9 +23,9 @@ def _text(unit: str, n: int) -> str:
 def _seconds(text: str) -> float:
     best = float("inf")
     for _ in range(3):
-        t = time.perf_counter()
+        t = time.thread_time()
         out = effects._gist(text)
-        best = min(best, time.perf_counter() - t)
+        best = min(best, time.thread_time() - t)
         assert best < 30 and len(out) < 2000
     return best
 
