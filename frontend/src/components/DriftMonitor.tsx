@@ -10,14 +10,22 @@ import { useMemo } from "react";
 // react-plotly.js is a CJS module. Under Vite's ESM handling, the default
 // export sometimes comes through as { default: PlotComponent } instead of
 // PlotComponent directly. This workaround handles both cases.
-import PlotImport from "react-plotly.js";
-const Plot = (typeof (PlotImport as any).default !== "undefined"
-  ? (PlotImport as any).default
-  : PlotImport) as typeof PlotImport;
+import PlotImport, {
+  type PlotMouseEvent,
+  type PlotProps,
+  type PlotTrace,
+} from "react-plotly.js";
+import type { ComponentType } from "react";
+// Under the CJS/ESM interop the import may actually be { default: Component }.
+const plotInterop = PlotImport as unknown as {
+  default?: ComponentType<PlotProps>;
+};
+const Plot: ComponentType<PlotProps> =
+  typeof plotInterop.default !== "undefined" ? plotInterop.default : PlotImport;
 import { useSessionStore } from "../stores/sessionStore";
+import { latestThreshold, pointThreshold } from "../lib/drift";
 
 const BASELINE_SIZE = 3;
-const DRIFT_THRESHOLD = 2.5;
 
 export function DriftMonitor() {
   const driftPoints = useSessionStore((s) => s.driftPoints);
@@ -25,12 +33,12 @@ export function DriftMonitor() {
   const setSelectedNode = useSessionStore((s) => s.setSelectedNode);
 
   // --- 2D Scatter Data (PC1 vs PC2) ---
-  const scatterData = useMemo(() => {
+  const scatterData = useMemo((): PlotTrace[] => {
     if (driftPoints.length === 0) return [];
 
     const baseline = driftPoints.slice(0, BASELINE_SIZE);
     const trail = driftPoints.slice(BASELINE_SIZE);
-    const traces: object[] = [];
+    const traces: PlotTrace[] = [];
 
     // Trajectory line connecting all points
     if (driftPoints.length > 1) {
@@ -77,7 +85,7 @@ export function DriftMonitor() {
         marker: {
           size: 10,
           color: trail.map((p) =>
-            p.mahalanobisDistance > DRIFT_THRESHOLD ? "#ef4444" : "#f59e0b"
+            p.mahalanobisDistance > pointThreshold(p.threshold) ? "#ef4444" : "#f59e0b"
           ),
         },
         text: trail.map((p) => `S${p.stepIndex}`),
@@ -96,7 +104,7 @@ export function DriftMonitor() {
   }, [driftPoints]);
 
   // --- Drift Score Line Chart Data ---
-  const driftLineData = useMemo(() => {
+  const driftLineData = useMemo((): PlotTrace[] => {
     if (driftPoints.length === 0) return [];
 
     return [
@@ -107,7 +115,7 @@ export function DriftMonitor() {
         y: driftPoints.map((p) => p.mahalanobisDistance),
         marker: {
           color: driftPoints.map((p) =>
-            p.mahalanobisDistance > DRIFT_THRESHOLD ? "#ef4444" : "#22c55e"
+            p.mahalanobisDistance > pointThreshold(p.threshold) ? "#ef4444" : "#22c55e"
           ),
           size: 8,
         },
@@ -122,7 +130,7 @@ export function DriftMonitor() {
   }, [driftPoints]);
 
   // Handle clicking a point to highlight the corresponding kill chain node
-  const handlePointClick = (event: any) => {
+  const handlePointClick = (event: PlotMouseEvent) => {
     const point = event?.points?.[0];
     if (point?.customdata) {
       setSelectedNode(point.customdata as string);
@@ -134,6 +142,8 @@ export function DriftMonitor() {
     zerolinecolor: "#2a2d37",
     color: "#6b7280",
   };
+
+  const threshold = latestThreshold(driftPoints);
 
   const maxStep =
     driftPoints.length > 0
@@ -147,7 +157,7 @@ export function DriftMonitor() {
         {currentDriftScore > 0 && (
           <span
             className={`drift-score-badge ${
-              currentDriftScore > DRIFT_THRESHOLD ? "breached" : ""
+              currentDriftScore > threshold ? "breached" : ""
             }`}
           >
             Score: {currentDriftScore.toFixed(2)}
@@ -165,7 +175,7 @@ export function DriftMonitor() {
           {/* 2D Scatter Plot — Embedding Space */}
           <div className="chart-container scatter3d-container">
             <Plot
-              data={scatterData as any}
+              data={scatterData}
               layout={{
                 autosize: true,
                 margin: { l: 40, r: 16, t: 8, b: 40 },
@@ -186,7 +196,7 @@ export function DriftMonitor() {
           {/* Drift Score Line Chart */}
           <div className="chart-container line-chart-container">
             <Plot
-              data={driftLineData as any}
+              data={driftLineData}
               layout={{
                 autosize: true,
                 margin: { l: 40, r: 16, t: 8, b: 32 },
@@ -208,15 +218,15 @@ export function DriftMonitor() {
                     type: "line",
                     x0: 0,
                     x1: maxStep,
-                    y0: DRIFT_THRESHOLD,
-                    y1: DRIFT_THRESHOLD,
+                    y0: threshold,
+                    y1: threshold,
                     line: { color: "#ef4444", width: 2, dash: "dash" },
                   },
                 ],
                 annotations: [
                   {
                     x: 0.02,
-                    y: DRIFT_THRESHOLD,
+                    y: threshold,
                     xref: "paper",
                     yref: "y",
                     text: "threshold",

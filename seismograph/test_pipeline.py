@@ -227,7 +227,7 @@ def run_test():
 
     fresh2 = SeismographAnalyzer(embedder=stub)
     fresh2.register_denial("query_database")
-    alert = fresh2.check_circumvention("read_file", "x", 5.0)
+    alert = fresh2.check_circumvention("update_task", "x", 5.0)  # data/data (read_file is filesystem per risk_scorer)
     check(alert is not None,
           "Invariant: different tool targeting same resource category must trigger alert")
     if alert is not None:

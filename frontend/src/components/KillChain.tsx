@@ -8,13 +8,16 @@
 // - ToolNode: Amber/red based on risk, has Approve/Deny buttons when pending
 // - ReplanNode: Same as ToolNode but with dashed orange border (appears after denial)
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
   type Node,
   type Edge,
+  type NodeProps,
   type NodeTypes,
+  Handle,
+  Position,
   useReactFlow,
   ReactFlowProvider,
 } from "@xyflow/react";
@@ -71,10 +74,18 @@ function getLayoutedElements(nodes: Node<NodeData>[], edges: Edge[]) {
 
 // ===== Type for custom node props =====
 // In @xyflow/react v12, NodeProps takes the Node type directly.
-type SentinelNodeProps = {
-  id: string;
-  data: NodeData;
-};
+type SentinelNodeProps = NodeProps<Node<NodeData>>;
+
+// react-flow only draws an edge between nodes that expose <Handle>s; without them every edge is
+// dropped ("Couldn't create edge for source handle id: null") and the graph renders disconnected.
+function NodeHandles() {
+  return (
+    <>
+      <Handle type="target" position={Position.Top} isConnectable={false} className="flow-handle" />
+      <Handle type="source" position={Position.Bottom} isConnectable={false} className="flow-handle" />
+    </>
+  );
+}
 
 // ===== CUSTOM NODE: Reasoning =====
 // Blue rounded rectangle showing the agent's chain-of-thought text.
@@ -89,6 +100,7 @@ function ReasoningNode({ data, id }: SentinelNodeProps) {
       className={`flow-node reasoning-node ${isSelected ? "selected" : ""}`}
       onClick={() => setSelectedNode(isSelected ? null : id)}
     >
+      <NodeHandles />
       <div className="flow-node-header">
         <span className="flow-node-type-badge reasoning-badge">REASONING</span>
       </div>
@@ -143,6 +155,7 @@ function ToolNode({ data, id }: SentinelNodeProps) {
       }`}
       onClick={() => setSelectedNode(isSelected ? null : id)}
     >
+      <NodeHandles />
       <div className="flow-node-header">
         <span className={`flow-node-type-badge ${riskClass}-badge`}>
           {data.toolName?.toUpperCase()}
@@ -195,12 +208,11 @@ function ReplanNode(props: SentinelNodeProps) {
 
 // ===== NODE TYPE REGISTRY =====
 // react-flow needs to know which component to render for each node type.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const nodeTypes: NodeTypes = {
-  reasoning: ReasoningNode as any,
-  tool: ToolNode as any,
-  replan: ReplanNode as any,
-};
+const nodeTypes = {
+  reasoning: ReasoningNode,
+  tool: ToolNode,
+  replan: ReplanNode,
+} satisfies NodeTypes;
 
 // ===== INNER COMPONENT (needs ReactFlowProvider) =====
 
@@ -230,7 +242,9 @@ function KillChainInner({
   // Listen for decision events from custom nodes
   useEffect(() => {
     const handler = (e: Event) => {
-      const { nodeId, decision } = (e as CustomEvent).detail;
+      const { nodeId, decision } = (
+        e as CustomEvent<{ nodeId: string; decision: "approve" | "deny" }>
+      ).detail;
       onDecision(nodeId, decision);
     };
     window.addEventListener("sentinel-decision", handler);
@@ -239,9 +253,9 @@ function KillChainInner({
 
   return (
     <ReactFlow
-      nodes={layoutedNodes as any}
+      nodes={layoutedNodes}
       edges={layoutedEdges}
-      nodeTypes={nodeTypes as any}
+      nodeTypes={nodeTypes}
       fitView
       proOptions={{ hideAttribution: true }}
       nodesDraggable={false}
@@ -270,8 +284,6 @@ interface KillChainProps {
 export function KillChain({ onDecision }: KillChainProps) {
   const nodes = useSessionStore((s) => s.nodes);
 
-  const stableOnDecision = useCallback(onDecision, [onDecision]);
-
   return (
     <div className="panel kill-chain-panel">
       <h2 className="panel-title">Kill Chain</h2>
@@ -283,7 +295,7 @@ export function KillChain({ onDecision }: KillChainProps) {
       ) : (
         <div style={{ flex: 1, minHeight: 0 }}>
           <ReactFlowProvider>
-            <KillChainInner onDecision={stableOnDecision} />
+            <KillChainInner onDecision={onDecision} />
           </ReactFlowProvider>
         </div>
       )}
