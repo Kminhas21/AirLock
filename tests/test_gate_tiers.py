@@ -24,7 +24,7 @@ PUSH = ["preflight", "mutation targets are current", "mutant killer map is curre
 PR = ["backend pytest, slow", "reality: hostile", "reality: real MCP servers", "reality: hub under concurrent load",
       "reality: live workflows", "live coverage proven", "browser e2e", "browser replay parity: action_sim", "browser inbox (",
       "browser inbox policy", "browser operator UI", "browser boundary", "browser identity"]
-PR_ONLY = ["mutation check, changed files only"]                 # full runs the whole mutation check instead
+PR_ONLY = ["mutation selection preflight", "mutation check, changed files only"]                 # full runs the whole mutation check instead
 FULL = ["mutation check (tests must catch"]
 FULL_OPT_IN = ["docker:", "user journeys", "claude code:"]        # full and weekly, only with RUN_DOCKER_TESTS / RUN_JOURNEY_TESTS / RUN_CLAUDE_TESTS
 WEEKLY = ["backend pytest, research", "browser replay parity: learned", "browser replay parity: registry (", "browser replay parity: registry_learned (",
@@ -274,9 +274,53 @@ def test_the_pr_tier_finds_a_green_full_mutation_run_for_the_pr_head_and_fails_c
     look = next(s for s in steps if "green full mutation run" in s.get("name", ""))
     assert "pull_request" in look["if"] and look["env"]["HEAD_SHA"] == "${{ github.event.pull_request.head.sha }}"
     run = look["run"]
-    for needle in ("GATE_HEAD_SHA=$HEAD_SHA", "GATE_MUTATION_PROOF=", "head_sha=$HEAD_SHA", "mutation (", "success"):
+    assert look["env"]["BRANCH"] == "${{ github.event.pull_request.head.ref }}"
+    for needle in ("GATE_HEAD_SHA=$HEAD_SHA", "GATE_MUTATION_PROOF=$id:$sha", 'branch="$BRANCH"', "event=workflow_dispatch", "merge-base --is-ancestor", "mutation (", "success"):
         assert needle in run, needle
     names = [s.get("name", "") for s in steps]
     assert names.index(look["name"]) < names.index("Gate")              # before the gate runs, so the check can use it
     gate_env = next(s for s in steps if s.get("name") == "Gate")["env"]
     assert gate_env["GATE_MUTATION_MAX"] == "150"                        # the cap itself is unchanged: only a proof for the same commit lifts it
+
+
+def test_the_pr_tier_checks_the_mutation_selection_first_and_only_there(tmp_path):
+    """A capped PR used to find out at the very END of the tier. The preflight is a fast stage right after the static checks, before any test run, in the
+    pr tier only (push has no mutation selection; full and weekly delegate the whole check)."""
+    for tier in ("push", "full", "weekly"):
+        assert not [n for n, _ in listed(tier, tmp_path)[1] if n.startswith("mutation selection preflight")], tier
+    names = [n for n, _ in listed("pr", tmp_path, GATE_BASE="origin/develop")[1]]
+    pre = [i for i, n in enumerate(names) if n.startswith("mutation selection preflight")]
+    assert len(pre) == 1 and pre[0] < names.index(next(n for n in names if n.startswith("backend pytest, fast")))
+    argv = next(a for n, a in listed("pr", tmp_path, GATE_BASE="origin/develop")[1] if n.startswith("mutation selection preflight"))
+    assert argv[-3:] == ["--preflight", "--changed-since", "origin/develop"]
+    argv = next(a for n, a in listed("pr", tmp_path, GATE_BASE="")[1] if n.startswith("mutation selection preflight"))
+    assert argv[-3:] == ["--preflight", "--changed-since", "@origin"]
+
+
+def test_the_proof_lookup_passes_the_branch_as_a_field_not_inside_the_url(tmp_path):
+    """A branch name may hold & # ? % or spaces: pasted into the query string it would cut or change the query (a different branch's runs, or none). gh's
+    `-f` fields are encoded by gh itself. Runs the step's real script with stubbed gh and git."""
+    import yaml
+    wf = yaml.safe_load(CI.read_text())
+    look = next(s for s in wf["jobs"]["gate"]["steps"] if "ancestor of it" in s.get("name", ""))
+    head = "d" * 40
+    branch = "feat/a&b#c d%20?x=1"
+    bin_ = tmp_path / "bin"
+    bin_.mkdir()
+    log = tmp_path / "gh.log"
+    (bin_ / "gh").write_text('#!/bin/sh\nfor a in "$@"; do printf "%s\\n" "$a" >> "$GH_LOG"; done\nprintf -- "--\\n" >> "$GH_LOG"\n'
+                             'case "$*" in *"/jobs"*) echo 4 ;; *) printf "11\\t%s\\n" "$HEAD_SHA" ;; esac\n')
+    (bin_ / "gh").chmod(0o755)
+    (bin_ / "git").write_text("#!/bin/sh\nexit 1\n")
+    (bin_ / "git").chmod(0o755)
+    envfile = tmp_path / "env"
+    envfile.write_text("")
+    env = {"PATH": f"{bin_}:/usr/bin:/bin", "GH_LOG": str(log), "HEAD_SHA": head, "BRANCH": branch, "GITHUB_REPOSITORY": "o/r", "GITHUB_ENV": str(envfile),
+           "GH_TOKEN": "x"}
+    r = subprocess.run(["bash", "-c", look["run"]], capture_output=True, text=True, env=env, timeout=30)
+    assert r.returncode == 0, r.stderr
+    calls = [c.split("\n") for c in log.read_text().split("--\n") if c.strip()]
+    runs = next(c for c in calls if any("workflows/ci.yml/runs" in a for a in c))
+    assert f"branch={branch}" in runs and "event=workflow_dispatch" in runs, runs                       # one argument each: gh encodes them
+    assert not any("branch=" in a and "workflows/ci.yml/runs" in a for a in runs), "the branch must not be pasted into the URL"
+    assert f"GATE_MUTATION_PROOF=11:{head}" in envfile.read_text() and f"GATE_HEAD_SHA={head}" in envfile.read_text()

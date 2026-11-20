@@ -18,6 +18,11 @@ XD="env OMP_NUM_THREADS=${OMP_NUM_THREADS:-1} python -m pytest -n ${GATE_PYTEST_
 run "preflight: opted-in stages can work at all (Docker daemon + proxy CA, claude CLI), in seconds instead of hours later" gate_preflight
 run "mutation targets are current (fast: stale mutants fail here, not at the end)" python scripts/mutation_check.py --check-targets
 run "mutant killer map is current (fast: a stale scripts/mutant_killers.json would let a PR skip mutants on a guess; --build-killer-map re-attributes only the stale ones)" python scripts/mutation_check.py --check-killer-map
+# pr tier only (full and weekly delegate the whole mutation check; push has no mutation selection): the cap and the proof are applied HERE, in seconds, so a PR
+# that selects too many mutants fails at the start of the tier instead of after its ~25 minutes of tests (the final stage below is the one that runs them)
+if at_tier pr && ! at_tier full; then
+  run "mutation selection preflight (fast: the PR-tier cap and proof, no mutant is run; red now instead of at the end)" python scripts/mutation_check.py --preflight --changed-since "${GATE_BASE:-@origin}"
+fi
 run "live coverage map, static (every user workflow has a live test or a declared gap; referenced files exist; live specs are run)" python scripts/check_live_coverage.py
 # Backend pytest, split by marker (GATE_PYTEST_* in scripts/gate_lib.sh): every collected test is in exactly one of these three stages.
 run "backend pytest, fast (unmarked tests, parallel)" $XD -m "$GATE_PYTEST_PUSH" ${GATE_JUNIT_DIR:+--junitxml=$GATE_JUNIT_DIR/backend-fast.xml}

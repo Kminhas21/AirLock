@@ -1310,7 +1310,7 @@
    "tier": "push"
   },
   "T38 the PR-tier selection cap is ignored (a huge selection becomes a silent timeout)": {
-   "hash": "084c4909e580f4451942a8ec89ce131d37c9b1cad836239ceebe92eb876c0c24",
+   "hash": "6163d00c07d2e9d6d63a90668d82ff66a2cd5497b3f8ffaf3d821f44fda5e293",
    "killers": [
     "tests/test_mutation_check.py"
    ],
@@ -1345,8 +1345,8 @@
    "runner": "pytest",
    "tier": "push"
   },
-  "T41 a proof for another commit is accepted above the PR-tier cap (a green run of different code passes this one)": {
-   "hash": "8cd77503094fe504c745ffae80e73a73008f7acbc1a0e896e6513544c8a32bde",
+  "T41 the over-cap RED no longer names the command that produces or refreshes the proof": {
+   "hash": "80de1bcf0c14ae8e7b5bfd81d324ee51b5a8a5bfbabfd5e2c5907e5f86a1aec9",
    "killers": [
     "tests/test_mutation_check.py"
    ],
@@ -1372,8 +1372,107 @@
    "runner": "pytest",
    "tier": "push"
   },
+  "T44 a proof commit that is not an ancestor of the PR head is still used as the diff base (rewritten history proves nothing)": {
+   "hash": "c3307df7010d36ccb57d1cb113bee4e362de5f23ca2ed785c1a46dac8b70dccf",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T45 a mutant added or changed after the proof commit is not re-run (the proof run never checked it)": {
+   "hash": "adfd3db5fb681600098d27167141db3a11066b8f8d3132ff6e46292a9dce6450",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T46 a proof of an ancestor does not move the diff base (the whole PR diff is selected again)": {
+   "hash": "a3ac7f49ab05e84df21b6229d18ad52608194b2da79b33a137011ddd86e0fb97",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T47 a proof of ANOTHER commit is taken for this very commit (nothing is re-run)": {
+   "hash": "b0c68ea0f280d5972a8f6e84596e93dad9a1c0f10914033c07f71ac2f9b71065",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T48 the preflight goes on to run the mutants it only meant to count": {
+   "hash": "e18e1b18b989e8d298c69a15e0f0d9fd398876966825041ed83184206831f9ee",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T49 a malformed proof (trailing junk) is accepted": {
+   "hash": "3c8b99637b80505e25bd10572f70416aeec4dec2eabf322e1ac1a7c89bf55f16",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
   "T5 research tests also run in the push stage (selected twice)": {
    "hash": "bf1b8a4d1bd7ad7f18f7a0267043cfe3a51c4ae99fd520eef1268393ef345a21",
+   "killers": [
+    "tests/test_gate_tiers.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T50 a proof for a GATE_HEAD_SHA that is not this checkout is accepted (a well-formed sha of another tree proves nothing)": {
+   "hash": "33342944670e5de109c44614cdfdd4d44e1abb9a3e5df66dbe70564b46f9c465",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T51 a proof shrinks a selection that already fits under the cap": {
+   "hash": "d65b78c9a112e1492b11c8d9fb16cafc714713a8e8c6a5f386bc4f9a0ceba323",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T52 a proof commit that mutates its own list after the literal (append, clear, ...) is trusted": {
+   "hash": "fc60177db5d6797949e3fbc39048de3b0d259499595108fe4c00455b68a6b6a0",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T53 a proof commit whose file cannot be decoded raises instead of being no proof": {
+   "hash": "7e9cd5208075f25123bf046568602b16850d59b37ba08a8e32a4396ebf9994c7",
+   "killers": [
+    "tests/test_mutation_check.py"
+   ],
+   "kind": "single",
+   "runner": "pytest",
+   "tier": "push"
+  },
+  "T54 the PR branch is pasted into the lookup URL (a name with & or # changes the query)": {
+   "hash": "81d59194a0969db7dd9b8d7ca4093e90e3f91e02775cd3a905c21424e0897912",
    "killers": [
     "tests/test_gate_tiers.py"
    ],
@@ -2624,6 +2723,6 @@
    "tier": "push"
   }
  },
- "mutants_hash": "e3a4fb4c0fefeeceafb4604938c0742bb6412571d3f84940146c3a5bc8847157",
+ "mutants_hash": "195fa8843cca4e9520f1a1702c609d7f9263e6d1102bac86517a96a40dbf9b2e",
  "schema": 1
 }

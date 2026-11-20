@@ -187,7 +187,7 @@ def _clean_tree_is_green_unless_a_test_says_otherwise():
 def _no_ambient_cap_proof(monkeypatch):
     """The PR job exports GATE_MUTATION_PROOF / GATE_HEAD_SHA once a full run of the commit is green; the cap tests must not inherit it (they
     passed locally and went red only in that job: the proof they were not meant to see lifted the cap)."""
-    for k in ("GATE_MUTATION_PROOF", "GATE_HEAD_SHA"):
+    for k in ("GATE_MUTATION_PROOF", "GATE_HEAD_SHA", "GATE_MUTATION_MAX"):
         monkeypatch.delenv(k, raising=False)
 
 
@@ -907,6 +907,7 @@ def _capped(monkeypatch, capsys, env, argv_extra=()):
     ran = []
     monkeypatch.setattr(mc, "run_backend", lambda ms_, s, st: ran.extend(m[0] for m in ms_))
     monkeypatch.setattr(mc, "run_frontend", lambda *a: None)
+    monkeypatch.setattr(mc, "head_in_checkout", lambda head, root=None: head == SHA)
     for k in ("GATE_MUTATION_PROOF", "GATE_HEAD_SHA"):
         monkeypatch.delenv(k, raising=False)
     for k, v in env.items():
@@ -924,7 +925,7 @@ def test_a_capped_selection_without_proof_is_red_and_says_exactly_what_to_run(mo
 def test_a_green_full_run_for_this_very_commit_lets_a_capped_selection_through_loudly(monkeypatch, capsys):
     rc, out, ran = _capped(monkeypatch, capsys, {"GATE_MUTATION_PROOF": f"123456:{SHA}", "GATE_HEAD_SHA": SHA})
     assert rc == 0 and ran == []                                  # nothing is re-run: the full run IS the check
-    assert "PROOF" in out and "123456" in out and SHA[:12] in out and "5 > 2" in out
+    assert "PROOF" in out and "123456" in out and SHA[:12] in out and "this very commit" in out
 
 
 @pytest.mark.parametrize("proof, head", [(f"123456:{SHA}", "b" * 40), (f"123456:{SHA}", ""), ("garbage", SHA), ("123456:short", "short"),
@@ -971,3 +972,205 @@ def test_the_real_map_dependency_smoke_subset_fits_under_the_pr_cap_and_covers_e
     files = {k for e in km["mutants"].values() if e["runner"] == "pytest" for k in e["killers"] if k != mc.ANY_TEST}
     got = {k for n in sel for k in km["mutants"][n]["killers"]}
     assert files <= got and len(sel) < len([m for m in allm if km["mutants"][m[0]]["runner"] == "pytest"])
+
+
+# ---------------------------------------------------------------------------------------------------------------------------------------
+# Proof carry-over: a green full run of an ANCESTOR A of the PR head B is the base of the PR tier's selection (diff A..B), not only an exact match.
+# ---------------------------------------------------------------------------------------------------------------------------------------
+A_SHA, B_SHA = "a" * 40, "b" * 40
+
+
+def test_the_proof_is_run_id_and_a_40_hex_sha_nothing_else(monkeypatch):
+    monkeypatch.setenv("GATE_MUTATION_PROOF", f"77:{A_SHA}")
+    assert mc.current_proof() == ("77", A_SHA)
+    for bad in ("", "77", f":{A_SHA}", f"77:{A_SHA[:39]}", f"77:{A_SHA.upper()}", f"x:{A_SHA}", f"77:{A_SHA} ", "77:" + "g" * 40):
+        monkeypatch.setenv("GATE_MUTATION_PROOF", bad)
+        assert mc.current_proof() is None, bad
+
+
+def test_ancestry_and_the_mutants_known_at_the_proof_commit_are_read_from_git(repo):
+    def commit(msg):
+        git(repo, "add", "-A"); git(repo, "commit", "-q", "-m", msg)
+        return git(repo, "rev-parse", "HEAD").strip()
+    (repo / "scripts").mkdir(exist_ok=True)
+    (repo / "scripts" / "mutation_check.py").write_text('MUTANTS = [("A1", "server/a.py", "o", "n", 1)]\nFRONTEND_MUTANTS = []\n')
+    a = commit("A")
+    (repo / "scripts" / "mutation_check.py").write_text('MUTANTS = [("A1", "server/a.py", "o", "n", 1), ("B1", "server/b.py", "o", "n", 1)]\nFRONTEND_MUTANTS = []\n')
+    b = commit("B")
+    assert mc.is_ancestor(a, b, repo) and not mc.is_ancestor(b, a, repo)
+    assert not mc.is_ancestor("f" * 40, b, repo) and not mc.is_ancestor(a, "f" * 40, repo)          # unknown commits: no proof, never an exception
+    assert mc.proof_known_hashes(a, repo) == {mc.mutant_hash(("A1", "server/a.py", "o", "n", 1))}
+    assert mc.proof_known_hashes("f" * 40, repo) is None
+    (repo / "scripts" / "mutation_check.py").write_text("MUTANTS = [x for x in range(3)]\n")
+    c = commit("not a literal")
+    assert mc.proof_known_hashes(c, repo) is None                       # cannot be read without executing it: no proof
+
+
+def _carry(monkeypatch, capsys, *, proof=f"9:{A_SHA}", head=B_SHA, ancestor=True, head_ok=True, known="default", changed_since_a=None, limit=2):
+    ms = [_m("OLD1", "server/old1.py"), _m("OLD2", "server/old2.py"), _m("NEW", "server/new.py"), _m("EDIT", "server/edit.py", new="n2")]
+    monkeypatch.setattr(mc, "MUTANTS", ms); monkeypatch.setattr(mc, "FRONTEND_MUTANTS", [])
+    monkeypatch.setattr(mc, "load_killer_map", lambda path=None: _map(ms))
+    asked = []
+    monkeypatch.setattr(mc, "changed_files", lambda ref, root=None: asked.append(ref) or (changed_since_a if ref == A_SHA else {"server/old1.py", "server/old2.py", "server/new.py"}))
+    monkeypatch.setattr(mc, "is_ancestor", lambda a, b, root=None: ancestor)
+    monkeypatch.setattr(mc, "head_in_checkout", lambda head, root=None: head_ok)
+    default_known = {mc.mutant_hash(ms[0]), mc.mutant_hash(ms[1]), mc.mutant_hash(ms[3])}               # everything but NEW was in the proof run
+    monkeypatch.setattr(mc, "proof_known_hashes", lambda sha, root=None: default_known if known == "default" else known)
+    ran = []
+    monkeypatch.setattr(mc, "run_backend", lambda ms_, s, st: ran.extend(m[0] for m in ms_)); monkeypatch.setattr(mc, "run_frontend", lambda *a: None)
+    if proof:
+        monkeypatch.setenv("GATE_MUTATION_PROOF", proof)
+    if head:
+        monkeypatch.setenv("GATE_HEAD_SHA", head)
+    rc = mc.main(["--changed-since", "origin/main", "--max-selected", str(limit)])
+    return rc, capsys.readouterr().out, ran, asked
+
+
+def test_with_a_proof_base_only_the_changes_since_it_select_and_every_unproven_mutant_runs_too(monkeypatch, capsys):
+    """The hole: a mutant ADDED after the proof commit has a committed map entry (so the missing-entry rule does not fire) and an unchanged target, but the
+    proof run never checked it: it must run."""
+    rc, out, ran, asked = _carry(monkeypatch, capsys, changed_since_a={"server/old1.py"})
+    assert rc == 0 and asked == ["origin/main", A_SHA]                       # the plain selection first (3 > cap 2), then the diff against the PROOF commit
+    assert sorted(ran) == ["NEW", "OLD1"] and "EDIT" not in ran              # OLD1's target changed since A; NEW is unknown to the proof; EDIT is proven and untouched
+    assert "PROOF BASE" in out and "run 9" in out and A_SHA[:12] in out and B_SHA[:12] in out and "2 mutants" in out and "1 not in the proof" in out
+
+
+def test_a_mutant_whose_definition_changed_since_the_proof_is_unproven_and_runs(monkeypatch, capsys):
+    known = {mc.mutant_hash(_m("OLD1", "server/old1.py")), mc.mutant_hash(_m("OLD2", "server/old2.py")), mc.mutant_hash(_m("EDIT", "server/edit.py"))}
+    rc, out, ran, asked = _carry(monkeypatch, capsys, changed_since_a=set(), known=known)
+    assert rc == 0 and sorted(ran) == ["EDIT", "NEW"]                        # NEW absent from the proof commit's list; EDIT there with ANOTHER definition (hash)
+
+
+def test_the_exact_proof_commit_re_runs_nothing(monkeypatch, capsys):
+    rc, out, ran, asked = _carry(monkeypatch, capsys, proof=f"9:{B_SHA}")
+    assert rc == 0 and ran == [] and "this very commit" in out and "not needed" not in out          # the plain selection (3) IS over the cap of 2
+
+
+@pytest.mark.parametrize("kw, why", [({"ancestor": False}, "not an ancestor"), ({"known": None}, "cannot read the mutant list"),
+                                     ({"head": ""}, "GATE_HEAD_SHA"), ({"proof": "garbage"}, "malformed"),
+                                     ({"head_ok": False}, "not this checkout")])
+def test_a_proof_that_cannot_be_checked_is_ignored_and_the_normal_base_and_cap_apply(monkeypatch, capsys, kw, why):
+    rc, out, ran, asked = _carry(monkeypatch, capsys, **kw)
+    assert asked == ["origin/main"] and ran == []                           # the ordinary selection (3 mutants) is above the cap of 2: RED
+    assert rc == 1 and "too many mutants selected" in out and why in out
+
+
+def test_over_the_cap_even_relative_to_the_proof_base_is_red_and_names_the_refresh_command(monkeypatch, capsys):
+    rc, out, ran, asked = _carry(monkeypatch, capsys, changed_since_a={"server/old1.py", "server/old2.py"}, limit=2)      # 2 changed + NEW = 3 > 2
+    assert rc == 1 and ran == [] and asked == ["origin/main", A_SHA]
+    assert "3 > 2" in out and "since the proof commit" in out and "gh workflow run gate" in out and "-f tier=full" in out
+
+
+# ---- Item B: --preflight (the early, run-nothing version of the same selection, cap and proof)
+def _pre(monkeypatch, n=5, changed=None):
+    ms = [_m(f"M{i}", f"server/m{i}.py") for i in range(n)]
+    monkeypatch.setattr(mc, "MUTANTS", ms); monkeypatch.setattr(mc, "FRONTEND_MUTANTS", [])
+    monkeypatch.setattr(mc, "load_killer_map", lambda path=None: _map(ms))
+    monkeypatch.setattr(mc, "changed_files", lambda ref, root=None: changed if changed is not None else {f"server/m{i}.py" for i in range(n)})
+    monkeypatch.setattr(mc, "run_backend", lambda *a: pytest.fail("a preflight must run no mutant"))
+    monkeypatch.setattr(mc, "run_frontend", lambda *a: pytest.fail("a preflight must run no mutant"))
+    monkeypatch.setattr(mc, "require_clean_backend_tree", lambda: pytest.fail("a preflight must not run the suite"))
+
+
+def test_preflight_over_the_cap_is_red_immediately_with_the_same_message(monkeypatch, capsys):
+    _pre(monkeypatch)
+    assert mc.main(["--preflight", "--changed-since", "main", "--max-selected", "2"]) == 1
+    out = capsys.readouterr().out
+    assert "5 > 2" in out and "gh workflow run gate" in out
+
+
+def test_preflight_under_the_cap_says_how_many_it_would_run_and_runs_none(monkeypatch, capsys):
+    _pre(monkeypatch, n=2, changed={"server/m0.py"})
+    assert mc.main(["--preflight", "--changed-since", "main", "--max-selected", "5"]) == 0
+    out = capsys.readouterr().out
+    assert "preflight" in out and "1 mutants would run" in out and "of 2" in out
+    monkeypatch.setattr(mc, "changed_files", lambda ref, root=None: {"README.md"})
+    assert mc.main(["--preflight", "--changed-since", "main"]) == 0 and "nothing to run" in capsys.readouterr().out
+
+
+def test_preflight_honours_the_proof_exactly_like_the_real_stage(monkeypatch, capsys):
+    _pre(monkeypatch)
+    monkeypatch.setattr(mc, "head_in_checkout", lambda head, root=None: True)
+    monkeypatch.setenv("GATE_MUTATION_PROOF", f"9:{B_SHA}"); monkeypatch.setenv("GATE_HEAD_SHA", B_SHA)
+    assert mc.main(["--preflight", "--changed-since", "main", "--max-selected", "2"]) == 0
+    assert "this very commit" in capsys.readouterr().out
+
+
+def test_preflight_needs_a_base():
+    with pytest.raises(SystemExit):
+        mc.main(["--preflight"])
+
+
+def test_a_proof_never_shrinks_a_selection_that_is_within_the_cap(monkeypatch, capsys):
+    """The plain selection (3) fits under the cap (5): it runs in full. A proof of an ancestor would have run only 1; that is not what the cap is for."""
+    rc, out, ran, asked = _carry(monkeypatch, capsys, changed_since_a={"server/old1.py"}, limit=5)
+    assert rc == 0 and asked == ["origin/main"] and sorted(ran) == ["NEW", "OLD1", "OLD2"]
+    assert "not needed" in out and "PROOF BASE" not in out
+
+
+def test_an_exact_proof_under_the_cap_still_re_runs_nothing_and_says_it_was_not_needed(monkeypatch, capsys):
+    rc, out, ran, asked = _carry(monkeypatch, capsys, proof=f"9:{B_SHA}", limit=5)
+    assert rc == 0 and ran == [] and "this very commit" in out and "not needed" in out
+
+
+def _commit_script(repo, text):
+    (repo / "scripts").mkdir(exist_ok=True)
+    (repo / "scripts" / "mutation_check.py").write_bytes(text if isinstance(text, bytes) else text.encode())
+    git(repo, "add", "-A"); git(repo, "commit", "-q", "-m", "x")
+    return git(repo, "rev-parse", "HEAD").strip()
+
+
+GOOD = 'MUTANTS = [("A1", "server/a.py", "o", "n", 1)]\nFRONTEND_MUTANTS = []\n'
+
+
+@pytest.mark.parametrize("text", [b"\xff\xfe not utf-8 \x80", b"MUTANTS = [", "MUTANTS = [x for x in range(3)]\nFRONTEND_MUTANTS = []\n", "MUTANTS = []\n", "x = 1\n"])
+def test_a_proof_commit_whose_mutant_list_cannot_be_parsed_is_no_proof(repo, text):
+    assert mc.proof_known_hashes(_commit_script(repo, text), repo) is None
+
+
+@pytest.mark.parametrize("extra", ["MUTANTS.append(('X', 'server/x.py', 'o', 'n', 1))", "MUTANTS.clear()", "MUTANTS.extend([])", "MUTANTS.remove(MUTANTS[0])", "MUTANTS.pop()",
+                                   "MUTANTS[0] = ('Y', 'a', 'o', 'n', 1)", "MUTANTS += [('Z', 'a', 'o', 'n', 1)]", "MUTANTS = []", "del MUTANTS", "del MUTANTS[0]",
+                                   "FRONTEND_MUTANTS.insert(0, 1)", "def grow():\n    global MUTANTS\n    MUTANTS = []", "for MUTANTS in []:\n    pass",
+                                   "import os as MUTANTS", "globals()['MUTANTS'] = []", "exec('MUTANTS = []')", "setattr(__import__('sys'), 'x', 1)"])
+def test_a_proof_commit_that_can_change_its_own_mutant_list_after_the_literal_is_no_proof(repo, extra):
+    """The literal read by ast.literal_eval is only a SUPERSET risk if other statements can shrink or rebind it (the real list would then be smaller than
+    what was read, and mutants would be taken as proven that the run never executed)."""
+    assert mc.proof_known_hashes(_commit_script(repo, GOOD + extra + "\n"), repo) is None
+
+
+def test_reading_the_list_is_still_allowed_around_it(repo):
+    code = GOOD + "N = len(MUTANTS)\nfor m in MUTANTS + FRONTEND_MUTANTS:\n    print(m)\ndef f(muts=MUTANTS):\n    return [m for m in MUTANTS if m]\n"
+    assert mc.proof_known_hashes(_commit_script(repo, code), repo) == {mc.mutant_hash(("A1", "server/a.py", "o", "n", 1))}
+
+
+def test_the_head_must_be_the_checkout_or_an_ancestor_of_it(repo):
+    """CI checks out a merge commit whose second parent is the PR head: the head is an ancestor of HEAD. An unrelated 40-hex sha, an unknown one, or
+    the empty string is not this checkout."""
+    first = git(repo, "rev-parse", "HEAD~1").strip()
+    head = git(repo, "rev-parse", "HEAD").strip()
+    assert mc.head_in_checkout(head, repo) and mc.head_in_checkout(first, repo)
+    assert not mc.head_in_checkout("f" * 40, repo) and not mc.head_in_checkout("", repo) and not mc.head_in_checkout("not-a-sha", repo)
+    git(repo, "checkout", "-q", "-b", "side", first)
+    (repo / "side.txt").write_text("s")
+    git(repo, "add", "-A"); git(repo, "commit", "-q", "-m", "side")
+    side = git(repo, "rev-parse", "HEAD").strip()
+    git(repo, "checkout", "-q", "feature")
+    git(repo, "merge", "-q", "--no-ff", "-m", "merge commit (like refs/pull/N/merge)", "side")
+    assert mc.head_in_checkout(side, repo) and mc.head_in_checkout(head, repo)                          # both parents are ancestors of the merge commit
+    git(repo, "checkout", "-q", "-b", "elsewhere", first)
+    assert not mc.head_in_checkout(side, repo)                                                         # a commit that is not in this checkout's history
+
+
+def test_a_proof_for_a_sha_that_is_not_this_checkout_is_ignored_in_the_real_stage(repo, monkeypatch, capsys):
+    """Repro of the review: GATE_HEAD_SHA and the proof set to HEAD~1 made the preflight pass with 'nothing is re-run' for a checkout whose real head is HEAD."""
+    prev = git(repo, "log", "--format=%H").split()
+    other = "c" * 40
+    monkeypatch.setattr(mc, "ROOT", repo)
+    ms = [_m(f"M{i}", f"server/m{i}.py") for i in range(5)]
+    monkeypatch.setattr(mc, "MUTANTS", ms); monkeypatch.setattr(mc, "FRONTEND_MUTANTS", [])
+    monkeypatch.setattr(mc, "load_killer_map", lambda path=None: _map(ms))
+    monkeypatch.setattr(mc, "changed_files", lambda ref, root=None: {f"server/m{i}.py" for i in range(5)})
+    monkeypatch.setenv("GATE_MUTATION_PROOF", f"9:{other}"); monkeypatch.setenv("GATE_HEAD_SHA", other)
+    assert mc.main(["--preflight", "--changed-since", "main", "--max-selected", "2"]) == 1
+    out = capsys.readouterr().out
+    assert "not this checkout" in out and "too many mutants selected" in out and prev

@@ -193,12 +193,36 @@ subset; the tiers nest, each runs everything the one before it runs. `.github/wo
   reader. A changed top-level gate test (`tests/test_*.py`) also still selects every gate-script mutant (`scripts/*`, `tests/*.py`).
   `--max-selected N` (env `GATE_MUTATION_MAX`, CI pr: 150) turns a selection above N into a loud RED, "too many mutants selected for the PR tier
   (N > limit): run the nightly mutation workflow", instead of a silent timeout; the pr job runs the selection 4 at a time (`GATE_MUTATION_JOBS`).
-  **The only way past the cap is evidence, never a label or a flag**: a green full sharded run of the SAME commit. The pr job's step "Look for a green
-  full mutation run for this PR head" lists the workflow's `workflow_dispatch` / `schedule` runs for `github.event.pull_request.head.sha` and, when one
-  has all four `mutation (N)` jobs green, exports `GATE_MUTATION_PROOF=<run id>:<head sha>` (and `GATE_HEAD_SHA`); `over_cap` accepts it only if both match
-  (a 40-hex sha equal to the PR head, not the CI merge commit), prints a loud `PROOF:` line and re-runs nothing (the full run already checked every mutant).
-  Otherwise it is RED and prints the command: `gh workflow run gate --ref <this PR's branch> -f tier=full` (or Actions > gate > Run workflow > branch = the
-  PR branch, tier = full), then re-run the PR job once the four `mutation` jobs are green. A new push changes the head sha, so the proof lapses with it.
+  **The only way past the cap is evidence, never a label or a flag: a green full sharded run of the PR head or of an ANCESTOR of it (the proof base).**
+  The pr job's step "Look for a green full mutation run of this PR head or of an ancestor of it" lists the `workflow_dispatch` runs of `ci.yml` on the PR
+  branch (newest first), keeps those whose commit is the head or satisfies `git merge-base --is-ancestor <run commit> <head>`, requires the four jobs named
+  exactly `mutation (1)`..`mutation (4)` to be green (a dispatch with `mutation` off has them skipped and never counts; schedule runs are not looked at),
+  and exports `GATE_MUTATION_PROOF=<run id>:<commit>` and `GATE_HEAD_SHA=<PR head>`; an API error is "no proof", never a failed step. The branch name is
+  passed as a `gh api -f` field (percent-encoded by gh), never pasted into the URL. `plan_pr` in
+  `scripts/mutation_check.py` then applies it: a proof of the head itself re-runs nothing (`PROOF: ... this very commit`); a proof of an ancestor A moves the
+  selection's diff base from `origin/<base>` to A, **but only when the plain selection against `origin/<base>` is over the cap** (a proof never shrinks a
+  selection that fits: with the proof the PR tier would silently run fewer mutants than it normally does; the message then says the proof was not needed) (`git diff A...HEAD`: the PR's own changes since A plus anything the merged base branch brought) and ALSO
+  selects every mutant whose definition (name + hash) is not in the mutant list of A's own `scripts/mutation_check.py` (read with `git show` and
+  `ast.literal_eval`, never executed): a mutant added or edited after A has a committed map entry (so the missing-entry rule does not fire) but was never run
+  by A's run. A's list is trusted only if its `scripts/mutation_check.py` decodes as UTF-8, parses, binds `MUTANTS` and `FRONTEND_MUTANTS` once at the top level to
+  literals, and nothing in it can change them afterwards (no method call such as `.append`/`.clear`, item store or delete, `+=`, second assignment, `del`, rebinding by
+  import/def/class/loop/argument, no `globals()`/`exec`/`eval`/`setattr`): otherwise the proof is ignored, since a list that shrinks at import time would make
+  the literal a superset of what the run really checked. The message names the run, A, the head and how many mutants it re-runs; if even the diff since A is above the cap it is RED as before and the
+  message names the command that refreshes the proof (`gh workflow run gate --ref <branch> -f tier=full`, or Actions > gate > Run workflow, tier full,
+  mutation on). Everything unverifiable falls back to the ordinary selection and cap, loudly: a malformed proof, a missing `GATE_HEAD_SHA`, a `GATE_HEAD_SHA` that is neither `git rev-parse HEAD` nor an ancestor of it (CI's merge commit has the PR head as a
+  parent; any other well-formed sha proves nothing about this tree), an A that is not
+  an ancestor (force-push, another branch), a mutant list at A that cannot be read. Measured by simulation on this branch (A = d216eeb, head = d75b9a7,
+  the committed map at the head): the whole PR selects all 291 mutants, the changes since A select 124 (4 mutants were new or changed since A, all among
+  them), under the cap of 150.
+  **`--preflight`** (`mutation_check.py --preflight --changed-since BASE`, the pr tier's second stage "mutation selection preflight", before any test) computes
+  the same selection with the same proof and cap in seconds and runs no mutant: a capped PR is RED there, not after the tier's ~25 minutes of tests. The final
+  mutation stage stays; it is the one that runs the mutants.
+  Residual risk of the carry-over, stated plainly: (1) the proof is only as good as the code that produced it: a run of A executes A's own `mutation_check.py`
+  and `ci.yml` (so a PR that breaks them is "proven" by itself; the same holds for an exact-commit proof; the diff since A lists those files and re-runs their
+  mutants, but a reviewer must still read them); (2) the argument that unchanged mutants stay killed is the same witness argument as for any PR (a non-target
+  source change that stops a witness from killing is seen by the next full run, not by the PR); (3) the newest valid run is taken, not the nearest ancestor;
+  (4) the lookup trusts GitHub's run and job conclusions and the run's commit; (5) a change of the shard count between A and the head is not detected (the
+  four-job name check would still pass); (6) the lookup only sees dispatches on the PR's own branch name, so a proof run from a fork or a renamed branch is not found.
   No usable map (missing, unreadable, other schema) falls back to the old rule: any change under `tests/` selects every mutant. Nothing
   selected = a quick pass that says so. A missing or unknown base ref is RED, never "nothing changed".
 * **The killer map (`scripts/mutant_killers.json`, `mutation_check.py --build-killer-map`).** Per mutant: its definition hash, the WITNESS test

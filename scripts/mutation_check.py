@@ -531,17 +531,40 @@ MUTANTS = [
     ("T37 a doc, CI or data file selects none of the mutants whose witness reads it (a weakened reader slips through)", "scripts/mutation_check.py",
      'or any(k in readers ' 'or any(k.startswith(d + "/") for d in dirs) for k in killers)', "or False", 1),
     ("T38 the PR-tier selection cap is ignored (a huge selection becomes a silent timeout)", "scripts/mutation_check.py",
-     "if limit and len(" "backend) + len(frontend) > limit:", "if False and len(backend) + len(frontend) > limit:", 1),
+     "if limit and n " "> limit:", "if False and n > limit:", 1),
     ("T39 a change at the top of tests/ (no_skip_plugin, harness, conftest) selects only some mutants", "scripts/mutation_check.py",
      'return f.startswith("tests/") and f.count("/") ' '== 1 and not _is_pytest_test(f)', "return False", 1),
     ("T40 a changed test module selects none of the tests that import it (a weakened helper slips through its importers)", "scripts/mutation_check.py",
      "if hit or killers & changed or killers" " & closure:", "if hit or killers & changed:", 1),
-    ("T41 a proof for another commit is accepted above the PR-tier cap (a green run of different code passes this one)", "scripts/mutation_check.py",
-     "if mt and mt.group(2) " "== head:", "if mt:", 1),
+    ("T41 the over-cap RED no longer names the command that produces or refreshes the proof", "scripts/mutation_check.py",
+     "gh workflow run gate --ref <this PR's branch> -f tier=" "full\\n", "gh workflow run: (no command)\\n", 1),
     ("T42 a dependency-only change selects no mutant at all (a dependency that breaks a witness slips through)", "scripts/mutation_check.py",
      "smoke = _smoke_set(mutants, " "ents) if", "smoke = set() if", 1),
     ("T43 the dependency smoke subset is every pytest mutant again (the PR tier is red for a requirements bump)", "scripts/mutation_check.py",
      "elif key not " "in seen:", "else:", 1),
+    ("T44 a proof commit that is not an ancestor of the PR head is still used as the diff base (rewritten history proves nothing)", "scripts/mutation_check.py",
+     "if not is_anc" "estor(sha, head):", "if False:", 1),
+    ("T45 a mutant added or changed after the proof commit is not re-run (the proof run never checked it)", "scripts/mutation_check.py",
+     "if m[0] not in have and mut" "ant_hash(m) not in known]", "if False]", 1),
+    ("T46 a proof of an ancestor does not move the diff base (the whole PR diff is selected again)", "scripts/mutation_check.py",
+     "base, since = s" "ha, f\"even relative", "base, since = b" "ase, f\"even relative", 1),
+    ("T47 a proof of ANOTHER commit is taken for this very commit (nothing is re-run)", "scripts/mutation_check.py",
+     "if sha == he" "ad:", "if True:", 1),
+    ("T48 the preflight goes on to run the mutants it only meant to count", "scripts/mutation_check.py",
+     'nothing was run")\n            return 0\n', 'nothing was run")\n', 1),
+    ("T49 a malformed proof (trailing junk) is accepted", "scripts/mutation_check.py",
+     "PROOF_RE.full" "match(os.environ", "PROOF_RE.ma" "tch(os.environ", 1),
+    ("T50 a proof for a GATE_HEAD_SHA that is not this checkout is accepted (a well-formed sha of another tree proves nothing)", "scripts/mutation_check.py",
+     "elif proof and not head_in_" "checkout(head):", "elif False:", 1),
+    ("T51 a proof shrinks a selection that already fits under the cap", "scripts/mutation_check.py",
+     "over = bool(limit) and len(" "backend)", "over = True or len(backend)", 1),
+    ("T52 a proof commit that mutates its own list after the literal (append, clear, ...) is trusted", "scripts/mutation_check.py",
+     "elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in _LIST_" "NAMES:\n            return None",
+     "elif False:\n            return None", 1),
+    ("T53 a proof commit whose file cannot be decoded raises instead of being no proof", "scripts/mutation_check.py",
+     "except Exception:                                  # noqa: B" "LE001", "except SyntaxError:                                # noqa: BLE001", 1),
+    ("T54 the PR branch is pasted into the lookup URL (a name with & or # changes the query)", ".github/workflows/ci.yml",
+     'ci.yml/runs" -f branch="$BRANCH" -f event=workflow_dispatch -f per_page=50', 'ci.yml/runs?branch=$BRANCH&event=workflow_dispatch&per_page=50"', 1),
 ]
 
 # Frontend mutants: killed by `vitest run` (frontend/src/**/*.test.{ts,tsx}), not by pytest.
@@ -622,32 +645,179 @@ def in_shard(name: str, i: int, n: int) -> bool:
 
 
 PROOF_RE = re.compile(r"(\d+):([0-9a-f]{40})")
+SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
-def over_cap(selected: list, limit: int, changed: set[str], base: str) -> int:
-    """The selection is larger than the PR tier can run. FAIL CLOSED: green only when the SAME commit (env GATE_HEAD_SHA: the PR head, not the
-    CI merge commit) already has a green full sharded `mutation` run (env GATE_MUTATION_PROOF = "<run id>:<sha>", set by ci.yml's lookup step); every
-    other case is RED and says which command or click produces the proof."""
+def current_proof() -> tuple[str, str] | None:
+    """(run id, commit sha) from env GATE_MUTATION_PROOF = "<run id>:<40 lowercase hex>", or None. Set by ci.yml's lookup step for a green full sharded
+    run of the PR head or of one of its ANCESTORS; anything malformed is no proof."""
+    mt = PROOF_RE.fullmatch(os.environ.get("GATE_MUTATION_PROOF", ""))
+    return (mt.group(1), mt.group(2)) if mt else None
+
+
+def _git_ok(root: Path, *args: str, text: bool = True) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=text, **({"errors": "replace"} if text else {}))
+
+
+def is_ancestor(a: str, b: str, root: Path = ROOT) -> bool:
+    """git merge-base --is-ancestor a b. Unknown commits, a missing git, any error: False (no proof), never an exception."""
+    try:
+        return _git_ok(root, "merge-base", "--is-ancestor", a, b).returncode == 0
+    except OSError:
+        return False
+
+
+def head_in_checkout(head: str, root: Path = ROOT) -> bool:
+    """GATE_HEAD_SHA must be what is checked out: HEAD itself, or an ancestor of it (CI checks out the PR's merge commit, whose second parent is the PR
+    head). A proof tied to any other 40-hex string, however well formed, proves nothing about this tree."""
+    if not SHA_RE.fullmatch(head or ""):
+        return False
+    try:
+        cur = _git_ok(root, "rev-parse", "HEAD")
+    except OSError:
+        return False
+    return (cur.returncode == 0 and cur.stdout.strip() == head) or is_ancestor(head, "HEAD", root)
+
+
+_LIST_NAMES = ("MUTANTS", "FRONTEND_MUTANTS")
+_DYNAMIC_NAMES = {"globals", "locals", "vars", "exec", "eval", "setattr", "delattr", "compile"}
+
+
+def _list_literals_only(tree) -> dict | None:
+    """{name: literal} when the module binds MUTANTS and FRONTEND_MUTANTS exactly once, at the top level, to a literal, and NOTHING else can change them:
+    no method call or attribute on either name (append, clear, ...), no item store or delete, no augmented or second assignment, no del, no rebinding by
+    import, def, class, loop, with, except or argument, no globals()/exec/eval/setattr. Reading them (iteration, +, len, defaults) is fine."""
+    import ast
+    top = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in _LIST_NAMES:
+            if node.targets[0].id in top:
+                return None
+            top[node.targets[0].id] = node
+    if set(top) != set(_LIST_NAMES):
+        return None
+    stores = {n: 0 for n in _LIST_NAMES}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            if node.id in _DYNAMIC_NAMES:
+                return None
+            if node.id in _LIST_NAMES and isinstance(node.ctx, (ast.Store, ast.Del)):
+                stores[node.id] += 1
+        elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) and node.value.id in _LIST_NAMES:
+            return None
+        elif isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id in _LIST_NAMES and not isinstance(node.ctx, ast.Load):
+            return None
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in _LIST_NAMES:
+            return None
+        elif isinstance(node, ast.alias) and (node.asname or node.name) in _LIST_NAMES:
+            return None
+        elif isinstance(node, ast.arg) and node.arg in _LIST_NAMES:
+            return None
+        elif isinstance(node, ast.ExceptHandler) and node.name in _LIST_NAMES:
+            return None
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) and node.target.id in _LIST_NAMES:
+            return None
+    if any(c != 1 for c in stores.values()):
+        return None
+    return {n: ast.literal_eval(top[n].value) for n in _LIST_NAMES}
+
+
+def proof_known_hashes(sha: str, root: Path = ROOT) -> set[str] | None:
+    """The definition hashes of the mutants the proof commit's own run checked: MUTANTS and FRONTEND_MUTANTS read from scripts/mutation_check.py AT that
+    commit with ast.literal_eval (never executed), and only when nothing in that file can change them after the literal (`_list_literals_only`). None on
+    ANY failure to read or parse (not UTF-8, syntax error, not literal, anything unexpected): then there is no usable proof."""
+    import ast
+    try:
+        p = _git_ok(root, "show", f"{sha}:scripts/mutation_check.py", text=False)
+        if p.returncode != 0:
+            return None
+        found = _list_literals_only(ast.parse(p.stdout.decode("utf-8")))
+        if found is None:
+            return None
+        return {mutant_hash(tuple(m)) for m in found["MUTANTS"] + found["FRONTEND_MUTANTS"]}
+    except Exception:                                  # noqa: BLE001  a proof that cannot be read in full is no proof, whatever the reason
+        return None
+
+
+def over_cap(selected: list, limit: int, changed: set[str], base: str, since_proof: str = "") -> int:
+    """The selection is larger than the PR tier can run. FAIL CLOSED: RED, saying what triggered it and which command refreshes the proof. (The proof
+    itself, an exact or ancestor full run, is applied BEFORE this, in `plan_pr`: what is left here is a selection that no proof reduced enough.)"""
     n = len(selected)
-    proof, head = os.environ.get("GATE_MUTATION_PROOF", ""), os.environ.get("GATE_HEAD_SHA", "")
-    mt = PROOF_RE.fullmatch(proof)
-    if mt and mt.group(2) == head:
-        print(f"mutation check: {n} mutants selected, above the PR-tier cap ({n} > {limit}); PROOF: the full sharded mutation run {mt.group(1)} is green "
-              f"for this commit ({head[:12]}), which checks every mutant: nothing is re-run here")
-        return 0
     shared = sorted(f for f in changed if _is_everything(f) or _vitest_shared(f))
     why = [f"{len({m[1] for m in selected} & changed)} changed mutant target(s)",
            f"{sum(1 for f in changed if _is_pytest_test(f) or _is_vitest_test(f))} changed test file(s)"]
     if shared:
         why.append(f"shared test support changed: {shared[:5]}")
     why = "; ".join(why)
-    state = ("a proof was given but it is not a green full run for THIS commit" if proof else "no green full mutation run is known for this commit")
+    state = since_proof or ("no usable green full mutation run of this PR head or of an ancestor of it is known"
+                            if not os.environ.get("GATE_MUTATION_PROOF") else "the given proof is not a green full run of this head or of a checkable ancestor of it")
     print(f"mutation check FAILED: too many mutants selected for the PR tier ({n} > {limit}): run the nightly mutation workflow ({why}); {state}.\n"
-          f"  To clear it, run the full sharded check on THIS commit and re-run this job when its four `mutation` jobs are green:\n"
+          f"  To clear or REFRESH the proof, run the full sharded check on the current PR branch and re-run this job when its four `mutation` jobs are green:\n"
           f"    gh workflow run gate --ref <this PR's branch> -f tier=full\n"
-          f"  (or GitHub: Actions > gate > Run workflow > branch = this PR's branch, tier = full). The PR tier then finds that run for the PR head\n"
-          f"  commit and accepts it as proof (scripts/mutation_check.py `over_cap`; docs/TESTING_REALITY.md). There is no other way through.")
+          f"  (or GitHub: Actions > gate > Run workflow > branch = this PR's branch, tier = full, mutation = on). The PR tier then takes the newest green run\n"
+          f"  of this head or of an ancestor of it as the proof base and re-runs only what changed since (scripts/mutation_check.py `plan_pr`;\n"
+          f"  docs/TESTING_REALITY.md). There is no other way through.")
     return 1
+
+
+def plan_pr(base_ref: str, limit: int):
+    """The PR tier's selection, shared by the real stage and --preflight. -> (rc, backend, frontend, changed, base); rc is not None when the answer is
+    final (0: nothing to run / an exact proof; 1: over the cap, already printed). A PROOF (env GATE_MUTATION_PROOF and GATE_HEAD_SHA) of the PR head
+    itself re-runs nothing; a proof of an ANCESTOR A of the head (git merge-base --is-ancestor, mutant list at A readable) moves the diff base to A
+    and also selects every mutant that A's own run did not check (definition new or changed since A). Anything else about the proof: ignored, loudly."""
+    proof, head = current_proof(), os.environ.get("GATE_HEAD_SHA", "")
+    changed = changed_files(resolve_base(base_ref))
+    km = load_killer_map()
+    if km is None:
+        print("mutation check: no usable killer map: any change under tests/ selects every mutant")
+    backend, frontend = select_changed(MUTANTS, changed, km), select_changed(FRONTEND_MUTANTS, changed, km)
+    base, known, note, since = base_ref, None, None, ""
+    over = bool(limit) and len(backend) + len(frontend) > limit
+    if os.environ.get("GATE_MUTATION_PROOF") and not proof:
+        print("mutation check: GATE_MUTATION_PROOF is malformed (want <run id>:<40 hex sha>): the proof is ignored")
+    elif proof and not SHA_RE.fullmatch(head):
+        print("mutation check: a proof was given but GATE_HEAD_SHA (the PR head, 40 hex) is not: the proof is ignored")
+    elif proof and not head_in_checkout(head):
+        print(f"mutation check: GATE_HEAD_SHA {head[:12]} is not this checkout (not HEAD and not an ancestor of it): the proof is ignored")
+    elif proof:
+        run, sha = proof
+        if sha == head:
+            print(f"mutation check: PROOF: the full sharded mutation run {run} is green for this very commit ({head[:12]}), which checks every mutant: "
+                  f"nothing is re-run here" + ("" if over else f" (not needed: the plain selection of {len(backend) + len(frontend)} is within the cap"
+                                                f"{f' of {limit}' if limit else ''})"))
+            return 0, [], [], set(), base
+        if not over:
+            print(f"mutation check: a proof of the ancestor {sha[:12]} (run {run}) is not needed: the plain selection of {len(backend) + len(frontend)} mutants is "
+                  f"within the cap{f' of {limit}' if limit else ''}, and a proof never shrinks a selection that fits")
+        elif not is_ancestor(sha, head):
+            print(f"mutation check: the proof run {run} is for {sha[:12]}, which is not an ancestor of this PR head {head[:12]} (rewritten history, another branch): "
+                  f"the proof is ignored")
+        else:
+            known = proof_known_hashes(sha)
+            if known is None:
+                print(f"mutation check: cannot read the mutant list at the proof commit {sha[:12]}: the proof is ignored")
+            else:
+                base, since = sha, f"even relative to the proof commit {sha[:12]} (full run {run}): the changes since the proof commit select too much"
+                note = (run, sha, head)
+                changed = changed_files(base)
+                backend, frontend = select_changed(MUTANTS, changed, km), select_changed(FRONTEND_MUTANTS, changed, km)
+    unproven = 0
+    if known is not None:
+        have = {m[0] for m in backend + frontend}
+        for lst, sel in ((MUTANTS, backend), (FRONTEND_MUTANTS, frontend)):
+            extra = [m for m in lst if m[0] not in have and mutant_hash(m) not in known]
+            unproven += len(extra)
+            sel[:] = [m for m in lst if m[0] in have or m in extra]
+    n = len(backend) + len(frontend)
+    if note:
+        print(f"mutation check: PROOF BASE: the full sharded mutation run {note[0]} is green for {note[1][:12]}, an ancestor of this PR head {note[2][:12]}; "
+              f"re-running the {n} mutants affected by the changes since it ({unproven} not in the proof)")
+    if not backend and not frontend:
+        print(f"mutation check: no mutant targets changed since {base} ({len(changed)} file(s) changed): nothing to run")
+        return 0, backend, frontend, changed, base
+    if limit and n > limit:
+        return over_cap(backend + frontend, limit, changed, base, since), backend, frontend, changed, base
+    return None, backend, frontend, changed, base
 
 
 def parse_shard(text: str) -> tuple[int, int]:
@@ -1282,6 +1452,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--rebuild-all", action="store_true", help="with --build-killer-map: attribute every mutant, not only the stale ones")
     ap.add_argument("--shard", metavar="i/N", help="run only the mutants whose name hashes into shard i of N (1-based; sha256 of the name): the "
                     "full check is split across CI jobs; every mutant is in exactly one shard")
+    ap.add_argument("--preflight", action="store_true", help="with --changed-since: only compute the selection and apply the cap and the proof (seconds, "
+                    "runs no mutant): the same RED as the real stage, at the START of the PR tier")
     ap.add_argument("--max-selected", type=int, default=None, help="with --changed-since: RED (not a silent timeout) when more than this many "
                     "mutants are selected (env GATE_MUTATION_MAX; 0 or unset = no limit)")
     ap.add_argument("--log", metavar="FILE", help="append each finished backend mutant's verdict to FILE and skip mutants already in it (resumable)")
@@ -1303,23 +1475,21 @@ def main(argv: list[str] | None = None) -> int:
         si, sn = parse_shard(a.shard)
         backend, frontend = [m for m in backend if in_shard(m[0], si, sn)], [m for m in frontend if in_shard(m[0], si, sn)]
         print(f"mutation check: shard {si}/{sn}: {len(backend) + len(frontend)} of {len(MUTANTS) + len(FRONTEND_MUTANTS)} mutants")
+    if a.preflight and not a.changed_since:
+        raise SystemExit("mutation check: --preflight needs --changed-since REF")
     if a.changed_since:
-        base = resolve_base(a.changed_since)
-        changed = changed_files(base)
-        km = load_killer_map()
-        if km is None:
-            print("mutation check: no usable killer map: any change under tests/ selects every mutant")
-        backend, frontend = select_changed(MUTANTS, changed, km), select_changed(FRONTEND_MUTANTS, changed, km)
-        if not backend and not frontend:
-            print(f"mutation check: no mutant targets changed since {base} ({len(changed)} file(s) changed): nothing to run")
-            return 0
         limit = a.max_selected if a.max_selected is not None else int(os.environ.get("GATE_MUTATION_MAX") or 0)
-        if limit and len(backend) + len(frontend) > limit:
-            return over_cap(backend + frontend, limit, changed, base)
+        rc, backend, frontend, changed, base = plan_pr(a.changed_since, limit)
+        if rc is not None:
+            return rc
         tests = sorted(f for f in changed if f.startswith("tests/") or _is_vitest_test(f) or _is_everything(f) or _vitest_shared(f))
         print(f"mutation check: {len(backend) + len(frontend)} of {len(MUTANTS) + len(FRONTEND_MUTANTS)} mutants selected by the changes "
               f"since {base} (targets: {sorted({m[1] for m in backend + frontend} & changed)}; tests changed: {tests[:10]}"
               f"{' ...' if len(tests) > 10 else ''})")
+        if a.preflight:
+            print(f"mutation selection preflight: {len(backend) + len(frontend)} mutants would run of {len(MUTANTS) + len(FRONTEND_MUTANTS)}"
+                  f"{f' (cap {limit})' if limit else ''}: within the cap, nothing was run")
+            return 0
     survivors, stale = [], []
     run_backend(backend, survivors, stale)
     run_frontend(frontend, survivors, stale)
