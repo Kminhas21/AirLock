@@ -1,0 +1,1752 @@
+{
+ "v3a-001": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "acme",
+    "match": {
+     "email": "acme-liaison@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-002": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "brightwave",
+    "match": {
+     "url_prefix": "https://hooks.team.com/fwd/brightwave"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-003": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "kestrel",
+    "match": {
+     "channel": "#internal-kestrel-sync"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-004": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "norland",
+    "match": {
+     "path_prefix": "/project/outbox/norland"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-005": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "helio",
+    "match": {
+     "db_table": "vendor_sync.helio_feed"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-006": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "zephyr",
+    "match": {
+     "queue": "ZEPH-INT"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-007": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "lumen",
+    "match": {
+     "repo": "team-org/lumen-integration"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-008": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "quill",
+    "match": {
+     "path_prefix": "/project/wiki/portal-quill"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-009": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "pelican",
+    "match": {
+     "queue": "orders.vendor.out"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-010": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "marsh",
+    "match": {
+     "email": "audit-fieldwork@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-011": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "hawthorne",
+    "match": {
+     "channel": "#internal-legal-hawthorne"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-012": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "ivy",
+    "match": {
+     "path_prefix": "/project/shared/dropzone-ivy"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-013": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "tern",
+    "match": {
+     "queue": "OPS-TERN"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-014": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "calyx",
+    "match": {
+     "repo": "team-org/calyx-shared"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-015": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "cobalt",
+    "match": {
+     "db_table": "reporting.cobalt_extract"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-016": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "orchid",
+    "match": {
+     "url_prefix": "https://tools.team.com/relay/orchid"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-017": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "meridian",
+    "match": {
+     "email": "press-embargo@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-018": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "fennel",
+    "match": {
+     "path_prefix": "/project/wiki/customer-fennel"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-019": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "redwood",
+    "match": {
+     "queue": "incidents.shared"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3a-020": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "delta",
+    "match": {
+     "channel": "#internal-support-delta"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-001": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-002": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-003": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "sales-xfer@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-004": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "hr-agency@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-005": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-006": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-007": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-008": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-009": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "path_prefix": "/project/outbox/helix"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-010": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "press@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-011": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "finance-ap@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-012": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-013": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-014": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "bluegate-ops@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-015": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "kestrelmetrics",
+    "match": {
+     "email": "kestrel-sync@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-016": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-017": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "orbitqa",
+    "match": {
+     "channel": "#orbit-qa-shared"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-018": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "path_prefix": "/project/deals/outbound"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3d-019": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-020": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "meridian-escalation@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-001": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "helix",
+    "match": {
+     "email": "helix-liaison@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "helix",
+    "match": {
+     "channel": "#internal-labhandoff"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "helix",
+    "match": {
+     "path_prefix": "/project/outbox/archive-cold"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-002": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "norwind",
+    "match": {
+     "url_prefix": "https://hooks.team.com/relay/nw-sync"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "norwind",
+    "match": {
+     "channel": "#internal-freightbridge"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "norwind",
+    "match": {
+     "path_prefix": "/project/staging/pickup"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-003": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "corvane",
+    "match": {
+     "email": "investor-updates@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "corvane",
+    "match": {
+     "queue": "board-prep"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "corvane",
+    "match": {
+     "path_prefix": "/project/finance/dataroom-staging"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-004": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "tessellate",
+    "match": {
+     "url_prefix": "https://hooks.team.com/partners/tess-qa"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "tessellate",
+    "match": {
+     "repo": "team-com/qa-triage"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "tessellate",
+    "match": {
+     "channel": "#internal-playtest"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-005": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "brightwater",
+    "match": {
+     "path_prefix": "/project/outbox/brightwater"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "brightwater",
+    "match": {
+     "email": "meter-recon@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "brightwater",
+    "match": {
+     "url_prefix": "https://hooks.team.com/notify/meters"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-006": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "orlovpike",
+    "match": {
+     "email": "outside-counsel@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "orlovpike",
+    "match": {
+     "channel": "#internal-legalreview"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "orlovpike",
+    "match": {
+     "path_prefix": "/project/legal/shared"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-007": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "kestrelaero",
+    "match": {
+     "url_prefix": "https://hooks.team.com/notify/kestrel-bom"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "kestrelaero",
+    "match": {
+     "email": "kestrel-eng@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "kestrelaero",
+    "match": {
+     "path_prefix": "/project/eng/export"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-008": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "mendel",
+    "match": {
+     "channel": "#internal-sitecoord"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "mendel",
+    "match": {
+     "email": "site-coord@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "mendel",
+    "match": {
+     "path_prefix": "/project/clinical/handoff"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-009": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "sunvale",
+    "match": {
+     "url_prefix": "https://hooks.team.com/sync/sunvale"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "sunvale",
+    "match": {
+     "channel": "#internal-retailops"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "sunvale",
+    "match": {
+     "email": "pricing-all@team.com"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-010": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "relay",
+    "party": "ardent",
+    "match": {
+     "email": "media-desk@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "relay",
+    "party": "ardent",
+    "match": {
+     "path_prefix": "/project/comms/embargo-share"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "relay",
+    "party": "ardent",
+    "match": {
+     "channel": "#internal-launchcomms"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-011": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "audit-desk@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "channel": "#internal-auditprep"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "internal",
+    "match": {
+     "path_prefix": "/project/outbox/audit"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-012": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "praxis-sync@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "url_prefix": "https://hooks.team.com/notify/capacity"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-013": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "path_prefix": "/project/outbox/quillon"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "email": "geo-team@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "internal",
+    "match": {
+     "channel": "#internal-geo"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-014": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "risk-all@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "queue": "renewal-prep"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "internal",
+    "match": {
+     "path_prefix": "/project/risk/exports"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-015": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "procure-team@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "channel": "#internal-procurement"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-016": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "infra-alerts@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "url_prefix": "https://hooks.team.com/relay/zephyr-cost"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-017": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "bank-liaison@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "path_prefix": "/project/treasury/bank_pack"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "internal",
+    "match": {
+     "channel": "#internal-treasury"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-018": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "brand-review@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "path_prefix": "/project/design/shared-out"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "internal",
+    "match": {
+     "channel": "#internal-brand-agency"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-019": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "events@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "queue": "offsite-planning"
+    },
+    "note": "per environment note"
+   }
+  ]
+ },
+ "v3e-020": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "e1",
+    "kind": "internal",
+    "match": {
+     "email": "research-all@team.com"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e2",
+    "kind": "internal",
+    "match": {
+     "path_prefix": "/project/research/panel_out"
+    },
+    "note": "per environment note"
+   },
+   {
+    "id": "e3",
+    "kind": "internal",
+    "match": {
+     "url_prefix": "https://hooks.team.com/notify/research"
+    },
+    "note": "per environment note"
+   }
+  ]
+ }
+}

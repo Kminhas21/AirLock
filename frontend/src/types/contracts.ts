@@ -55,6 +55,8 @@ export interface DriftUpdateEvent {
   };
   mahalanobis_distance: number;
   baseline_breached: boolean;
+  /** The detector's active breach threshold; absent in recorded replays (the UI then uses DRIFT_THRESHOLD). */
+  threshold?: number;
   timestamp: string;
 }
 
@@ -69,7 +71,21 @@ export interface AlignmentAlertEvent {
   threshold: number;
 }
 
-/** Sent when the scenario has finished (all steps processed). */
+/** Canonical terminal event. The server ALWAYS sends exactly one of these (or `error`) per session. */
+export interface SessionCompleteEvent {
+  event: "session_complete";
+  reason: "finished" | "max_iterations" | "llm_error" | "gate_timeout";
+  message: string;
+  timestamp: string;
+}
+
+/** Sent when the session cannot proceed (bad request, unknown model, auth). */
+export interface ErrorEvent {
+  event: "error";
+  message: string;
+}
+
+/** Legacy terminal event emitted only by frontend/mockServer.cjs. Treated as an alias of session_complete. */
 export interface TaskCompleteEvent {
   event: "task_complete";
   timestamp: string;
@@ -82,6 +98,8 @@ export type ServerEvent =
   | ToolResolvedEvent
   | DriftUpdateEvent
   | AlignmentAlertEvent
+  | SessionCompleteEvent
+  | ErrorEvent
   | TaskCompleteEvent;
 
 // ---------- Client → Server Messages ----------
@@ -98,6 +116,7 @@ export interface StartTaskMessage {
   event: "start_task";
   task: string;
   scenario: "aligned" | "adversarial";
+  model?: string;
   mode?: "live" | "replay";
 }
 

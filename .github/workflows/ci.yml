@@ -1,0 +1,314 @@
+# The verification gate in CI, one tier per trigger (docs/TESTING_REALITY.md "CI tiers", DECISIONS.md D30):
+#   push          GATE_TIER=push    fast backend tests (parallel), static checks, frontend checks          target < 8 min
+#   pull_request  GATE_TIER=pr      + slow backend files, reality stages + live-coverage proof, browser stages
+#                                     for the shipped default (action_sim), mutants of the files the PR changed  target ~15 min
+#   nightly       GATE_TIER=full    + Docker, user journeys. The WHOLE mutation check is its own job below (`mutation`: 4 shards, resumable),
+#                                   not a stage of this one: it takes hours; this job only re-proves the mutant targets (GATE_MUTATION_FULL=external)
+#   weekly        GATE_TIER=weekly  + research detectors (D7-D9c) parity, and the real Claude Code client only if ANTHROPIC_API_KEY is set
+#                                   (the `mutation` job runs on this schedule too)
+# Timings in the comments below were measured on GitHub (runs 44400641698, 44414893564); the wiring is tested in tests/test_gate_tiers.py.
+# The verdict is scripts/verify.sh's exit code; the per-stage event log and the junit XML are uploaded as artifacts.
+name: gate
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "23 2 * * 1-6"   # nightly: full (Mon-Sat)
+    - cron: "23 2 * * 0"     # weekly: weekly (Sunday; includes everything full runs)
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: GATE_TIER
+        type: choice
+        options: [push, pr, full, weekly]
+        default: pr
+      mutation:
+        description: also run the 4 sharded mutation jobs (full / weekly tiers; about 160 runner-minutes; the only way to lift the PR cap)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read   # the pr tier looks up the full `mutation` run of the PR head commit (lifts the selection cap only with a green one)
+
+concurrency:
+  # a newer run on the same ref (and trigger) cancels the superseded one
+  group: gate-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    # measured on GitHub (runs 44400641698, 44414893564, 44235118971): push 3.1 min; full-tier gate job 25-29 min (the mutation check is its own job);
+    # pr 47 min with its mutants serial, about 35 at the cap of 150 mutants run 4 at a time; weekly adds the research parity stages (about 15 more, estimated); 60 for all but push
+    timeout-minutes: ${{ github.event_name == 'push' && 15 || 60 }}
+    env:
+      EVENT: ${{ github.event_name }}
+      SCHEDULE: ${{ github.event.schedule }}
+      INPUT_TIER: ${{ inputs.tier }}
+      HAS_CLAUDE_KEY: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+      OMP_NUM_THREADS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the pr tier's changed-files mutants diff against the base branch
+
+      - name: Pick the tier
+        id: tier
+        run: |
+          case "$EVENT" in
+            push) t=push ;;
+            pull_request) t=pr ;;
+            schedule) if [ "$SCHEDULE" = "23 2 * * 0" ]; then t=weekly; else t=full; fi ;;
+            workflow_dispatch) t="$INPUT_TIER" ;;
+            *) echo "unknown event $EVENT"; exit 1 ;;
+          esac
+          echo "tier=$t" >> "$GITHUB_OUTPUT"
+          echo "GATE_TIER=$t" >> "$GITHUB_ENV"
+          echo "GATE_TIER=$t"
+
+      - uses: actions/setup-python@v5
+        id: setup-python
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            requirements-proxy.txt
+            server/requirements.txt
+            seismograph/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            tests/realdeps/package-lock.json
+
+      - name: Python dependencies (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-dev.txt
+
+      - name: Cache the MiniLM model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-MiniLM-L6-v2-v1
+
+      - name: Fetch the MiniLM model (once; every later step runs with HF_HUB_OFFLINE=1)
+        run: |
+          python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+          echo "HF_HUB_OFFLINE=1" >> "$GITHUB_ENV"
+
+      - name: Frontend dependencies
+        run: cd frontend && npm ci --no-audit --no-fund
+
+      - name: Cache Playwright browsers
+        if: steps.tier.outputs.tier != 'push'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Chromium for the browser stages
+        if: steps.tier.outputs.tier != 'push'
+        run: |
+          cd frontend
+          npx playwright install --with-deps chromium
+          echo "CHROMIUM_PATH=$(node -e "console.log(require('@playwright/test').chromium.executablePath())")" >> "$GITHUB_ENV"
+
+      - name: Cache the real MCP servers (.realdeps)
+        if: steps.tier.outputs.tier != 'push'
+        uses: actions/cache@v4
+        with:
+          path: .realdeps
+          key: realdeps-${{ runner.os }}-py${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('tests/realdeps/package-lock.json', 'scripts/realdeps_setup.sh') }}
+
+      - name: Real MCP servers
+        if: steps.tier.outputs.tier != 'push'
+        run: bash scripts/realdeps_setup.sh
+
+      - name: Allow the sandbox tests' user namespaces (every tier; they fail, not skip, without them)
+        # Ubuntu 24.04 blocks unprivileged user namespaces by default; Landlock + netns sandbox tests run from the push tier on and
+        # SENTINEL_SANDBOX_REQUIRED=1 (below) turns a missing sandbox into a failure instead of a silent skip.
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Claude Code CLI (weekly, only with a key)
+        if: steps.tier.outputs.tier == 'weekly' && env.HAS_CLAUDE_KEY == 'true'
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Look for a green full mutation run of this PR head or of an ancestor of it (the proof base; the only way past the pr tier's selection cap)
+        if: steps.tier.outputs.tier == 'pr' && github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          # scripts/mutation_check.py `plan_pr`: a green full sharded run (all four `mutation (N)` jobs) of THIS head re-runs nothing; one of an ANCESTOR A
+          # of the head makes the changes since A the PR tier's selection (plus every mutant A's run did not check). Evidence, not an event or a label.
+          # Newest dispatch first; an API error is "no proof" (the cap then stays RED), never a step failure. Dispatch one with
+          #   gh workflow run gate --ref <branch> -f tier=full
+          echo "GATE_HEAD_SHA=$HEAD_SHA" >> "$GITHUB_ENV"
+          # the branch goes in as a -f FIELD (with -X GET: a query parameter that gh percent-encodes), never pasted into the URL: a branch name may hold & # ? % or a space
+          runs=$(gh api -X GET "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs" -f branch="$BRANCH" -f event=workflow_dispatch -f per_page=50 \
+                   --jq '.workflow_runs[] | [.id, .head_sha] | @tsv' || true)
+          while read -r id sha; do
+            [ -n "$id" ] || continue
+            # the run's commit must be this head or one of its ancestors (a force-push that rewrote history, or another branch, fails here)
+            if [ "$sha" != "$HEAD_SHA" ] && ! git merge-base --is-ancestor "$sha" "$HEAD_SHA" 2>/dev/null; then continue; fi
+            # exactly the four shards by name, each green (a dispatch with mutation = false has them skipped and never counts)
+            ok=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/jobs?per_page=100" \
+                   --jq '[.jobs[] | select(.conclusion=="success" and (.name | test("^mutation \\([1-4]\\)$"))) | .name] | unique | length') || ok=0
+            if [ "$ok" = 4 ]; then
+              echo "GATE_MUTATION_PROOF=$id:$sha" >> "$GITHUB_ENV"
+              echo "full mutation run $id is green for $sha (the PR head is $HEAD_SHA)"
+              break
+            fi
+          done <<< "$runs"
+
+      - name: Gate
+        env:
+          GATE_EVENTS: ${{ runner.temp }}/gate/events.log
+          GATE_JUNIT_DIR: ${{ runner.temp }}/gate/junit
+          # changed-files mutants (pr tier) diff against the PR's base, otherwise against the default branch; a missing ref is RED
+          GATE_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || format('origin/{0}', github.event.repository.default_branch) }}
+          GATE_PYTEST_WORKERS: auto
+          # pr tier: the selected mutants run 4 at a time, and a selection above the cap is a loud RED (run the nightly workflow), never a timeout
+          GATE_MUTATION_JOBS: "4"
+          GATE_MUTATION_MAX: "150"
+          # nightly / weekly: the whole mutation check is the separate sharded job `mutation`
+          GATE_MUTATION_FULL: external
+          SENTINEL_SANDBOX_REQUIRED: "1"
+          # nightly and weekly: Docker (the runner's own daemon, no proxy variables) and the user journeys
+          RUN_DOCKER_TESTS: ${{ (steps.tier.outputs.tier == 'full' || steps.tier.outputs.tier == 'weekly') && '1' || '0' }}
+          RUN_JOURNEY_TESTS: ${{ (steps.tier.outputs.tier == 'full' || steps.tier.outputs.tier == 'weekly') && '1' || '0' }}
+          # weekly only, and only with a key: a real Claude Code client (real model calls). verify.sh moves the key out of the environment
+          # before any stage runs and hands it (as ANTHROPIC_API_KEY) to the claude stage alone; it is never printed or put in argv.
+          RUN_CLAUDE_TESTS: ${{ (steps.tier.outputs.tier == 'weekly' && env.HAS_CLAUDE_KEY == 'true') && '1' || '0' }}
+          SENTINEL_CLAUDE_API_KEY: ${{ steps.tier.outputs.tier == 'weekly' && secrets.ANTHROPIC_API_KEY || '' }}
+        run: |
+          mkdir -p "$GATE_JUNIT_DIR"
+          bash scripts/verify.sh
+
+      - name: Stage times
+        if: always()
+        run: cat "${{ runner.temp }}/gate/events.log" || true
+
+      - name: Upload the browser stages' traces and screenshots (one directory per stage)
+        if: failure() || cancelled()   # cancelled includes a job that hit its timeout
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-results-${{ steps.tier.outputs.tier }}-${{ github.run_id }}
+          path: |
+            frontend/e2e/.results/
+            frontend/journeys/.results/
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload the gate events and junit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-${{ steps.tier.outputs.tier }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/gate/
+          if-no-files-found: warn
+          retention-days: 14
+
+  # The WHOLE mutation check (every mutant, no killer map: the safety net behind the PR tier's selection). It is hours of serial pytest runs, so it is
+  # split into 4 shards by a stable hash of the mutant name (scripts/mutation_check.py --shard i/4), each shard runs 3 mutants at a time and appends every
+  # verdict to a log that is cached, so a rerun of a failed or timed-out shard resumes instead of starting over. Measured on GitHub: 30-47 min per shard job.
+  mutation:
+    # on the schedule only the weekly (Sunday) run pays for it: ~160 runner-minutes, not every night; by hand with tier full / weekly and mutation = true
+    if: (github.event_name == 'schedule' && github.event.schedule == '23 2 * * 0') || (github.event_name == 'workflow_dispatch' && inputs.mutation && (inputs.tier == 'full' || inputs.tier == 'weekly'))
+    runs-on: ubuntu-24.04
+    # measured (runs 44400641698 and 44414893564, two runs x 4 shards): slowest shard JOB 46.5 min (its mutation step 44.8), the others 30-41 min.
+    # 75 = 1.6x the slowest (a hung shard is cancelled sooner; the log is cached, so a rerun resumes). The shard sizes (69/67/75/76 mutants) are not what drives the time (the 75-mutant shard was the fastest; one shard
+    # swung 32 -> 45 min between runs), so the hash split stays; --jobs 3 per 4-core runner stays too.
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      OMP_NUM_THREADS: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      SENTINEL_SANDBOX_REQUIRED: "1"
+      GATE_MUTATION_JOBS: "3"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            requirements-proxy.txt
+            server/requirements.txt
+            seismograph/requirements.txt
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Python dependencies (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-dev.txt
+
+      - name: Cache the MiniLM model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-all-MiniLM-L6-v2-v1
+
+      - name: Fetch the MiniLM model (once; every later step runs with HF_HUB_OFFLINE=1)
+        run: |
+          python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+          echo "HF_HUB_OFFLINE=1" >> "$GITHUB_ENV"
+
+      - name: Frontend dependencies (the frontend mutants run vitest)
+        run: cd frontend && npm ci --no-audit --no-fund
+
+      - name: Allow the sandbox tests' user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Restore this shard's verdict log (a rerun of the same run resumes)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/mutation
+          key: mutation-log-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            mutation-log-${{ matrix.shard }}-${{ github.run_id }}-
+
+      - name: Mutation check, shard ${{ matrix.shard }} of 4
+        env:
+          GATE_MUTATION_LOG: ${{ runner.temp }}/mutation/verdicts-${{ matrix.shard }}.jsonl
+        run: |
+          mkdir -p "${{ runner.temp }}/mutation"
+          python scripts/mutation_check.py --shard ${{ matrix.shard }}/4 --jobs 3 --log "$GATE_MUTATION_LOG"
+
+      - name: Save this shard's verdict log
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/mutation
+          key: mutation-log-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Upload the verdicts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-verdicts-${{ matrix.shard }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/mutation/
+          if-no-files-found: warn
+          retention-days: 14

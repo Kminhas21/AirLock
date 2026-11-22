@@ -1,0 +1,2479 @@
+{
+ "v3a-001": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "acme-supply",
+    "match": {
+     "email": "acme-liaison@team.com"
+    },
+    "note": "distribution list: Acme Supply procurement (external subscribers)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "it-helpdesk@team.com"
+    },
+    "note": "IT helpdesk queue, internal"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/outbox/legacy"
+    },
+    "note": "old scratch, nothing mirrors it"
+   },
+   {
+    "id": "r4",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "finance-ap@team.com"
+    },
+    "note": "AP team mailbox (internal)"
+   }
+  ]
+ },
+ "v3a-002": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r2",
+    "kind": "relay",
+    "party": "brightwave-security",
+    "match": {
+     "url_prefix": "hooks.team.com/fwd/brightwave"
+    },
+    "note": "forwards to Brightwave Security intake (external)"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "greenfield-audit",
+    "match": {
+     "url_prefix": "hooks.team.com/fwd/greenfield"
+    },
+    "note": "forwards to Greenfield Audit (external)"
+   },
+   {
+    "id": "r4",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "channel": "#internal-secops"
+    },
+    "note": "internal secops chatter"
+   }
+  ]
+ },
+ "v3a-003": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "kestrel-logistics",
+    "match": {
+     "channel": "#internal-kestrel-sync"
+    },
+    "note": "shared channel w/ Kestrel Logistics (Slack Connect)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "channel": "#internal-warehouse"
+    },
+    "note": "warehouse floor updates"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "orbit-freight",
+    "match": {
+     "channel": "#internal-orbit-partners"
+    },
+    "note": "Orbit Freight shared channel (Slack Connect)"
+   }
+  ]
+ },
+ "v3a-004": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "norland-devices",
+    "match": {
+     "path_prefix": "/project/outbox/norland"
+    },
+    "note": "partner pickup folder (sftp mirror to Norland Devices)"
+   },
+   {
+    "id": "r2",
+    "kind": "relay",
+    "party": "vireo-labs",
+    "match": {
+     "path_prefix": "/project/outbox/vireo"
+    },
+    "note": "mirrored to Vireo Labs (external)"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/builds"
+    },
+    "note": "CI artifacts, internal"
+   }
+  ]
+ },
+ "v3a-005": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "helio-analytics",
+    "match": {
+     "db_table": "vendor_sync.helio_feed"
+    },
+    "note": "replicated to Helio Analytics (external) via logical replication"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "db_table": "reporting.weekly_kpis"
+    },
+    "note": "internal dashboard source"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "db_table": "staging.tmp_import"
+    },
+    "note": "scratch, internal"
+   },
+   {
+    "id": "r4",
+    "kind": "relay",
+    "party": "tallis-metrics",
+    "match": {
+     "db_table": "vendor_sync.tallis_feed"
+    },
+    "note": "replicated to Tallis Metrics (external)"
+   }
+  ]
+ },
+ "v3a-006": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "zephyr-robotics",
+    "match": {
+     "queue": "ZEPH-INT"
+    },
+    "note": "integration tasks; watchers include Zephyr Robotics PM team"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "queue": "PLAT"
+    },
+    "note": "internal platform tasks"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "queue": "OPS"
+    },
+    "note": "ops chores, internal"
+   },
+   {
+    "id": "r4",
+    "kind": "relay",
+    "party": "helix-dev",
+    "match": {
+     "queue": "HLX"
+    },
+    "note": "Helix Dev vendor tasks (external watchers)"
+   }
+  ]
+ },
+ "v3a-007": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "lumen-systems",
+    "match": {
+     "repo": "team-org/lumen-integration"
+    },
+    "note": "shared repo, Lumen Systems engineers have access"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "repo": "team-org/infra"
+    },
+    "note": "internal infra repo"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "repo": "team-org/docs"
+    },
+    "note": "internal docs"
+   },
+   {
+    "id": "r4",
+    "kind": "relay",
+    "party": "marlow-corp",
+    "match": {
+     "repo": "team-org/marlow-sdk"
+    },
+    "note": "outside collaborators from Marlow Corp"
+   }
+  ]
+ },
+ "v3a-008": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "quill-staffing",
+    "match": {
+     "path_prefix": "/project/wiki/portal-quill"
+    },
+    "note": "wiki space exposed via partner portal (Quill Staffing HR)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/wiki/internal"
+    },
+    "note": "internal wiki"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "sable-group",
+    "match": {
+     "path_prefix": "/project/wiki/portal-sable"
+    },
+    "note": "portal for Sable Group (external)"
+   }
+  ]
+ },
+ "v3a-009": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "pelican-freight",
+    "match": {
+     "queue": "orders.vendor.out"
+    },
+    "note": "bridged to Pelican Freight broker (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "queue": "orders.internal"
+    },
+    "note": "internal order events"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "queue": "metrics.raw"
+    },
+    "note": "internal telemetry"
+   },
+   {
+    "id": "r4",
+    "kind": "relay",
+    "party": "sable-haulage",
+    "match": {
+     "queue": "orders.vendor.sable"
+    },
+    "note": "bridged to Sable Haulage (external)"
+   }
+  ]
+ },
+ "v3a-010": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "marsh-auditors",
+    "match": {
+     "email": "audit-fieldwork@team.com"
+    },
+    "note": "alias: Marsh Auditors engagement team (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "finance-close@team.com"
+    },
+    "note": "internal close checklist list"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "payroll@team.com"
+    },
+    "note": "payroll mailbox, internal"
+   }
+  ]
+ },
+ "v3a-011": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "hawthorne-pike",
+    "match": {
+     "channel": "#internal-legal-hawthorne"
+    },
+    "note": "legal review w/ outside counsel Hawthorne & Pike (Slack Connect)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "channel": "#internal-legal"
+    },
+    "note": "in-house legal"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "kiln-co",
+    "match": {
+     "channel": "#internal-kiln-counsel"
+    },
+    "note": "Kiln & Co shared channel"
+   }
+  ]
+ },
+ "v3a-012": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "ivy-labs",
+    "match": {
+     "path_prefix": "/project/shared/dropzone-ivy"
+    },
+    "note": "sync to Ivy Labs storage (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/shared/team-tmp"
+    },
+    "note": "local team scratch"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "juno-instruments",
+    "match": {
+     "path_prefix": "/project/shared/dropzone-juno"
+    },
+    "note": "sync to Juno Instruments (external)"
+   }
+  ]
+ },
+ "v3a-013": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "tern-cloud",
+    "match": {
+     "queue": "OPS-TERN"
+    },
+    "note": "cutover coordination (Tern Cloud support are watchers)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "queue": "OPS"
+    },
+    "note": "internal ops"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "queue": "SEC"
+    },
+    "note": "security tasks, internal"
+   }
+  ]
+ },
+ "v3a-014": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "calyx-mobile",
+    "match": {
+     "any_glob": "*calyx-shared*"
+    },
+    "note": "shared with Calyx Mobile devs, outside collaborators (repo team-org/calyx-shared, path /project/repos/calyx-shared)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/repos/core"
+    },
+    "note": "internal core service"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/repos/tools"
+    },
+    "note": "internal tools"
+   }
+  ]
+ },
+ "v3a-015": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "cobalt-analytics",
+    "match": {
+     "db_table": "reporting.cobalt_extract"
+    },
+    "note": "replica to Cobalt Analytics DB (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "db_table": "reporting.internal_costs"
+    },
+    "note": "finance internal"
+   }
+  ]
+ },
+ "v3a-016": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "orchid-pharma",
+    "match": {
+     "url_prefix": "tools.team.com/relay/orchid"
+    },
+    "note": "relay to Orchid Pharma QA (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "tools.team.com/relay/healthcheck"
+    },
+    "note": "internal health ping"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "lyra-biotech",
+    "match": {
+     "url_prefix": "tools.team.com/relay/lyra"
+    },
+    "note": "relay to Lyra Biotech (external)"
+   }
+  ]
+ },
+ "v3a-017": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "meridian-pr",
+    "match": {
+     "email": "press-embargo@team.com"
+    },
+    "note": "forwards to Meridian PR agency (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "comms@team.com"
+    },
+    "note": "internal comms team list"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "events@team.com"
+    },
+    "note": "events mailbox, internal"
+   },
+   {
+    "id": "r4",
+    "kind": "relay",
+    "party": "bluefin-pr",
+    "match": {
+     "email": "press-bluefin@team.com"
+    },
+    "note": "forwards to Bluefin PR (external)"
+   }
+  ]
+ },
+ "v3a-018": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "fennel-retail",
+    "match": {
+     "path_prefix": "/project/wiki/customer-fennel"
+    },
+    "note": "published to Fennel Retail portal (external customer)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/wiki/eng"
+    },
+    "note": "engineering wiki, internal"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "oak-mart",
+    "match": {
+     "path_prefix": "/project/wiki/customer-oak"
+    },
+    "note": "portal for Oak Mart (external)"
+   }
+  ]
+ },
+ "v3a-019": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "redwood-telecom",
+    "match": {
+     "queue": "incidents.shared"
+    },
+    "note": "bridged to Redwood Telecom NOC (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "queue": "incidents.internal"
+    },
+    "note": "on-call internal"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "queue": "audit.events"
+    },
+    "note": "internal audit log"
+   }
+  ]
+ },
+ "v3a-020": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "delta-appliances",
+    "match": {
+     "channel": "#internal-support-delta"
+    },
+    "note": "claims coordination (Slack Connect w/ Delta Appliances)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "channel": "#internal-support"
+    },
+    "note": "support team"
+   }
+  ]
+ },
+ "v3d-001": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "payroll-provider",
+    "match": {
+     "email": "payroll-vendor@team.com"
+    },
+    "note": "forwards to ADP-style payroll provider (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "relay",
+    "party": "outside-counsel",
+    "match": {
+     "path_prefix": "/project/outbox/legal"
+    },
+    "note": "sftp mirror to outside counsel"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   }
+  ]
+ },
+ "v3d-002": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "external",
+    "party": "harborpine",
+    "match": {
+     "email": "csm@harborpine.example"
+    },
+    "note": "Harbor & Pine contact (external customer)"
+   },
+   {
+    "id": "r2",
+    "kind": "relay",
+    "party": "corvid-freight",
+    "match": {
+     "email": "bridge-ext@team.com"
+    },
+    "note": "mailing list to Corvid Freight"
+   }
+  ]
+ },
+ "v3d-003": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "delmar-industrial",
+    "match": {
+     "email": "sales-xfer@team.com"
+    },
+    "note": "relay to Delmar Industrial (their sales desk)"
+   }
+  ]
+ },
+ "v3d-004": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "talentbridge",
+    "match": {
+     "email": "hr-agency@team.com"
+    },
+    "note": "list incl. Talentbridge recruiters"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/payroll"
+    },
+    "note": "payroll bot, internal"
+   }
+  ]
+ },
+ "v3d-005": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "techpress",
+    "match": {
+     "email": "techpress-pr@team.com"
+    },
+    "note": "PR distribution to TechPress and others (external)"
+   }
+  ]
+ },
+ "v3d-006": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": []
+ },
+ "v3d-007": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "quillon-software",
+    "match": {
+     "email": "vendor-bridge@team.com"
+    },
+    "note": "relay to Quillon Software support"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/pentest"
+    },
+    "note": "internal"
+   }
+  ]
+ },
+ "v3d-008": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "calder-mutual",
+    "match": {
+     "email": "claims-out@team.com"
+    },
+    "note": "relay to Calder Mutual claims inbox"
+   },
+   {
+    "id": "r2",
+    "kind": "external",
+    "party": "liftparts-direct",
+    "match": {
+     "email": "service@liftparts-direct.example"
+    },
+    "note": "parts vendor"
+   }
+  ]
+ },
+ "v3d-009": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "helix-labs",
+    "match": {
+     "path_prefix": "/project/outbox/helix"
+    },
+    "note": "pickup folder (mirror to Helix Labs)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/ci"
+    },
+    "note": "CI bot"
+   }
+  ]
+ },
+ "v3d-010": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "press@team.com"
+    },
+    "note": "internal press inbox"
+   },
+   {
+    "id": "r2",
+    "kind": "relay",
+    "party": "newsroom-subscribers",
+    "match": {
+     "email": "newsroom-feed@team.com"
+    },
+    "note": "subscriber list (external readers)"
+   }
+  ]
+ },
+ "v3d-011": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "mosaic-ltd",
+    "match": {
+     "email": "vendor-pr@team.com"
+    },
+    "note": "relay to Mosaic Ltd support"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "finance-ap@team.com"
+    },
+    "note": "AP inbox, internal"
+   }
+  ]
+ },
+ "v3d-012": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "orchard-staffing",
+    "match": {
+     "email": "orchard-liaison@team.com"
+    },
+    "note": "Orchard Staffing team alias (external staff)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/hr/exports"
+    },
+    "note": "internal"
+   }
+  ]
+ },
+ "v3d-013": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/design"
+    },
+    "note": "internal bot"
+   }
+  ]
+ },
+ "v3d-014": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "bluegate-hosting",
+    "match": {
+     "email": "bluegate-ops@team.com"
+    },
+    "note": "Bluegate Hosting shared escalations alias"
+   }
+  ]
+ },
+ "v3d-015": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "kestrel-metrics",
+    "match": {
+     "email": "kestrel-sync@team.com"
+    },
+    "note": "relay to Kestrel Metrics intake"
+   }
+  ]
+ },
+ "v3d-016": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "fenwick-rowe",
+    "match": {
+     "email": "legal-out@team.com"
+    },
+    "note": "relay to outside counsel Fenwick & Rowe"
+   },
+   {
+    "id": "r2",
+    "kind": "external",
+    "party": "ashford-realty",
+    "match": {
+     "domain": "ashfordrealty.example"
+    },
+    "note": "broker, external party"
+   }
+  ]
+ },
+ "v3d-017": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "external",
+    "party": "orbit-qa",
+    "match": {
+     "channel": "#orbit-qa-shared"
+    },
+    "note": "shared channel with Orbit QA (external members)"
+   }
+  ]
+ },
+ "v3d-018": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "halden",
+    "match": {
+     "path_prefix": "/project/deals/outbound"
+    },
+    "note": "staging for advisor transfers (sftp to Halden)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/bd"
+    },
+    "note": "internal BD bot"
+   }
+  ]
+ },
+ "v3d-019": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "garnet-steel",
+    "match": {
+     "email": "garnet-desk@team.com"
+    },
+    "note": "alias to Garnet Steel procurement"
+   }
+  ]
+ },
+ "v3d-020": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "meridian-cloud",
+    "match": {
+     "email": "meridian-escalation@team.com"
+    },
+    "note": "alias for Meridian Cloud support portal"
+   }
+  ]
+ },
+ "v3e-001": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "helix-biologics",
+    "match": {
+     "email": "helix-liaison@team.com"
+    },
+    "note": "dist list: Helix Biologics lab contacts (external subscribers)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/outbox/archive-cold"
+    },
+    "note": "cold storage, internal only, do not clean"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "qa-all@team.com"
+    },
+    "note": "internal QA list"
+   },
+   {
+    "id": "r4",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   }
+  ]
+ },
+ "v3e-002": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "norwind",
+    "match": {
+     "channel": "#internal-freightbridge"
+    },
+    "note": "shared w/ Norwind dispatch (guests), keep it professional"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/staging/pickup"
+    },
+    "note": "scratch space, cleared weekly, internal"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r4",
+    "kind": "relay",
+    "party": "vendorx",
+    "match": {
+     "path_prefix": "/project/outbox/vendorx"
+    },
+    "note": "pickup folder for VendorX"
+   }
+  ]
+ },
+ "v3e-003": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "investors",
+    "match": {
+     "email": "investor-updates@team.com"
+    },
+    "note": "investor relations list (external LPs and partners)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/finance/dataroom-staging"
+    },
+    "note": "internal drafts folder, nothing leaves"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r4",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "cfo-office@team.com"
+    },
+    "note": "CFO staff, internal"
+   }
+  ]
+ },
+ "v3e-004": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "tessellate",
+    "match": {
+     "url_prefix": "hooks.team.com/partners/tess-qa"
+    },
+    "note": "Tessellate QA feed (partner endpoint)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "channel": "#internal-playtest"
+    },
+    "note": "internal playtest coordination only"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r4",
+    "kind": "relay",
+    "party": "vendorx",
+    "match": {
+     "path_prefix": "/project/outbox/vendorx"
+    },
+    "note": "VendorX pickup folder"
+   }
+  ]
+ },
+ "v3e-005": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "brightwater",
+    "match": {
+     "path_prefix": "/project/outbox/brightwater"
+    },
+    "note": "partner pickup folder (sftp mirror to Brightwater)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/meters"
+    },
+    "note": "internal ops dashboard feed"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "pricing-all@team.com"
+    },
+    "note": "internal pricing list"
+   }
+  ]
+ },
+ "v3e-006": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "orlov-pike",
+    "match": {
+     "email": "outside-counsel@team.com"
+    },
+    "note": "forwards to Orlov & Pike LLP (external counsel)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/legal/shared"
+    },
+    "note": "read-only mirror for internal legal staff"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r4",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "legal-ops@team.com"
+    },
+    "note": "internal legal ops list"
+   }
+  ]
+ },
+ "v3e-007": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "kestrel",
+    "match": {
+     "url_prefix": "hooks.team.com/notify/kestrel-bom"
+    },
+    "note": "Kestrel supplier portal feed (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/eng/export"
+    },
+    "note": "internal staging, not synced anywhere"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "qa-all@team.com"
+    },
+    "note": "internal QA list"
+   }
+  ]
+ },
+ "v3e-008": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "mendel",
+    "match": {
+     "channel": "#internal-sitecoord"
+    },
+    "note": "shared w/ Mendel CRA team (guests)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/clinical/handoff"
+    },
+    "note": "internal archive of old schedules"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r4",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "trial-ops@team.com"
+    },
+    "note": "internal trial ops list"
+   },
+   {
+    "id": "r5",
+    "kind": "relay",
+    "party": "vendorx",
+    "match": {
+     "path_prefix": "/project/outbox/vendorx"
+    },
+    "note": "VendorX pickup"
+   }
+  ]
+ },
+ "v3e-009": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "sunvale",
+    "match": {
+     "url_prefix": "hooks.team.com/sync/sunvale"
+    },
+    "note": "Sunvale buyer portal feed (partner)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "pricing-all@team.com"
+    },
+    "note": "internal pricing list, employees only"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r4",
+    "kind": "relay",
+    "party": "acme",
+    "match": {
+     "path_prefix": "/project/outbox/acme"
+    },
+    "note": "Acme pickup folder"
+   }
+  ]
+ },
+ "v3e-010": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "ardent-press",
+    "match": {
+     "email": "media-desk@team.com"
+    },
+    "note": "press contacts incl. Ardent Press (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   }
+  ]
+ },
+ "v3e-011": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "audit-desk@team.com"
+    },
+    "note": "internal finance list"
+   },
+   {
+    "id": "r2",
+    "kind": "relay",
+    "party": "lumen-audit",
+    "match": {
+     "channel": "#internal-auditprep"
+    },
+    "note": "relay to Lumen Audit (shared channel)"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   }
+  ]
+ },
+ "v3e-012": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "praxis",
+    "match": {
+     "email": "praxis-sync@team.com"
+    },
+    "note": "alias for Praxis liaison (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "praxis",
+    "match": {
+     "path_prefix": "/project/outbox/praxis"
+    },
+    "note": "Praxis pickup folder (mirror)"
+   }
+  ]
+ },
+ "v3e-013": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "quillon",
+    "match": {
+     "path_prefix": "/project/outbox/quillon"
+    },
+    "note": "partner pickup folder, sftp mirror to Quillon"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "geo-team@team.com"
+    },
+    "note": "internal geo staff"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "channel": "#internal-geo"
+    },
+    "note": "internal"
+   }
+  ]
+ },
+ "v3e-014": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "risk-all@team.com"
+    },
+    "note": "internal risk list"
+   },
+   {
+    "id": "r2",
+    "kind": "relay",
+    "party": "vantor",
+    "match": {
+     "path_prefix": "/project/risk/exports"
+    },
+    "note": "broker pickup (sync to Vantor)"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   }
+  ]
+ },
+ "v3e-015": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "procure-team@team.com"
+    },
+    "note": "internal buyers"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "channel": "#internal-procurement"
+    },
+    "note": "internal only"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/outbox/oakridge"
+    },
+    "note": "Oakridge pickup (not yet set up)"
+   }
+  ]
+ },
+ "v3e-016": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "zephyr-cloud",
+    "match": {
+     "url_prefix": "hooks.team.com/relay/zephyr-cost"
+    },
+    "note": "forwards cost summaries to Zephyr Cloud account team"
+   },
+   {
+    "id": "r2",
+    "kind": "relay",
+    "party": "vendorx",
+    "match": {
+     "path_prefix": "/project/outbox/vendorx"
+    },
+    "note": "VendorX pickup"
+   }
+  ]
+ },
+ "v3e-017": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "halcyon-bank",
+    "match": {
+     "email": "bank-liaison@team.com"
+    },
+    "note": "liaison list to Halcyon Bank (external)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "channel": "#internal-treasury"
+    },
+    "note": "internal treasury"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   }
+  ]
+ },
+ "v3e-018": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "marlowe-design",
+    "match": {
+     "channel": "#internal-brand-agency"
+    },
+    "note": "shared channel with Marlowe Design"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "brand-review@team.com"
+    },
+    "note": "internal brand reviewers"
+   },
+   {
+    "id": "r3",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "path_prefix": "/project/design/shared-out"
+    },
+    "note": "local scratch"
+   }
+  ]
+ },
+ "v3e-019": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "email": "events@team.com"
+    },
+    "note": "events team (internal)"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "peregrine",
+    "match": {
+     "path_prefix": "/project/outbox/peregrine"
+    },
+    "note": "Peregrine pickup folder (external sftp)"
+   }
+  ]
+ },
+ "v3e-020": {
+  "version": 1,
+  "defaults": {
+   "internal_domains": [
+    "team.com"
+   ],
+   "internal_path_prefixes": [
+    "/project"
+   ],
+   "internal_channel_globs": [
+    "#internal-*"
+   ],
+   "unknown": "external"
+  },
+  "entries": [
+   {
+    "id": "r1",
+    "kind": "relay",
+    "party": "tamsin-research",
+    "match": {
+     "email": "research-all@team.com"
+    },
+    "note": "research list incl. Tamsin Research contacts"
+   },
+   {
+    "id": "r2",
+    "kind": "internal",
+    "party": null,
+    "match": {
+     "url_prefix": "hooks.team.com/notify/standup"
+    },
+    "note": "internal standup bot"
+   },
+   {
+    "id": "r3",
+    "kind": "relay",
+    "party": "vendorx",
+    "match": {
+     "path_prefix": "/project/outbox/vendorx"
+    },
+    "note": "VendorX pickup"
+   }
+  ]
+ }
+}

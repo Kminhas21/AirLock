@@ -1,0 +1,62 @@
+{
+ "version": 1,
+ "entries": [
+  {
+   "id": "r1",
+   "kind": "relay",
+   "party": "helix-analytics",
+   "match": {
+    "channel": "#internal-helix-sync"
+   },
+   "note": "Slack Connect channel, Helix Analytics workspace members read every message"
+  },
+  {
+   "id": "r1@1",
+   "kind": "relay",
+   "party": "acme-logistics",
+   "match": {
+    "path_prefix": "/project/outbox/acme-logistics/"
+   },
+   "note": "mirrored every 10 min to Acme Logistics sftp, procurement team reads"
+  },
+  {
+   "id": "r2",
+   "kind": "internal",
+   "party": null,
+   "match": {
+    "path_prefix": "/project/outbox/"
+   },
+   "note": "other folders under outbox internal only, not mirrored"
+  },
+  {
+   "id": "r1@2",
+   "kind": "relay",
+   "party": "harborline-logistics",
+   "match": {
+    "path_prefix": "/project/shared/outbox/harborline/"
+   },
+   "note": "rsynced nightly to Harborline Logistics SFTP"
+  },
+  {
+   "id": "r2@2",
+   "kind": "relay",
+   "party": "harborline-logistics",
+   "match": {
+    "channel": "#internal-harborline-sync"
+   },
+   "note": "Slack Connect bridge, Harborline staff see every message"
+  }
+ ],
+ "defaults": {
+  "internal_domains": [
+   "team.com"
+  ],
+  "internal_path_prefixes": [
+   "/project"
+  ],
+  "internal_channel_globs": [
+   "#internal-*"
+  ],
+  "unknown": "external"
+ }
+}

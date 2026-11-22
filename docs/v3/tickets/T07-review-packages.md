@@ -1,0 +1,2 @@
+# T07 review packages
+For every implementation ticket (T01, T05, T06, T08): (a) spec-compliance reviewer (reads the ticket + spec + diff, lists every gap, no editing), (b) code-quality reviewer (bugs, tests that cannot fail, unclear code, hidden coupling), (c) implementer fixes, reviewers re-check. Findings live in docs/v3/reviews/. A ticket is done only when both reviewers say 'no blocking findings' and the tests are green.

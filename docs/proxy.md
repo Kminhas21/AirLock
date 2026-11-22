@@ -1,0 +1,94 @@
+# Monitoring an agent you didn't write: the MCP proxy and the approval inbox
+
+SENTINEL sits between an MCP agent (Claude Code, Claude Desktop, Cursor, ...) and its stdio MCP servers. Every tool call is held until you approve
+it in the web UI (Inbox tab), except tools you explicitly allow-listed. Monitors (action similarity, registry modes, union) look at each call and an
+alert always holds the call, even an allow-listed one.
+
+## Run it
+1. Backend with a token (the inbox sockets refuse to work without one):
+   `cd server && SENTINEL_WS_TOKEN=<secret> SENTINEL_MONITOR=action_sim uvicorn main:app --port 8080`
+2. UI: `cd frontend && VITE_SENTINEL_WS_TOKEN=<secret> npm run dev`, open the **Inbox** tab.
+3. Proxy config `proxy.json`:
+   ```json
+   {"session_id": "my-agent",
+    "servers": {"fs": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/work"]}},
+    "auto_approve": ["fs:read_text_file", "fs:list_directory"]}
+   ```
+   (optional per server: `prefix`, `env`, `cwd`, `trust_read_only_hint`; optional `backend`, default `ws://127.0.0.1:8080/proxy/ws`)
+4. Point your agent at the proxy instead of the server, passing the token through the MCP client's env:
+   `{"command": "python", "args": ["-m", "sentinel_proxy", "--config", "/path/proxy.json"], "env": {"SENTINEL_WS_TOKEN": "<secret>"}}`
+   (run from the repo root, or install the repo on PYTHONPATH). Install the dependency: `pip install -r requirements-proxy.txt`.
+
+## What you will see
+- A card per held call: server, tool, the exact arguments (numbered lines; huge arguments disable Approve), any monitor alert, a countdown.
+- **Approve** forwards the call; **Deny** (or the 300 s timeout, a dropped proxy, a dead backend) returns "Denied by SENTINEL: <reason>" to the agent.
+- Auto-approved calls need no click, but are shown as resolved ("auto").
+
+## Rules to remember
+- Only the exact string `approve` approves. Every failure is a deny.
+- Use a call-based monitor. With `SENTINEL_MONITOR=rules` or the stub embedder no alerts can be raised, so auto-approve is DISABLED (those calls are held).
+- Monitor history is per proxy session: a restarted proxy starts with an empty denied history. Keep `session_id` stable, and note a second live proxy with
+  the same id is rejected.
+- Token limit: it keeps out processes that cannot read your environment. Anything with full access to your account can read it.
+- Not covered yet: HTTP/SSE downstream servers, tools/list_changed, multi-user, hosted deployment. See DECISIONS D16.
+
+## Auto-allowed path calls run kernel-confined (DECISIONS D31)
+Path prediction (D29 B4) is gone. Every `proxy_call` carries `confinable` (bool): true only when the server has a `sandbox` with `runtime`, the host has
+Landlock and `openat2`, and a dry run of the worker's walk over every path-slot string (`path`, `paths`, `source`, `destination`, `directory`, `file`; top
+level and list entries) found no symlink, no escape from its base, no `~`, at most 64 values and at most 4 bases for a relative value (2 s budget, else
+false). A missing name is fine. For a value with a symlink the frame also carries `links` (`{"path": "/work/.env"}`, `{"paths.1": ...}`; `realpath`,
+display only: the card shows it, nothing evaluates it). A policy approval whose rule has a `confine` map comes back as `proxy_decision` with
+`"confine": {"path": "read"}`; the proxy then runs the call in a fresh one-shot worker of the same server (also for `lifecycle: "session"`, whose own
+process keeps serving human-approved calls) with the server's `read`/`write` REPLACED by exact grants: each value is opened in the worker, right before
+Landlock is applied, with `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS)` from `/` (absolute) or each base (the server's absolute
+directory arguments, else its `cwd`), and gets READ_FILE on exactly that file (`read`) or READ_DIR beneath that directory (`list`). A value that cannot be
+opened that way gets no grant: the server meets EACCES. The worker's status line must say `confined` with `landlock_fs` and nothing missing, or it is killed
+before `call_tool` and the agent gets `Denied by SENTINEL: confine_failed`. A policy approval of a path call WITHOUT `confine` is refused
+(`Denied by SENTINEL: unconfined`). The agent's arguments are forwarded unchanged. Measured cost: a server start per auto-allowed read, about 0.2 s for the
+filesystem server 1.0.0 and 0.8 s for Desktop Commander. Test knob: `SENTINEL_CONFINE_PRECHECK=force_true` makes the precheck say true (the kernel still
+decides); used by the live tests only. Ship hub and proxy together: an old proxy's path allows ask, an old hub's policy approvals of path calls are refused.
+
+## An auto-allowed OVERWRITE is one-inode confined, logged and undoable (DECISIONS D32)
+A `proxy_call` whose arguments look like a write of one file (a string `path` plus `content` or `edits`) also carries `write_confinable` (bool) and, when false,
+`write_why` (one of `unsupported`, `bad_path`, `outside_write_dir`, `new_file`, `symlink`, `not_regular`, `hard_link`, `executable`, `too_large`, `no_before_image`, `edits_too_large`). It is
+true only for an existing regular file with one name (`st_nlink == 1`), no exec bit, at most 256 KiB, found by `openat2` with no symlink beneath one of the server's
+`sandbox.write` directories, on Landlock ABI >= 3, when a before-image can be kept (the top-level `undo_dir`, default `$SENTINEL_PROXY_STATE_DIR/undo`, else
+`$XDG_STATE_HOME/sentinel-proxy/undo`, else `~/.local/state/sentinel-proxy/undo`). A policy approval with `"confine": {"path": "write"}` makes the proxy (1) refuse the
+call (`Denied by SENTINEL: write_unsupported`) unless it vouched for the write itself, (2) copy the file to `<undo_dir>/<call_id>/0` (0600) and hash it, (3) run a
+one-shot worker whose Landlock rules grant READ_FILE | WRITE_FILE | TRUNCATE on that one inode (the worker re-checks the file kind and the link count, and a 8 MiB file-size
+limit applies), (4) kill it before `call_tool` unless its status names the same device and inode with one name (`confine_failed`), and (5) report `writes` in the result
+frame: `path`, `dev`, `ino`, `size_before`, `sha256_before`, `size_after`, `sha256_after`, `replaced` (the name now leads to another inode), `undo`. `writes` is sent after a
+success, a tool error, a timeout and a crash alike (the worker may have written); the hub logs it in `call_result`. The undo is `cp <undo> <path>`. An older hub never
+sends a write confine (its write allows ask); an older proxy sends no `write_confinable` (the hub asks).
+
+**Upgrade note (D32).** A config that loaded before can now fail to load: for a server WITH `sandbox.runtime`, a `sandbox.write` directory may not be, contain or lie inside the undo store (default `$XDG_STATE_HOME/sentinel-proxy/undo`, e.g. `write: ["/home/me"]`), nor contain the proxy config file (a symlinked config is judged by the file it names too). The error names the undo store and the fix: add `"undo_dir": "/dir/outside/every/write/dir"` to proxy.json (or set `SENTINEL_PROXY_STATE_DIR`), or narrow the write directory. Servers without `runtime` are not checked. The undo directory must be owned by the proxy user and not group/world-writable, or writes ask (`no_before_image`). Retention: before-images are removed only when older than 30 days; a store of 1000 calls or 64 MiB is FULL and the next write asks instead of evicting.
+
+## Compatibility with real MCP servers (measured, DECISIONS D26)
+Each server below was run DIRECTLY and THROUGH the proxy and hub with the same MCP client, and everything the client can observe was diffed
+(`docs/TESTING_REALITY.md`, rung 2): filesystem 1.0.0, memory 1.0.0, sequential-thinking 1.0.0, the protocol-coverage `everything` 1.0.0 (all npm), Microsoft
+Playwright MCP 0.0.85 (real Chromium), git, fetch, time (PyPI, current SDK), and sqlite 2025.4.25 (built on the OLD 1.x Python SDK; it works through the 2.x proxy).
+
+**Passes through unchanged:** the tool list (names, descriptions, input and output schemas, annotations such as `readOnlyHint`), and every call result: text,
+image, embedded resource, `resource_link`, `structuredContent`, `isError`. Every call was held by the gate. A downstream gets a CLEAN environment (not your shell's).
+
+**Does NOT pass through (the proxy is a tool gate, not a transparent MCP proxy):**
+- `resources`, `prompts`, `completions`, `logging` and `tasks`: the client sees only the `tools` capability and gets "Method not found" for the rest. A server whose value is
+  mostly resources or prompts (the git and sqlite servers' prompts, fetch's resources) loses that part. Nothing is gated or leaked; it is simply not offered.
+- Server `instructions` (the usage hints a client normally adds to the model's context) and logging notifications.
+- `progress` notifications: a long tool call shows no progress, and a client that extends its timeout on progress will not get that extension.
+- Server-to-client requests (`sampling`, `roots`, `elicitation`): the proxy does not declare those client capabilities, so a server that needs them does not OFFER
+  the tools that depend on them (4 of the 17 `everything` tools were absent through the proxy).
+- The server's identity: the client sees `sentinel-proxy`. Starting a proxied server takes about 3 s longer (hub connection and monitor build).
+- HTTP/SSE (remote) servers: stdio only.
+
+### Third-party servers (chosen by research, not written by us)
+Chosen from public MCP-server rankings (2026) on four criteria: widely used, NOT an Anthropic reference server, runs over stdio without credentials, and exercises the risky classes the gate exists for.
+**Desktop Commander 0.3.1** (`@wonderwhy-er/desktop-commander`, MIT; terminal execution, file read/write/edit, process control: 25 tools) and **Context7 4.6.0** (`@upstash/context7-mcp`, MIT; library documentation
+from a hosted API: 2 tools). Both were run directly and through the proxy and hub, and with a real Claude Code client behind `builtin:starter`.
+- Desktop Commander: all 25 tools, schemas and annotations identical through the proxy; 10 of 10 calls gated; a real `start_process` ran only after approval; a denied `rm -rf` left the project directory intact.
+  Dropped as documented above: its `instructions`, its `resources` (`ui://` pages) and its logging notifications (49 in one session).
+- Context7: works end to end through the proxy (real library results after approval; the anonymous tier answers a monthly-quota error when shared egress is exhausted: the real server's own message is passed back unchanged).
+- **A proxied server gets a CLEAN environment on purpose.** A server that needs the network from behind an HTTPS proxy, or needs credentials, must be given them in its own `env` block
+  (here: `HTTPS_PROXY`, `NODE_USE_ENV_PROXY=1`, `NODE_EXTRA_CA_CERTS` for Node's built-in `fetch`); without them Context7 answered "fetch failed" even when run directly in the same minimal environment.
+- The starter policy auto-allowed Desktop Commander's `read_file {isUrl: true}` (an outbound HTTP request) because the allow rules match tool NAMES on any server: fixed by asking for any URL-like value and for `isUrl: true` (D27), then generally by binding every allow rule to the real tools' argument names (`arg_keys`, D29).
+
